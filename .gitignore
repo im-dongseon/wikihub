@@ -1,0 +1,26 @@
+# Local environment variables / config
+.env
+wikihub.yaml
+.wikihub
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Backup / temporary
+*.bak
+/tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Superpowers intermediate artifacts (optional)
+docs/superpowers/
+
+# Agent skills (project-local installs via `npx skills add`)
+.agents/
+.claude/
+skills-lock.json
