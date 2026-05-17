@@ -76,6 +76,7 @@ F4 backlog 의 결함 #C·#D + R16-L2 + design review 3 round (R1·R2·R3) 의 C
   - bash trap 의 의사코드 복잡도 증가 — ERR/EXIT/INT 3-signal handling + PRE_UPDATE_REF state machine.
   - `--force-fresh` flag 신규 — ADR-0010 의 single-curl-line 정합은 유지 (no-flag default 가 update, flag 로만 destructive).
   - `--version` flag 의 인자 강제 소비 — GNU CLI 관례 (`--version` no-arg) 와 충돌. version 조회는 `cat $WIKIHUB_HOME/_system/VERSION` 으로 안내.
+  - **sparse-checkout 정책 영속화** (2026-05-18 추가, feature `install_scope_reduction`): `_step2_update` 가 `_apply_sparse_checkout` 을 호출하면 `.git/info/sparse-checkout` 에 영속 — 이후 `_rollback_if_failed` 가 `git reset --hard $PRE_UPDATE_REF` 호출해도 working tree 는 sparse subset 만 복원됨 (governance 파일 `docs/`·`features/`·`tests/`·`AGENTS.md` 등은 **rollback 후에도 미복구**). 이는 의도된 동작 — pre-feature 풀-clone 운영 서버가 본 feature 적용 시 자동 정리. 운영자가 사후 trace 시 "rollback 후 governance 파일 부재" 를 부분 손상으로 오인하지 않도록 `_rollback_if_failed` 본문에 `_apply_sparse_checkout` 호출 명시 + journal 로그에 "sparse re-apply (intended)" 가시화. helper 호출 위치는 `git reset --hard $target_ref` **이후** (working tree mutation 의 origin 시점 = target_ref 채택 후) — 자세한 위치 정합은 `install_scope_reduction/analysis_and_design.md §4.3` 참조.
 
 - **후속 영향**:
   - **ADR-0010** conformance 회복 — supersede 아님. ADR-0010 §Decision 의 `latest` 절차 + `_system/VERSION` detect 가 본 ADR 의 implementation spec.
@@ -86,4 +87,4 @@ F4 backlog 의 결함 #C·#D + R16-L2 + design review 3 round (R1·R2·R3) 의 C
 ## Notes
 
 - `--version` GNU 관례 충돌 인지. 운영자에게 명시 안내 — README 의 install snippet + `install.sh -h` 출력.
-- 본 ADR 의 4 sub-decision 분할 검토 (R3 Notes): "ref resolution chain (sub-4) 만 별도 ADR-0031 로 분리 가능" 제안. v0.1.0 에서는 1 ADR 유지 (동일 관심사 — update workflow safety). v0.2.x release engineering 확장 시 (e.g. tag signature verification) ADR-0031 신설 검토.
+- 본 ADR 의 4 sub-decision 분할 검토 (R3 Notes): "ref resolution chain (sub-4) 만 별도 ADR 로 분리 가능" 제안. v0.1.0 에서는 1 ADR 유지 (동일 관심사 — update workflow safety). v0.2.x release engineering 확장 시 (e.g. tag signature verification) **별도 ADR 신설 검토** (현 시점 ADR-0031 은 yaml template materialization 으로 이미 점유됨 — 2026-05-18, `install_scope_reduction` feature).

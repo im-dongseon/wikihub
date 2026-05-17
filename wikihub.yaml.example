@@ -1,8 +1,9 @@
-# WikiHub 운영 정본 — wikihub.yaml 의 example.
-# install.sh 가 `~/wikihub-instance/wikihub.yaml` 에 복사 (없을 때만).
-# 메인테이너가 vault 정의 + credentials_path + bootstrap_allowed 채운 후 /wh:setup 호출.
+# WikiHub 운영 정본 (wikihub.yaml) 의 read-only template — ADR-0031.
+# `/wh:setup` 첫 호출이 본 파일을 read → derived 4필드 patching → $WIKIHUB_INSTANCE_ROOT/wikihub.yaml 에 atomic write.
+# install.sh 는 yaml 미관여 (ADR-0031 §Decision A — Partially supersedes ADR-0010).
+# 이후 메인테이너가 operational yaml 에서 vault 정의·credentials_path·bootstrap_allowed 등 채운 후 /wh:setup --enable 재호출.
 #
-# 본 파일은 v0.1.0 v5 spec (analysis_and_design.md §4.3) 정합.
+# 본 파일은 v0.1.0 schema v1 정합 (analysis_and_design.md §4.5 + ADR-0031).
 
 version: 1
 

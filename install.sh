@@ -284,6 +284,21 @@ _confirm_force_fresh_wipe() {
     sleep 5
 }
 
+# Sparse-checkout fetch list (ADR-0023 §"Clone scope" 정본).
+# 운영 타깃에는 운영 필수 path 만 거주 — AGENTS.md §1 Dev/Ops Zone 분리 invariant 정합.
+# 제외: docs/·features/·tests/·AGENTS.md·CLAUDE.md·GEMINI.md·.gitignore 등 governance·dev 파일.
+WIKIHUB_SPARSE_PATHS=(_system scripts install.sh wikihub.yaml.example README.md LICENSE)
+
+# Idempotent sparse-checkout state 적용 — _step2_clone + _step2_update + _rollback_if_failed
+# 셋 다 호출 (ADR-0023 §"Clone scope" + ADR-0030 §부정/제약 sparse-checkout 영속화).
+# git >=2.27 필요 (Ubuntu 22.04 의 2.34 OK, OCI custom image 가 2.20 이하면 fail-fast).
+_apply_sparse_checkout() {
+    git -C "$WIKIHUB_HOME" sparse-checkout init --no-cone >/dev/null 2>&1 \
+        || { err "sparse-checkout init 실패 — git >=2.27 필요. 현재: $(git --version 2>/dev/null || echo 'git 미설치')"; return 2; }
+    git -C "$WIKIHUB_HOME" sparse-checkout set "${WIKIHUB_SPARSE_PATHS[@]}" >/dev/null \
+        || { err "sparse-checkout set 실패 — paths: ${WIKIHUB_SPARSE_PATHS[*]}"; return 2; }
+}
+
 _step2_clone() {
     _validate_wipe_target
     if [ -e "$WIKIHUB_HOME" ]; then
@@ -294,7 +309,7 @@ _step2_clone() {
     # ref 결정 — fresh path 도 _resolve_ref chain 사용 (ADR-0030).
     local clone_ref
     clone_ref="$(_resolve_ref)"
-    info "git clone --branch $clone_ref --depth 1 $WIKIHUB_REPO_URL → $WIKIHUB_HOME"
+    info "git clone --branch $clone_ref --depth 1 $WIKIHUB_REPO_URL → $WIKIHUB_HOME (sparse)"
     # _resolve_ref 가 `refs/tags/<tag>` 또는 branch name 또는 `origin/main` 반환 — git clone
     # 의 `--branch` 는 tag 또는 branch 둘 다 받음. `origin/main` 같은 prefixed ref 는 fallback.
     if [[ "$clone_ref" == refs/tags/* ]]; then
@@ -302,8 +317,13 @@ _step2_clone() {
     elif [[ "$clone_ref" == origin/* ]]; then
         clone_ref="${clone_ref#origin/}"
     fi
-    git clone --branch "$clone_ref" --depth 1 "$WIKIHUB_REPO_URL" "$WIKIHUB_HOME"
-    ok "Step 2 repo clone 완료 (ref=$clone_ref)"
+    # ADR-0023 §"Clone scope": --no-checkout 후 sparse-checkout init + set + checkout.
+    # blob filter 미사용 (HIGH-S2 design review — partial clone + --unshallow 호환 위험 회피).
+    git clone --no-checkout --depth 1 --branch "$clone_ref" \
+        "$WIKIHUB_REPO_URL" "$WIKIHUB_HOME"
+    _apply_sparse_checkout
+    git -C "$WIKIHUB_HOME" checkout
+    ok "Step 2 repo clone 완료 (ref=$clone_ref, scope=sparse: ${WIKIHUB_SPARSE_PATHS[*]})"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -584,9 +604,47 @@ _enforce_rclone_conf_perms() {
     fi
 }
 
+# ADR-0031 §Decision B (MED-S2 design review): install-time version fact 를 sidecar 에 기록.
+# `/wh:setup` Step 0 가 read → operations.gws_min_version 등 derived 필드 patching.
+# stdout 파싱 brittleness 회피 (gws --version 형식 변경 시 fallback 으로만 사용).
+#
+# atomic write (CR1-HIGH-3 review 반영): tmpfile + sync + mv. same-directory + PID suffix +
+# cleanup trap (errexit 또는 중단 시 orphan tmp 회수) + stale tmp 5분 이상 자동 정리.
+_write_installed_versions_sidecar() {
+    local target="$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json"
+    local target_dir; target_dir="$(dirname "$target")"
+    local target_base; target_base="$(basename "$target")"
+    mkdir -p "$target_dir"
+    # Stale .tmp.* 5분 이상 자동 cleanup (이전 process 의 SIGTERM/errexit 흔적).
+    find "$target_dir" -maxdepth 1 -name "${target_base}.tmp.*" -mmin +5 -delete 2>/dev/null || true
+
+    local rclone_v
+    rclone_v="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//' || true)"
+
+    local tmp="${target}.tmp.$$"
+    # 본 함수 ERR/RETURN 시 tmp 자동 회수 — set -e 환경에서 cat/sync fail 시 orphan 차단.
+    trap "rm -f '$tmp' 2>/dev/null || true" RETURN ERR
+    cat > "$tmp" <<EOF
+{
+  "schema_version": 1,
+  "gws": "${GWS_VERSION}",
+  "rclone": "${rclone_v:-}",
+  "uv": "${UV_VERSION}",
+  "wikihub": "$(cat "$WIKIHUB_HOME/_system/VERSION" 2>/dev/null || echo unknown)",
+  "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    # Ubuntu 22.04+ coreutils 8.32 의 `sync -f <file>` 는 해당 파일 의 FS data 만 flush.
+    # 실패 시 fallback 으로 global sync (cost 증가하나 정합 유지).
+    sync -f "$tmp" 2>/dev/null || sync || true
+    mv "$tmp" "$target"
+    info "Step 4.5 INSTALLED_VERSIONS.json 작성: $target"
+}
+
 _step45_rclone() {
     _install_rclone
     _enforce_rclone_conf_perms
+    _write_installed_versions_sidecar
     # rc port pre-check — yaml 이 이미 Step 5 에서 복사된 상태 가정. 첫 실행 (yaml 미복사) 시 skip.
     if [[ -f "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" ]]; then
         local ports
@@ -605,21 +663,16 @@ _step45_rclone() {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-# Step 5. wikihub.yaml.example → wikihub.yaml (없을 때만)
+# Step 5. instance dir 보장 + credentials 권한 enforce (ADR-0031 이후 — yaml 미관여)
 # ──────────────────────────────────────────────────────────────────────
+# 본 함수는 yaml 한 글자도 안 만짐 (ADR-0031 §Decision A 정합).
+# wikihub.yaml 의 시작·끝 책임은 `/wh:setup` Step 0 단독.
+# 메인테이너가 install.sh 직후 `/wh:setup` 호출 시 .example → operational yaml materialize.
 
-_step5_yaml() {
+_step5_instance_dirs() {
     mkdir -p "$WIKIHUB_INSTANCE_ROOT"
     mkdir -p "$WIKIHUB_INSTANCE_ROOT/.credentials"
     chmod 700 "$WIKIHUB_INSTANCE_ROOT/.credentials"
-
-    local target="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
-    if [ -f "$target" ]; then
-        ok "Step 5 wikihub.yaml 기존 보존: $target"
-    else
-        cp "$WIKIHUB_HOME/wikihub.yaml.example" "$target"
-        ok "Step 5 wikihub.yaml.example → $target (메인테이너 편집 대상)"
-    fi
 
     # R10 HIGH-5 fix: credentials 파일 chmod 600 enforce — 이미 배치된 파일 검증.
     # install.sh 가 credentials 자체를 만들지 않지만, 메인테이너 scp 후 권한 미설정 케이스 회피.
@@ -716,23 +769,28 @@ _step8_guide() {
 ${C_OK}=== WikiHub 설치 완료 ===${C_RST}
 
 [경로 구조]
-  $WIKIHUB_HOME/                          # repo (install.sh 가 git clone --branch $BRANCH)
+  $WIKIHUB_HOME/                          # repo (install.sh 가 git clone — sparse, ADR-0023)
   $VENV_PATH/                             # Python venv (install.sh 관리, 메인테이너 미관여)
   $GWS_BIN_DIR/gws                        # gws binary (install.sh 관리)
   $WIKIHUB_INSTANCE_ROOT/                 # 운영 state (instance.root) — 메인테이너 편집 대상
-      ├── wikihub.yaml                    # 운영 정본 (편집 필수)
+      ├── wikihub.yaml                    # 운영 정본 — **/wh:setup 첫 호출이 .example 으로부터 생성 (ADR-0031)**
       ├── .credentials/                   # OAuth tokens (scp 배치 + chmod 600)
       ├── _state/<vault_id>/              # cursor·file_map·retry·last_sync (자동)
-      ├── vault-<vault_id>/               # vault local mirror (자동)
+      ├── vault/<vault_id>/               # vault local mirror — rclone mount (자동, wikihub.yaml.example default 정합)
       └── wiki/                           # 통합 wiki (자동)
-  ~/.config/systemd/user/                 # systemd unit (/wh:setup 관리)
+  ~/.config/systemd/user/                 # systemd unit (install.sh _step8_systemd_render 관리)
+
+${C_WARN}⚠ wikihub.yaml 은 아직 부재합니다 (ADR-0031 §Decision A — install.sh 는 yaml 미관여).${C_RST}
+${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 — vault@.service 가 fail-loop.${C_RST}
 
 다음 단계:
-  1. $WIKIHUB_INSTANCE_ROOT/wikihub.yaml 편집 — vault 정의 + 옵션 채우기
+  1. /wh:setup 호출 — .example 으로부터 wikihub.yaml 자동 생성 (ADR-0031 Step 0):
+       <agent_invocation> "/wh:setup"
+     생성된 yaml 의 maintainer field (vault id, root_folder_id, fatal_webhook_url 등) 편집.
   2. credentials 배치 — dev box (macOS) 에서 scripts/auth_gdrive.py 실행 후 scp:
        scp ~/wikihub-credentials/token_gdrive.json user@$(hostname):$WIKIHUB_INSTANCE_ROOT/.credentials/
        ssh user@$(hostname) 'chmod 600 $WIKIHUB_INSTANCE_ROOT/.credentials/token_*.json'
-  3. /wh:setup 호출 — wikihub.yaml 검증 + systemd unit + 첫 ingest prompt
+  3. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
        <agent_invocation> "/wh:setup --enable"
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
@@ -940,6 +998,11 @@ _step2_update() {
     target_ref="$(_resolve_ref)"
     info "git reset --hard ${target_ref}"
     git -C "$WIKIHUB_HOME" reset --hard "$target_ref"
+    # ADR-0023 §"Clone scope" + ADR-0030 §부정/제약 (HIGH-S1 design review):
+    # _apply_sparse_checkout 호출 위치는 reset --hard **이후** — working tree mutation 의
+    # origin = target_ref 채택 후. pre-feature 풀-clone 운영 서버가 본 update 에서 sparse
+    # 로 자동 전환 + 이후 update 는 idempotent.
+    _apply_sparse_checkout
     # post-condition (R2-HIGH-5)
     if ! git -C "$WIKIHUB_HOME" diff --quiet HEAD --; then
         err "git reset --hard 후 working tree 여전히 dirty — disk full / 디스크 오류 의심"
@@ -1000,6 +1063,13 @@ _rollback_if_failed() {
     err "update 실패 (exit ${exit_code}) — 직전 ref ${PRE_UPDATE_REF:0:7} 로 자동 rollback"
     git -C "$WIKIHUB_HOME" reset --hard "$PRE_UPDATE_REF" \
         || { warn "rollback reset 실패 — 수동 복구"; exit $exit_code; }
+    # ADR-0030 §부정/제약 (HIGH-S1): sparse-checkout 정책은 .git/info/sparse-checkout 에
+    # 영속이라 PRE_UPDATE_REF (sparse 이전 ref) 의 install.sh 가 sparse 를 몰라도 working
+    # tree 는 sparse subset 만 복원됨. governance 파일 (docs/·features/·tests/·AGENTS.md)
+    # 은 rollback 후에도 미복구 — 의도. journal 로그에 명시.
+    info "sparse re-apply (intended — governance 파일은 rollback 후 미복구, ADR-0030 §부정/제약)"
+    _apply_sparse_checkout \
+        || warn "rollback 후 sparse re-apply fail — working tree 일관성 확인 필요"
     # CRIT-N1: 직전 ref 의 template 으로 systemd unit 재render → daemon-reload → start
     _step8_systemd_render \
         || warn "rollback systemd render 실패 — 수동 (systemctl daemon-reload 직접 호출)"
@@ -1188,6 +1258,12 @@ _step11_banner() {
     if [[ "$mode_label" == "update" ]]; then
         echo "  transition: v${INSTALL_OLD_VERSION:-?} → v${INSTALL_NEW_VERSION:-?}"
         echo "  ref:  ${ref_label}"
+        # ADR-0031 (HIGH-S3): update path 에서도 yaml 부재 시 warn — update 도중 instance dir
+        # wipe 또는 신규 vault 추가 시나리오 mitigation. _step8_guide 는 fresh 만 호출되므로
+        # update path 전용 안내가 별도 필요.
+        if [[ ! -f "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" ]]; then
+            echo "  ${C_WARN}⚠ wikihub.yaml 부재 — /wh:setup 호출 전에는 systemd timer enable 금지 (ADR-0031).${C_RST}"
+        fi
     fi
     echo "  status: systemctl --user list-timers wikihub-*"
     echo "================================="
@@ -1222,7 +1298,7 @@ main() {
     _step3_venv
     _step4_gws
     _step45_rclone
-    _step5_yaml
+    _step5_instance_dirs    # ADR-0031: yaml 미관여 (이름 변경 + cp 삭제)
     _step6_agent_skill
 
     [[ "$INSTALL_MODE" == "fresh" ]] && _step7_linger

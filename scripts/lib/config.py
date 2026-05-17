@@ -4,6 +4,7 @@ Schema 위반 시 VaultSyncFatal — vault_id를 알 수 없으므로 '__config_
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -13,6 +14,8 @@ from typing import Any
 import yaml
 
 from .exceptions import VaultSyncFatal
+
+_log = logging.getLogger(__name__)
 
 VAULT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 SUPPORTED_VAULT_TYPES = frozenset({"gdrive_api", "directory"})
@@ -101,13 +104,28 @@ def _parse_vault(vid: str, vcfg: dict[str, Any]) -> VaultConfig:
             remediation="60 이상 정수로 설정",
         )
     local_path = Path(_require(vcfg, "local_path", ctx=f"vaults.{vid}")).expanduser()
+    options = dict(vcfg.get("options", {}))
+
+    # ADR-0031 §Decision B (HIGH-A1): mount_path 는 maintainer-controlled.
+    # default (Path C+) 는 mount_path == local_path 지만, advanced 운영자가 bind-mount /
+    # ramdisk / multi-vault layout 분리 등으로 명시 분리할 수 있음. fail 아닌 soft warn 만.
+    mount_path_raw = options.get("mount_path")
+    if mount_path_raw is not None:
+        mount_path = Path(str(mount_path_raw)).expanduser()
+        if mount_path != local_path:
+            _log.warning(
+                "vault '%s': mount_path (%s) != local_path (%s) — default 패턴 아님. "
+                "bind-mount/ramdisk/multi-vault layout 의도가 아니면 yaml 정합 확인 권장.",
+                vid, mount_path, local_path,
+            )
+
     return VaultConfig(
         id=vid,
         type=vtype,
         enabled=bool(vcfg.get("enabled", True)),
         sync_interval_sec=interval,
         local_path=local_path,
-        options=dict(vcfg.get("options", {})),
+        options=options,
     )
 
 
@@ -153,7 +171,11 @@ def load_wikihub_yaml(path: Path | None = None) -> Config:
         raise VaultSyncFatal(
             vault_id="__config__",
             reason=f"wikihub.yaml 없음: {path}",
-            remediation="install.sh 가 wikihub.yaml.example 을 복사한 뒤 메인테이너가 편집해야 함.",
+            remediation=(
+                "/wh:setup 을 호출하여 wikihub.yaml 을 생성하세요 — "
+                "ADR-0031 §Decision A 정합 (`.example` template → derived 값 patching → atomic write). "
+                "install.sh 직후 첫 /wh:setup 호출이 yaml 의 시작 책임."
+            ),
         )
     try:
         data = yaml.safe_load(path.read_text())

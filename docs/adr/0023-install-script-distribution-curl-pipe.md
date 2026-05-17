@@ -86,3 +86,52 @@ curl -fsSL --proto '=https' --tlsv1.2 \
 - Decision §`--update` flag 비채택은 유지 — update path 진입은 ADR-0030 의 detect 시그널 자동 분기 (flag 없음).
 
 Status 변경 없음. 의미론 일관, 운영 scope 만 명시화.
+
+## Note (2026-05-18, feature `install_scope_reduction`) — Clone scope
+
+본 ADR 의 `git clone` 책임에 **sparse-checkout 적용** — 운영 타깃에는 운영 필수 path 만 거주. AGENTS.md §1 Dev Zone / Ops Zone 분리 invariant 정합.
+
+### Fetch list 정본 (`install.sh:WIKIHUB_SPARSE_PATHS`)
+
+| path | 사유 |
+|---|---|
+| `_system/` | `/wh:*` 명령 playbook · systemd template · VERSION |
+| `scripts/` | Python runtime (vault-fetch · ops-alert · lib/* · requirements.txt) |
+| `install.sh` | re-run / update |
+| `wikihub.yaml.example` | `/wh:setup` Step 0 의 template input (ADR-0031) |
+| `README.md` | 운영자 참고 (운영 진단 시 useful) |
+| `LICENSE` | legal · convention — MIT 의 redistribution scope 가 운영 타깃엔 strict 적용 안 되지만 OSS 관례로 포함 (LOW-S1 design review) |
+
+### 제외 (의도)
+
+`docs/` · `features/` · `tests/` · `AGENTS.md` · `CLAUDE.md` · `GEMINI.md` · `.gitignore` · `.env*` 등 — AGENTS.md §1 Development Zone 산출물 + 운영 무관 dev 파일.
+
+### Sparse mode
+
+`--no-cone` — root 파일 단위 정밀 선택. cone 모드는 root 의 모든 파일을 자동 포함하여 governance 파일까지 끌고 옴.
+
+### Clone 패턴 (install.sh `_step2_clone`)
+
+```bash
+git clone --no-checkout --depth 1 --branch "$clone_ref" "$URL" "$WIKIHUB_HOME"
+git -C "$WIKIHUB_HOME" sparse-checkout init --no-cone
+git -C "$WIKIHUB_HOME" sparse-checkout set _system scripts install.sh wikihub.yaml.example README.md LICENSE
+git -C "$WIKIHUB_HOME" checkout
+```
+
+**blob filter (`--filter=blob:none`) 미사용** — HIGH-S2 design review (partial clone + `--unshallow` 호환 위험 + lazy blob fetch 폭증 회피). sparse-checkout 만으로 working tree 절감 충분.
+
+### Update path 정합 (`install.sh _step2_update`)
+
+`_apply_sparse_checkout` 호출은 `git reset --hard $target_ref` **직후** — working tree mutation 의 origin = target_ref 채택 후. pre-feature 풀-clone 운영 서버가 첫 update 시 자동 sparse 전환 + 이후 update 는 idempotent.
+
+`_rollback_if_failed` 본문에도 `_apply_sparse_checkout` 호출 포함 — rollback 후에도 sparse state 정합 (ADR-0030 §부정/제약 의 sparse-checkout 영속화 Note 정합).
+
+### Supersede 아님
+
+본 ADR 의 호출·배포 모델 (curl-pipe + clean install + safety guard 3개) 는 유지. clone scope 만 보강. Status 변경 없음.
+
+### Related
+
+- ADR-0031 §"Clone scope" (의 Related 명시) — yaml writer 책임 reassign 과 짝.
+- ADR-0030 §부정/제약 sparse-checkout 영속화 — update path + rollback 시 working tree 동작.

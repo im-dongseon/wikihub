@@ -84,6 +84,8 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0027](0027-rclone-gws-responsibility-split.md) | rclone vs gws 책임 분리 — Path C+ 정본화 (rclone = mount/다운로드/UX, gws = changes API). ADR-0014·0006 supersede 없음 | Accepted | 2026-05-15 | `20260514_install_runtime` |
 | [ADR-0028](0028-uv-python-runtime.md) | uv 기반 Python runtime — GitHub Releases binary + SHA256, Python 3.12 pinned, `python3-venv` apt 의존 제거 (V8 결함 #1·#2·#5·#6 fix) | Accepted | 2026-05-17 | `20260514_install_runtime` |
 | [ADR-0029](0029-service-account-auth.md) | Service Account 기반 Drive 인증 (gws + rclone 둘 다 SA JSON key, Personal Google OK, vault 폴더 명시 공유) | Proposed | 2026-05-17 | `20260514_install_runtime` |
+| [ADR-0030](0030-update-workflow-orchestration.md) | install.sh dual-mode lifecycle (`_step2_update` git fetch + reset, `--force-fresh`/`--version` flag, systemd stop/start orchestration + rollback trap, log rotation) | Accepted | 2026-05-17 | `20260517_update_mode` |
+| [ADR-0031](0031-yaml-template-materialization.md) | wikihub.yaml template materialization — `/wh:setup` Step 0 단독 writer + 4-필드 patching + confirm drift fix + ruamel.yaml round-trip + Step 6 helper 통합 + §E schema version 정책 | Accepted | 2026-05-17 / 2026-05-18 (v2 + Step 4 통과) | `20260517_install_scope_reduction` |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

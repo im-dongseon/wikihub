@@ -1,10 +1,20 @@
 # ADR-0009: `/setup`의 책임 — wikihub.yaml → systemd 동기화 + 환경 검증
 
 - **Status**: Accepted
-- **Date**: 2026-05-13
+- **Date**: 2026-05-13 / 2026-05-18 (Note: yaml writer 책임 명시 확장)
 - **Feature**: features/20260513_wikihub_schema_v1
 - **Supersedes**: 없음
-- **Superseded by**: 없음
+- **Superseded by**: 없음 (supplement: ADR-0022 + ADR-0031 — yaml writer 책임 확장)
+
+> **Note (2026-05-18, feature `install_scope_reduction`)**: 본 ADR §Decision §"1. 환경 검증 (read-only)" 의 **"read-only"** 표현이 ADR-0022 (Step 6 `bootstrap_allowed: true → false` atomic write) 와 ADR-0031 (Step 0 template materialization + drift fix) 이후 더 이상 정확하지 않다. `/wh:setup` 은 다음 책임을 추가로 보유:
+>
+> ### 4. yaml writer (Step 0 + Step 6 — ADR-0022·ADR-0031 정본)
+>
+> - **Step 0** (ADR-0031): `wikihub.yaml` 부재 시 `wikihub.yaml.example` 을 template 으로 read → derived 5필드 patching → atomic write. 존재 시 install-derived 필드 drift 검출 + (대화 모드) confirm prompt + (비대화 fallback) 보존+보고.
+> - **Step 6** (ADR-0022): 첫 ingest 성공 후 `bootstrap_allowed: true → false` atomic write.
+> - 두 writer 는 동일 helper (`scripts/lib/yaml_writer.py` — ADR-0031 §Decision D) 호출 — atomic lock + 주석 보존 정합.
+>
+> 본 책임 확장은 ADR-0031 의 §Consequences "후속 영향" 에 명시. supersede 아님 — 본 ADR 의 §Decision 1·2·3 (환경 검증·systemd unit 동기화·보고) 은 유지 + §4 추가.
 
 ## Context
 

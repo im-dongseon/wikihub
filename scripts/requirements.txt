@@ -6,3 +6,11 @@ python-pptx>=0.6.21,<1
 python-docx>=1.1.0,<2
 openpyxl>=3.1.0,<4
 pdfminer.six>=20231228
+
+# yaml round-trip writer (ADR-0031) — /wh:setup Step 0 의 template materialization +
+# Step 6 의 bootstrap_allowed 환원이 단일 helper (`scripts/lib/yaml_writer.py`) 호출.
+# exact pin — MED-S3 design review 반영 (minor bump 의 round-trip API 변경 위험 회피).
+# 본 line 의 SHA256 hash + 다른 dep 들의 hash 전환 (uv pip --require-hashes 일관) 은
+# Step 4 ~ Step 5 사이의 supply-chain hardening 후속 작업으로 lock — `features/backlog.md`
+# 의 별도 항목으로 추적.
+ruamel.yaml==0.18.6

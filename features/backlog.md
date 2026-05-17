@@ -13,8 +13,8 @@
 | ~~#B~~ | ~~install update~~ | ~~Step 2 `rm -rf $WIKIHUB_HOME` destructive~~ | ✅ **closed** by `update_mode` — `_step2_update` git fetch + reset, fresh path 는 `--force-fresh` 명시 동의로 한정 |
 | ~~#C~~ | ~~install update~~ | ~~update 중 vault@ timer race~~ | ✅ **closed** by `update_mode` — `_systemd_stop_before_update` 15min in-flight grace + reset-failed + daemon-reload |
 | ~~#D~~ | ~~install update~~ | ~~update 후 service template 자동 redeploy~~ | ✅ **closed** by `update_mode` — `_step8_systemd_render` (install.sh 가 직접 render, hermes 독립) |
-| #E | install scope | `_step2_clone` 가 repo 전체를 clone — `docs/`·`features/`·`tests/`·`AGENTS.md` 등 메인테이너 내부 산출물 (~1.5 MiB) 이 운영 타깃에 노출. AGENTS.md §1 의 Dev/Ops Zone 분리 invariant 위반 | `install_scope_reduction` feature — `git clone --filter=blob:none --sparse-checkout` 으로 `_system`·`scripts`·`install.sh`·`wikihub.yaml.example`·`README.md` 만 fetch. ADR-0023 본문에 "clone scope" 항목 보강 (supersede 아님). **의존: `update_mode` 완료 후 진입** (install.sh 동시 편집 회피) |
-| #F | yaml provisioning | install.sh Step 5 `cp wikihub.yaml.example → wikihub.yaml` 가 raw template 그대로 복사 — 운영용 값 (instance.root override, vault paths, gws_min_version 등) 메인테이너 수동 편집 의존. yaml writer 책임이 install.sh + /wh:setup 두 곳 분산 (race·이중 정본 위험) | `install_scope_reduction` feature 와 묶음 — install.sh 의 yaml 개입 **0건** 으로 축소 (Step 5 cp 삭제). `/wh:setup` 에 Step 0 신규 — `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml` 부재 시 repo 의 `wikihub.yaml.example` 을 template 으로 read → derived 값 patching → atomic write. .example 은 repo 의 read-only template 으로 영구 거주, instance 에는 `wikihub.yaml` 만 — 위치 분리로 운영자 혼동 차단. setup.md "install.sh와의 관계" 표 갱신 + 신규 ADR-0031 후보 (template materialization 정책 + idempotent drift fix). **의존: `update_mode` 완료 후 #E 와 동시 진행** |
+| ~~#E~~ | ~~install scope~~ | ~~`_step2_clone` 가 repo 전체를 clone — 메인테이너 내부 산출물 (~1.5 MiB) 운영 노출, AGENTS.md §1 invariant 위반~~ | ✅ **closed** by `install_scope_reduction` (2026-05-18) — ADR-0023 §"Clone scope" Note + `WIKIHUB_SPARSE_PATHS` 6필드 lock (`_system scripts install.sh wikihub.yaml.example README.md LICENSE`) |
+| ~~#F~~ | ~~yaml provisioning~~ | ~~install.sh Step 5 raw cp + yaml writer 책임 분산~~ | ✅ **closed** by `install_scope_reduction` (2026-05-18) — ADR-0031 신설 + install.sh `_step5_yaml` 삭제 + `/wh:setup` Step 0 신규 (4필드 patching catalog · drift fix · 단일 helper `yaml_writer.py`) |
 
 ### R15·R16 Could 8건 (Step 4 code review)
 
@@ -61,14 +61,34 @@
 
 V3 (--force-fresh confirm), V4 (vault@ mid-sync grace), V5a/b (downgrade), V6 (log rotation), V7 (req diff), V8 (network fail), V9 (tag pin), V10 (template fixture), V12 (disk full).
 
+## install_scope_reduction 산출 (2026-05-18 Step 4 종결)
+
+### code review follow-up — v0.2.x deferred
+
+| ID | 영역 | 항목 | 해결 방향 |
+|---|---|---|---|
+| ISR-1 | supply-chain | `scripts/requirements.txt` 의 `--require-hashes` 미적용 + ruamel.yaml SHA256 hash 미기재 — ADR-0028 의 uv·rclone·gws hash verify 패턴과 일관성 미달 | `uv pip compile --generate-hashes` 출력 lock + install.sh Step 3 `uv pip install --require-hashes -r` 전환 |
+| ISR-2 | tests | `tests/test_config.py` 에 `mount_path != local_path` soft warn regression test 부재 — C10 (config.py:109-120) 가 코드 들어갔지만 test 미보유 | pytest fixture + `caplog` 활용 |
+| ISR-3 | yaml_writer thread-safety | `scripts/lib/yaml_writer.py` 의 `_yaml_rt` module-level singleton — v0.2.x multi-thread/multi-process 호출 시 race | function-local instance + 또는 lock |
+| ISR-4 | yaml_writer simplicity | `atomic_yaml_write(round_trip=False)` 분기 미사용 dead code (Karpathy §2) | 본 분기 삭제 또는 별도 helper 분리 |
+| ISR-5 | yaml_writer hardening | `_cleanup_stale_tmp` 의 directory entry guard 부재 — `entry.is_file()` 추가 | 1줄 patch |
+| ISR-6 | bash helper consistency | `_write_installed_versions_sidecar` 를 Python 으로 마이그레이션 — yaml_writer 와 동일 atomic invariant 공유 | v0.2.x Step 0 의 entry script 와 통합 |
+
+### code review LOW 3건 (Step 4 follow-up commit 후 잔여)
+
+- LOW-CR2-1: ADR-0031 §Decision B 의 `os.path.expanduser` 비교 정합 명시 (V6 false-positive 회피)
+- LOW-CR2-2: setup.md "실패 처리" 표에 schema version mismatch (exit 2) 행 추가
+- LOW-CR2-3: ADR-0023 Note 의 LICENSE 표현 추가 약화 ("install ≠ redistribution")
+- LOW-CR1-9, LOW-CR1-10: stylistic / logging handler 검증
+
 ## 다음 feature 제안 (v0.1.0 완성 path)
 
 | feat_id | 목적 | 의존 |
 |---|---|---|
 | `hermes_adapter` (F5) | wikihub 의 `wh:*` skill 을 Hermes skill 시스템에 정합화. ADR-0011·0012 spec 보강 또는 wrapper dispatcher 채택. 결함 #12 lock | F4 archive |
 | ~~`update_mode`~~ | ✅ archive (2026-05-17) — ADR-0030 신설 | — |
-| `install_scope_reduction` | 결함 #E + #F — install.sh clone scope 한정 (sparse-checkout, ADR-0023 보강) + yaml provisioning 책임을 `/wh:setup` Step 0 으로 이전 (install.sh yaml 개입 0건, .example 위치 분리, ADR-0031 후보) | `update_mode` archive 후 진행 가능 |
+| ~~`install_scope_reduction`~~ | ✅ **Step 3 완료** (2026-05-18) — ADR-0023 §"Clone scope" Note + ADR-0031 (Proposed) + install.sh sparse + yaml_writer.py 신규. Step 4 code review + V<N> 검증 통과 후 archive (ADR-0031 → Accepted) | — |
 | `lint_authoring` (F2 잔여) | wiki 의 정합성 검증 자동화 (lint.service) | F2 spec |
 | `wiki_query` (F6) | 메인테이너/사용자가 wiki 검색 / 그래프 탐색 (`wh:query`) | F5 (hermes_adapter) |
 
-v0.1.0 acceptance = F4 (✅) + F5 + (선택) update_mode (✅). v0.2.x 는 lint_authoring·wiki_query·multi-vault·install_scope_reduction 등.
+v0.1.0 acceptance = F4 (✅) + F5 + (선택) update_mode (✅) + install_scope_reduction (Step 3 완료, Step 4 V<N> 대기). v0.2.x 는 lint_authoring·wiki_query·multi-vault 등.

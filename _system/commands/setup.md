@@ -1,17 +1,18 @@
 # /wh:setup
 
-`wikihub.yaml`(운영 정본) 검증, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** + **메인테이너가 yaml 편집한 뒤**에 호출.
+`wikihub.yaml`(운영 정본) **생성 + 검증**, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** 호출.
 
 ## 호출
 
 ```
-<agent_invocation> "/wh:setup"                # 검증 + unit 동기화 (활성화는 메인테이너 수동)
+<agent_invocation> "/wh:setup"                # yaml materialize (첫 호출) 또는 drift sync + 검증 + unit 동기화
 <agent_invocation> "/wh:setup --enable"       # 추가로 systemctl --user enable --now까지 수행
 ```
 
 - **트리거**: 메인테이너 수동 (timer 아님 — `/wh:setup` 자체가 timer 설정 명령)
 - **호출 시점**:
-  - install.sh 직후 + yaml 편집 완료 후 (운영 시작)
+  - **install.sh 직후 (첫 호출)** — Step 0 가 `.example` 으로부터 `wikihub.yaml` 생성 (ADR-0031)
+  - yaml maintainer field 편집 완료 후 (운영 시작)
   - vault 추가·삭제 후
   - `sync_interval_sec` 또는 `lint_interval_hours` 변경 후
   - unit template 갱신 후 (install.sh로 정본 update 후)
@@ -19,13 +20,88 @@
 ## 사전 조건
 
 - install.sh가 OS bootstrap·venv·deps·skill 등록을 완료 (ADR-0010)
-- `wikihub.yaml` 존재 + 읽기 권한 (install.sh가 example을 복사한 상태이면 메인테이너가 값 채워야 검증 통과)
+- `$WIKIHUB_HOME/wikihub.yaml.example` 존재 (sparse-checkout fetch list, ADR-0023)
+- `$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json` 존재 권장 (Step 0 의 `gws_min_version` source, ADR-0031 §Decision B)
 - `~/.config/systemd/user/` 쓰기 권한
 - F4 산출물인 unit template이 `_system/systemd/`에 존재 (install.sh가 fetch)
 
 ## 절차
 
-### Step 1. 환경 검증 (read-only, critical fail 시 즉시 exit)
+### Step 0. wikihub.yaml materialization · schema version 검증 · drift fix (ADR-0031)
+
+본 Step 은 `/wh:setup` 의 **yaml writer 책임**의 정본 (ADR-0009 §4 + ADR-0031 §Decision A·B·C·E).
+yaml 의 시작·끝 책임은 `/wh:setup` 단독 — install.sh 는 yaml 미관여.
+
+#### Step 0.1. Schema version 검증 (ADR-0031 §Decision E)
+
+```python
+example_data = yaml_writer.load_yaml_rt(Path("$WIKIHUB_HOME/wikihub.yaml.example"))
+example_version = int(example_data["version"])
+
+if target.exists():
+    operational_data = yaml_writer.load_yaml_rt(target)
+    operational_version = int(operational_data.get("version", 1))
+    if operational_version != example_version:
+        fail_fast(
+            reason=f"schema version mismatch: operational v{operational_version} vs example v{example_version}",
+            remediation="install.sh --version <prev-tag> 로 rollback 또는 schema migration guide 참조",
+        )
+```
+
+v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
+
+#### Step 0.2. Materialize 또는 Drift Sync 분기
+
+##### Case A — `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml` 부재
+
+1. `yaml_writer.load_yaml_rt($WIKIHUB_HOME/wikihub.yaml.example)` 로 round-trip load (주석 보존).
+2. **Derived 4필드 patching** (ADR-0031 §Decision B catalog):
+   - `instance.root` → `$WIKIHUB_INSTANCE_ROOT` env
+   - `vaults[*].local_path` → `<instance.root>/vault/<vault.id>`
+   - `vaults[*].options.credentials_path` → `<instance.root>/.credentials/sa_<vault.id>.json`
+   - `operations.gws_min_version` → `$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json` 의 `gws` 필드 (file 부재 시 `gws --version` stdout fallback)
+3. `yaml_writer.atomic_yaml_write($WIKIHUB_INSTANCE_ROOT/wikihub.yaml, data, round_trip=True)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os.replace).
+4. 보고:
+   ```
+   wikihub.yaml 생성 완료 (.example → operational, 4 필드 patching 적용).
+   다음 단계: maintainer field 편집 (vault id, root_folder_id, enabled, bootstrap_allowed,
+   fatal_webhook_url, instance_label 등) 후 /wh:setup --enable 재호출.
+   ```
+5. Step 1 진입.
+
+##### Case B — `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml` 존재
+
+1. `yaml_writer.load_yaml_rt(target)` 로 round-trip load.
+2. Step 0.1 의 schema version 검증.
+3. **Drift 검출** — derived 4필드 각각:
+   - 현재 값 vs 예상값 (env / install-time fact 기반).
+   - drift 의 source 분류 — "install-time env 와 매번 mismatch" vs "derived 만 mismatch".
+4. drift 있는 필드 0건 → Step 0 no-op. Step 1 진입.
+5. drift 1건 이상:
+   - **대화 모드** (`/dev/tty` 있음 + `WIKIHUB_NONINTERACTIVE` 미설정 + `SKIP_CONFIRM` 미설정):
+     - 각 drift 필드 보고 (현재 값 vs 예상값 + source 분류).
+     - prompt (default 보수 — LOW-S2 design review):
+       ```
+       위 변경은 install-time env 값으로 yaml 을 덮어씁니다.
+       메인테이너 hand-edit 가 있으면 N 선택. [y/N] (default N)
+       ```
+     - `Y` → `yaml_writer.atomic_yaml_write(target, data, round_trip=True)` 재기록.
+     - `N` → 보존 + "재호출 시 다시 prompt" 안내. Step 1 진입 (exit 0).
+   - **비대화 모드** (`WIKIHUB_NONINTERACTIVE=1` 또는 `/dev/tty` 부재):
+     - drift 보고 (stderr) + 보존.
+     - **exit 1** (HIGH-S3 design review — silent mismatch 회피). systemd OnFailure → ops-alert 1회 트리거 (ADR-0024 dedup 정합).
+
+#### Step 0.3. 미관여 필드 invariant (ADR-0031 §Decision B "미관여 필드")
+
+위 4필드 외 **모든 yaml 필드**는 maintainer-controlled — Step 0 절대 미관여. 명시 예시:
+- `version`, `instance.timezone`
+- `vaults[*]`: `id`·`enabled`·`type`·`sync_interval_sec`·`options.root_folder_id`·`options.exclude_shared_with_me`·`options.max_file_size_mb`·`options.bootstrap_allowed`·`options.mount_path`·`options.rclone_remote_name`·`options.rclone_rc_port`
+- `operations`: `lint_interval_hours`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`
+- `agent.*` 전체
+
+특히 `mount_path` 는 Path C+ default 패턴에선 `local_path` 와 동일하지만, advanced 운영자가 bind-mount / ramdisk / multi-vault layout 분리로 명시 분리 가능 (HIGH-A1 design review). Step 1 schema 검증의 soft warn 만 발생, Step 0 미관여.
+
+### Step 1. 환경 검증 (Step 0 후 — yaml writer 분기와 분리)
 
 검증 항목 (실패 항목은 수집해 보고):
 
@@ -185,8 +261,9 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 3. **`N` 응답**: vault-fetch + timer enable 모두 skip.
 
 4. **bootstrap_allowed 환원** (`Y` + exit 0/75 with cursor 시):
-   - `wikihub.yaml` 의 해당 vault `bootstrap_allowed: true → false` atomic write (fsync 정합).
-   - yaml writer 는 본 명령의 새 책임 (ADR-0009 확장).
+   - `yaml_writer.load_yaml_rt(target)` → 해당 vault `bootstrap_allowed: True → False` → `yaml_writer.atomic_yaml_write(target, data, round_trip=True)`.
+   - **단일 helper 호출** (ADR-0031 §Decision D + CRIT-A2 design review) — Step 0 와 동일 `scripts/lib/yaml_writer.py` 사용. round-trip 모드라 메인테이너 편집한 주석·key 순서·indent 보존.
+   - yaml writer 책임은 ADR-0009 §4 (Step 0 + Step 6) + ADR-0022 + ADR-0031 정본.
 
 5. **timer enable** (`Y` + exit 0/75 with cursor 시):
    - `systemctl --user enable --now {vault_id}-ingest.timer`.
@@ -205,12 +282,13 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 
 | 변경 대상 | 조건 |
 |---|---|
+| `wikihub.yaml` (Step 0 — materialize 또는 drift sync) | 첫 호출: `.example` 으로부터 generate + derived 4필드 patching. 재호출: drift 검출 시 confirm prompt (대화) 또는 exit 1 (비대화). helper = `scripts/lib/yaml_writer.py atomic_yaml_write` (PID-suffix `.tmp` + fsync + os.replace). **ADR-0031 정본** |
 | `wiki/` 카테고리 디렉토리 | 없을 때만 생성 |
 | `_state/{vault_id}/` 초기 파일 | 없을 때만 생성 |
 | `~/.config/systemd/user/*.service`·`*.timer` | 매 호출 시 yaml 값으로 갱신 (덮어쓰기 — yaml이 정본) |
 | systemd state | daemon-reload + (선택) enable. **vault-ingest.timer 는 Step 6 결과 위임** |
 | agent skill 메타 | 변경 시만 갱신 |
-| `wikihub.yaml` (bootstrap_allowed: true → false) | Step 6 의 `Y` + (exit 0 또는 exit 75 with cursor) 시만. atomic write + fsync. **ADR-0022 정본** |
+| `wikihub.yaml` (Step 6 — bootstrap_allowed: true → false) | Step 6 의 `Y` + (exit 0 또는 exit 75 with cursor) 시만. **동일 helper `atomic_yaml_write` 호출** (Step 0 와 단일성, CRIT-A2). **ADR-0022 정본** |
 
 ## 실패 처리
 
@@ -234,14 +312,21 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 
 ## install.sh와의 관계
 
-| 항목 | install.sh (1회 bootstrap + 정본 update) | /wh:setup (yaml 변경 시 반복) |
+ADR-0010 의 도구 split (install.sh = OS bootstrap / `/wh:setup` = wiki·yaml 정합) + ADR-0031 의 yaml writer 단일성 정합. install.sh 는 yaml 미관여.
+
+| 항목 | install.sh (1회 bootstrap + 반복 update) | /wh:setup (첫 호출 + yaml 변경 시 반복) |
 |---|---|---|
 | OS deps (Python venv, libs) | ✓ | — |
-| 정본 파일 fetch (`_system/`, `scripts/`) | ✓ | — |
-| `wikihub.yaml.example` → `wikihub.yaml` 복사 | ✓ (없을 때만) | — |
+| 정본 파일 fetch (`_system/`, `scripts/`) — sparse-checkout (ADR-0023 §"Clone scope") | ✓ | — |
+| `INSTALLED_VERSIONS.json` sidecar 작성 (Step 0 input) | ✓ (`_write_installed_versions_sidecar`, ADR-0031 §Decision B) | — |
+| `wikihub.yaml` 생성 (`.example` 으로부터 materialize) | — | ✓ (Step 0 첫 호출 시 generate · 이후 호출 시 drift sync, ADR-0031) |
+| `wikihub.yaml` derived 값 patching (4필드) | — | ✓ (Step 0, ADR-0031 §Decision B catalog) |
+| `wikihub.yaml` (Step 6 — `bootstrap_allowed` 환원) | — | ✓ (Step 6, ADR-0022 — Step 0 와 동일 helper) |
+| `instance.root` mkdir + `.credentials/` chmod 700 | ✓ (`_step5_instance_dirs`) | — |
+| credentials chmod 600 enforce | ✓ (`_step5_instance_dirs`) | — |
 | agent skill 초기 등록 | ✓ | — (메타 갱신만) |
 | wiki/·_state/ 디렉토리 | — | ✓ |
-| systemd unit 생성·갱신 | — | ✓ |
+| systemd unit 생성·갱신 (template + yaml 값 instance화) | ✓ (`_step8_systemd_render`, ADR-0030 update_mode 정본) | ✓ (재진입 호출 — `/wh:setup` 단독 호출 시) |
 | OAuth 토큰 검증 | — | ✓ |
 | daemon-reload·enable | — | ✓ |
 
@@ -251,6 +336,9 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 - ADR-0006 unified orchestration (ExecStart의 명령 형식)
 - ADR-0007 state all JSON (Step 1 초기 파일)
 - ADR-0008 lint 권한 (lint.timer는 기본 모드만)
-- ADR-0009 setup 책임 (본 명령의 정본)
-- ADR-0010 운영 도구 책임 분할 (install.sh와의 경계)
+- ADR-0009 setup 책임 (본 명령의 정본 — §4 yaml writer 확장 Note 정합)
+- ADR-0010 운영 도구 책임 분할 (install.sh와의 경계 — yaml.example 복사 책임은 ADR-0031 으로 reassign)
 - ADR-0011 skill namespace prefix (Step 3 메타 갱신 시 prefix 적용)
+- ADR-0022 첫 ingest 진입점 (Step 6 — `bootstrap_allowed` 환원, Step 0 와 동일 helper)
+- ADR-0030 update workflow orchestration (`_step2_update` + sparse-checkout 영속화)
+- ADR-0031 yaml template materialization (Step 0 정본 — 4필드 catalog + drift fix + helper 단일성)
