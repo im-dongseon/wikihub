@@ -48,21 +48,37 @@
 
 ```mermaid
 flowchart TD
-    GDrive["Google Drive<br/>(vault-gdrive)"]
-    NAS["NAS / 기타 vault<br/>(vault-nas, …)"]
-    Sync["gdrive-sync.py / sync 스크립트<br/>(systemd timer, 10분 주기)"]
+    GDrive["Google Drive"]
+    Mount["rclone mount daemon<br/>(wikihub-mount@.service, Type=simple)<br/>vfs-cache full + dir-cache 5m + --rc"]
+    Vault["wikihub-instance/vault/&lt;vault_id&gt;/<br/>(실시간 mount FS — SSH ls/cat 가능)"]
+    Sync["vault-fetch.py<br/>(wikihub-vault@.service, Type=oneshot)<br/>systemd timer, 10분 주기"]
     Hermes["Hermes daemon<br/>Telegram polling +<br/>/ingest /lint /query /graphify"]
     Wiki["wikihub/wiki/<br/>(통합 위키)"]
     ADR["docs/adr/<br/>(결정 기록)"]
 
-    GDrive -->|"Drive API<br/>changes.list"| Sync
-    NAS -->|inotifywait| Sync
-    Sync -->|"변동 발생 시<br/>트리거"| Hermes
+    GDrive -->|"FUSE read-through"| Mount
+    Mount -->|"실시간 동기화"| Vault
+    GDrive -->|"changes.list (cursor, gws CLI)"| Sync
+    Sync -->|"assert_mount_alive + vfs/refresh"| Mount
+    Vault -->|"mount FS open()"| Sync
+    Sync -->|"변동 발생 시 trigger"| Hermes
     Hermes --> Wiki
     Hermes --> ADR
 ```
 
-상세 설계는 [`features/20260513_v030_initial_architecture/analysis_and_design.md`](features/20260513_v030_initial_architecture/analysis_and_design.md) 참조.
+**v9 (ADR-0025·0026·0027 — Path C+ 책임 분리)**:
+- **rclone mount** = Drive ↔ vault 실시간 동기화 + 파일 read 패스 (vfs cache 영속). SSH 에서 `ls/cat` 으로 Drive 파일 즉시 접근
+- **gws CLI** = `drive changes list` 로 cursor 기반 변경 감지 (정확한 삭제·rename·권한 이벤트)
+- **vault-fetch.py 사이클**: 시작 시 `assert_mount_alive` (stat) + `vfs/refresh recursive=true` 로 race window 차단 → `gws changes list` → mount FS `open()` → extraction → wiki page write
+
+**rclone OAuth 1회성 발급** (vault 별, install.sh 후 setup.md §Step 5.5):
+```
+rclone config        # 안내 따라 OAuth flow + remote name = wikihub.yaml.vaults.<id>.options.rclone_remote_name
+chmod 0600 ~/.config/rclone/rclone.conf
+```
+gws OAuth (macOS dev box 의 `scripts/auth_gdrive.py`) 와 token 분리 — 같은 Google 계정 권장.
+
+상세 설계는 [`features/20260513_v030_initial_architecture/analysis_and_design.md`](features/20260513_v030_initial_architecture/analysis_and_design.md) + Path C+ 결정은 [`docs/adr/0025-rclone-mount-adoption.md`](docs/adr/0025-rclone-mount-adoption.md) · [`docs/adr/0027-rclone-gws-responsibility-split.md`](docs/adr/0027-rclone-gws-responsibility-split.md) 참조.
 
 ---
 
@@ -127,15 +143,21 @@ wikihub/
 
 ## 로드맵
 
-본 feature `20260513_v030_initial_architecture`의 설계가 확정되면 후속 feature로 분기:
+v0.1.0 feature 진행 상황 (2026-05-17 기준):
 
-| Feature | 범위 |
-|---|---|
-| **F2: `wikihub_schema_v1`** | `_system/wiki-schema.md` + `_system/commands/*` 구현 |
-| **F3: `vault_gdrive_api`** | `scripts/gdrive-sync.py` + Drive API + 헤드리스 OAuth + cursor/file_map 영속화 |
-| **F4: `systemd_orchestrator`** | `deploy.sh` + systemd user units + `wikihub.yaml` 스키마 |
-| **F5: `hermes_adapter`** | Hermes 호출 어댑터 + 자동 트리거 + 수동 명령 처리 |
-| **F6: `vault_directory`** (선택) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 |
+| Feature | 범위 | 상태 |
+|---|---|---|
+| **F1: `v030_initial_architecture`** | 메소드론 + 초기 architecture 정본화 | ✅ archive |
+| **F2: `wikihub_schema_v1`** | `_system/wiki-schema.md` + `_system/commands/*` 구현 | ✅ archive |
+| **F3: `vault_gdrive_api`** | `scripts/sync.py` + Drive API + cursor/file_map 영속화 | ✅ archive |
+| **F4: `install_runtime`** | `install.sh` + systemd unit (mount@/vault@/timer/ops-alert/lint) + rclone mount + vfs/refresh + SA 인증 (ADR-0029) | ✅ archive (2026-05-17) |
+| **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh:*` skill ↔ Hermes skill 시스템 정합화. F4 surface 의 결함 #12 lock | ⏸ 진행 예정 |
+| `update_mode` | `install.sh --update` flag + Step 2 idempotent + systemd auto-redeploy. F4 의 결함 #A·#B·#C·#D 일괄 fix | ⏸ 진행 예정 |
+| **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
+
+v0.1.0 acceptance = F4 (✅) + F5 + (선택) update_mode. v0.1.0 일괄 deployment 는 F5 완료 후 진행.
+
+자세한 backlog (R15·R16 Could 8건 + 결함 surface) 는 [`features/backlog.md`](features/backlog.md) 참조.
 
 ---
 

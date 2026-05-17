@@ -1,0 +1,56 @@
+# WikiHub 운영 정본 — wikihub.yaml 의 example.
+# install.sh 가 `~/wikihub-instance/wikihub.yaml` 에 복사 (없을 때만).
+# 메인테이너가 vault 정의 + credentials_path + bootstrap_allowed 채운 후 /wh:setup 호출.
+#
+# 본 파일은 v0.1.0 v5 spec (analysis_and_design.md §4.3) 정합.
+
+version: 1
+
+instance:
+  root: ~/wikihub-instance
+  timezone: Asia/Seoul
+
+vaults:
+  - id: gdrive
+    type: gdrive_api
+    enabled: false             # 운영 시작 시 true 로 변경
+    sync_interval_sec: 600     # 10분
+    local_path: ~/wikihub-instance/vault/gdrive    # v9: rclone mount 가 마운트하는 path (= mount_path 정합). ADR-0025
+    options:
+      credentials_path: ~/wikihub-instance/.credentials/sa_gdrive.json   # ADR-0029: Service Account JSON key (Google Cloud Console 발급). gws 는 GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE env, rclone 은 rclone.conf 의 service_account_file 로 동일 path 참조
+      root_folder_id: ""              # Drive 의 vault root folder ID. SA 채택 (ADR-0029) 후엔 명시 필수 — SA 가 공유받은 폴더만 접근, 빈 문자열이면 SA 의 본인 home (빈 상태) 만 보임
+      exclude_shared_with_me: true    # sharedWithMe 파일 제외 (trust boundary). SA 채택 시 ownedByMe 자체 부재 — 의미적으로 SA 가 공유받은 폴더 = sharedWithMe 라 기본 false 후보 (v0.2.x 재검토)
+      max_file_size_mb: 50            # 큰 파일 skip threshold (F3 SIG-3)
+      bootstrap_allowed: false        # 첫 sync 시에만 true → /wh:setup Step 6 prompt 가 자동 false 환원
+      # v9 신규 (ADR-0025·0026·0027 — Path C+):
+      mount_path: ~/wikihub-instance/vault/gdrive   # local_path 와 동일 — rclone mount 가 마운트하는 path. ADR-0025
+      rclone_remote_name: gdrive                    # ~/.config/rclone/rclone.conf 의 remote 이름 (setup.md Step 5.5 정합)
+      rclone_rc_port: 5572                          # per-vault rclone rc port. 다중 vault 시 +1 순번 (install.sh Step 5.5c pre-check)
+
+operations:
+  lint_interval_hours: 24
+  max_concurrent_vaults: serial       # v0.1.0 단일 vault 가정 — F6 시점 재검토
+  retry:
+    max_attempts: 5
+    backoff_base_sec: 60
+  disk: {}                            # operations.disk.* 스키마는 F4 미정의 — v0.2.x
+  fatal_webhook_url: null             # 미설정 시 ops-alert.service no-op (journal 만)
+  fatal_webhook_timeout_sec: 10
+  instance_label: null                # R10 MED-3 + R16-L6: webhook payload 의 wikihub_instance 식별자. 미설정 시 socket.gethostname() 사용 — OCI internal hostname (예: inst-2x4-arm-ubuntu) 외부 SaaS (Slack/Discord) leak 회피 위해 운영자 명시 alias 권장. 권장 형식: "wikihub-prod-ap1" / "wikihub-staging".
+  gws_min_version: ""                 # ADR-0014·0015 — Step 3 V6 후 채움. /wh:setup 시작 시 `gws --version` 비교
+  # v9 신규 (ADR-0025·0026 — rclone install + vfs cache 정책):
+  rclone_min_version: "1.65.0"        # install.sh Step 5.5a `_install_rclone` 의 min
+  rclone_max_version: "1.99.99"       # ADR-0025 breaking change 방어 (R12-LOW-2)
+  vfs_cache_max_size: "10G"           # rclone mount `--vfs-cache-max-size`. OCI free tier 디스크 가이드는 Q7
+  vfs_refresh_mode: recursive         # ADR-0026 K1 채택 (recursive | per-file | none — K2/K3 v0.2.x deferred)
+
+# agent: Hermes (또는 codex/gemini) 는 install.sh 설치 범위 밖 — 메인테이너가 별도 설치 후 binary 경로 확인 필수.
+# 미설치 시 systemd timer 활성화 후 첫 fire 시점에 `203/EXEC` fail → OnFailure → ops-alert 매 사이클 발화.
+# 권장 검증: `command -v hermes` 가 binary path 와 일치하는지 /wh:setup Step 1 가 확인.
+agent:
+  type: hermes                        # ADR-0012 — 다른 값: codex, gemini
+  binary: /usr/local/bin/hermes       # R10 MED-8: 미설치 시 운영자가 별도 설치 책임
+  oneshot_args: ["-z"]                # `hermes -z "/wh:..."` 형식
+  skill_prefix: "wh:"                 # ADR-0011 (fallback "wh-")
+  timeout_sec: 600
+  notify_on_fatal: true               # ADR-0024 — Hermes 통지 (v0.1.0 은 stub, v0.2.x 활성화)

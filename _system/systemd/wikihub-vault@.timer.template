@@ -1,0 +1,17 @@
+[Unit]
+Description=WikiHub vault ingest timer — %i
+
+# OnBootSec=2min: reboot 후 network-online + cloud-init settle 시간 (F1 §4.8.2 lift)
+# OnUnitInactiveSec={sync_interval_sec}s: 직전 service inactive 후 N초 (Active 아님)
+# Persistent=true: reboot 중 놓친 fire 부팅 후 catch up (V12 acceptance)
+# AccuracySec=1min: 전력 절감 (F1 §4.8.2 lift)
+# !! systemd unit syntax — trailing inline comment 미지원, 같은 라인 끝 `# ...` 금지 (V<N> 결함 #5, 2026-05-17)
+[Timer]
+Unit=wikihub-vault@%i.service
+OnBootSec=2min
+OnUnitInactiveSec={sync_interval_sec}s
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

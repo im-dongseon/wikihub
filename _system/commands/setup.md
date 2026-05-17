@@ -1,0 +1,307 @@
+# /wh:setup
+
+`wikihub.yaml`(운영 정본) 검증, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** + **메인테이너가 yaml 편집한 뒤**에 호출.
+
+## 호출
+
+```
+<agent_invocation> "/wh:setup"                # 검증 + unit 동기화 (활성화는 메인테이너 수동)
+<agent_invocation> "/wh:setup --enable"       # 추가로 systemctl --user enable --now까지 수행
+```
+
+- **트리거**: 메인테이너 수동 (timer 아님 — `/wh:setup` 자체가 timer 설정 명령)
+- **호출 시점**:
+  - install.sh 직후 + yaml 편집 완료 후 (운영 시작)
+  - vault 추가·삭제 후
+  - `sync_interval_sec` 또는 `lint_interval_hours` 변경 후
+  - unit template 갱신 후 (install.sh로 정본 update 후)
+
+## 사전 조건
+
+- install.sh가 OS bootstrap·venv·deps·skill 등록을 완료 (ADR-0010)
+- `wikihub.yaml` 존재 + 읽기 권한 (install.sh가 example을 복사한 상태이면 메인테이너가 값 채워야 검증 통과)
+- `~/.config/systemd/user/` 쓰기 권한
+- F4 산출물인 unit template이 `_system/systemd/`에 존재 (install.sh가 fetch)
+
+## 절차
+
+### Step 1. 환경 검증 (read-only, critical fail 시 즉시 exit)
+
+검증 항목 (실패 항목은 수집해 보고):
+
+- **wikihub.yaml 스키마**: `version == 1`, `instance.root` **(없으면 mkdir -p — 운영자가 yaml의 `instance.root`를 install.sh 기본값 외로 편집한 경우 자동 생성, 이후 쓰기 권한 검증)**, 각 `vaults[*]`의 `id` 형식(`^[a-z][a-z0-9_]*$`)·`type`·`enabled`·`sync_interval_sec ≥ 60`·`local_path` (없으면 mkdir + 쓰기 권한 검증), `operations.lint_interval_hours ≥ 1`, `agent.binary` 실행 가능 (`agent.type`별 ADR-0012 매핑 정합). **`operations.disk.*` 스키마는 F4 산출물(`wikihub.yaml.example`)에서 정의됨 — F4 완료 전까지 본 항목 검증 생략 가능 (L1)**
+  - **CRIT-R10-2**: `instance.root` 디렉토리 ensure 가 본 Step의 명시적 책임. 미존재 시 unit template의 `WorkingDirectory={instance_root}`가 `203/CHDIR`로 즉시 fail → OnFailure → ops-alert 매 사이클 발화. **추가 안전망**으로 unit template `ExecStartPre=/bin/mkdir -p {instance_root}` 보유 (정상 운영에서는 redundant, yaml 편집 직후 reboot 등 race window 방어).
+- **OAuth 토큰 유효성** (enabled gdrive_api vault만): 각 vault의 `credentials_path` 파일 존재 + 권한 600 + load 가능 + valid 또는 refresh 가능
+  - **권한 검증 추가 (O8)**: `creds.valid` 확인 후 light API call(`drive.about.get` 등)로 실제 Drive 접근 가능 여부 검증. 401/403 발생 시 보고 + 해당 vault 제외 (해당 vault unit 생성 skip)
+- **wiki/ 디렉토리**: 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` + 각 vault별 `sources/{vault_id}/` 존재 (없으면 생성)
+- **_state/ 디렉토리**: 각 enabled vault의 `_state/{vault_id}/` + 초기 state 파일 (없을 때만 — ADR-0007 all JSON, `pending_ingest.json`은 제외)
+  - **초기 파일 형식 (L2 정본)**:
+    - `cursor.json` → `{"vault_id": "<id>", "vault_type": "<type>", "cursor": "", "cursor_updated_at": null}`
+    - `file_map.json` → `{"vault_id": "<id>", "updated_at": null, "files": {}}`
+    - `retry.json` → `{"vault_id": "<id>", "next_id": 1, "queue": []}`
+
+실패 시: stdout 상세 보고 + exit 1. unit 동기화는 일부만 진행하거나 전체 중단 (정책: 스키마 위반은 전체 중단, OAuth 토큰 무효는 해당 vault만 unit 갱신 제외).
+
+### Step 2. systemd unit 동기화 (write)
+
+F4 산출물인 `_system/systemd/`의 unit template을 읽어 yaml 값으로 instance화한 결과를 `~/.config/systemd/user/`에 작성.
+
+대상 (v9 — ADR-0025 instantiated `@` 패턴):
+- 각 enabled vault에 대해 `wikihub-vault@<vault_id>.service` + `wikihub-vault@<vault_id>.timer` + `wikihub-mount@<vault_id>.service` (v9 신규)
+- 단일 `lint.service` + `lint.timer`
+- 단일 `ops-alert.service`
+- 조건부 (operations.disk.* 활성): `disk-watch.service` + `disk-watch.timer`
+
+template 치환 변수 (F4 가 unit template 정의 + /wh:setup 의 Python helper 가 substitution):
+- `{vault_id}` — vault id
+- `{sync_interval_sec}` — 해당 vault 의 sync_interval_sec
+- `{lint_interval_hours}` — operations.lint_interval_hours
+- `{instance_root}` — instance.root
+- `{agent_invocation}` — `agent.binary` + `agent.oneshot_args` 공백 join (ADR-0012)
+- `{skill_prefix}` — agent.skill_prefix (default `"wh:"`, fallback `"wh-"` per ADR-0011)
+- `{venv_path}` — `{wikihub_home}/.venv_path` 사이드카 파일에서 read (install.sh Step 3 이 기록 — ADR-0020·0019)
+- `{credentials_path}` — `vaults[id].options.credentials_path` (per-vault. `~` 는 `os.path.expanduser` 로 expand)
+- `{wikihub_home}` — `WIKIHUB_HOME` env (default `~/wikihub`. install.sh 가 export — ADR-0023)
+- **`{rclone_bin}`** (v9, ADR-0025) — `/usr/local/bin/rclone` (install.sh Step 4.5 가 install location lock)
+- **`{rclone_config_path}`** (v9, ADR-0025) — `${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}`
+- **`{vfs_cache_max_size}`** (v9, ADR-0025) — `operations.vfs_cache_max_size` (default `10G`)
+- **`{rc_port_for_<vault_id>}`** (v9, ADR-0026) — `vaults[*].options.rclone_rc_port` 에서 vault_id 별로 lookup (default 5572 + 순번)
+- **`{remote_name_for_<vault_id>}`** (v9, ADR-0025) — `vaults[*].options.rclone_remote_name` 에서 vault_id 별로 lookup
+
+#### Substitution 순서 (v9 R13-MED-2 — 2-pass)
+
+`wikihub-mount@.service.template` + `wikihub-vault@.service.template` 의 systemd `%i` 와 Python `.format_map()` brace 가 한 template 에 공존. Python substitution helper 는 **2-pass** 처리:
+
+1. **Pass 1 — `%i` 전치환**: template 내 모든 `%i` 를 vault_id literal 로 치환. 예:
+   - `{rc_port_for_%i}` → `{rc_port_for_gdrive}`
+   - `{remote_name_for_%i}` → `{remote_name_for_gdrive}`
+   - `ExecStart=... mount @%i.service ...` → `ExecStart=... mount @gdrive.service ...` (만약 ExecStart 본문에 literal `%i` 가 있다면)
+2. **Pass 2 — `.format_map(subst_dict)` 로 brace 치환**: `subst_dict` 에 vault_id 가 합쳐진 key 들이 등록되어 lookup
+
+이유: systemd `%i` 는 systemd 런타임에 unit 이름 (`wikihub-mount@gdrive.service`) 에서 추출하여 ExecStart 토큰 해석 시 적용. Python `.format_map()` 은 unit 파일 deploy 전 stage. 두 메커니즘이 같은 token (`%i`) 으로 보이나 stage 가 분리됨 — Python helper 가 brace 안의 `%i` 를 먼저 명시 치환해야 `.format_map()` 이 정확한 key 를 lookup. ADR-0019 의 단일 pass 패턴을 per-vault 키 prefix 방식으로 확장.
+
+deploy 시점:
+- install.sh §Step 6 `_step6_agent_skill` 또는 /wh:setup 의 본 Step 2 가 호출 — vault_id 별로 substitution dict 산출 + 2-pass + 결과 파일을 `~/.config/systemd/user/wikihub-mount@<vid>.service` 등으로 write
+- systemd 가 unit enable 후 시작 시점에 `%i` 가 unit 이름에서 추출되어 ExecStart 의 `%i` (이미 Python pass 1 으로 치환됨) 와 정합
+
+본 spec은 unit ini 내용을 정의하지 않음 — **F4가 unit template의 single source of truth**. 본 명령은 template 적용 helper.
+
+#### Step 2.x ExecStart 조립 규약 (B4 — F4·F5 정본)
+
+`ExecStart` 라인 형식 (systemd parser 기준):
+```
+ExecStart={agent.binary} {agent.oneshot_args 공백 join} "{prompt}"
+```
+
+**규칙**:
+- prompt 전체는 systemd `"..."` 1개 토큰으로 감싸야 함 (slash·공백·인자 모두 포함)
+- prompt 내부에 큰따옴표 사용 금지 (systemd escape 미지원 — v0.1.0은 slash command 인자에 큰따옴표 안 들어감 가정. 발생 시 별도 ADR로 wrapper script 도입 검토)
+- `oneshot_args` 다중 토큰 예: `["chat", "-q"]` → `hermes chat -q "/wh:..."` 
+- `oneshot_args` 빈 list면 binary 직후 prompt: `agent "/wh:..."` (PATH 단일 토큰)
+- stdin 모드 custom agent는 v0.1.0 미지원 — wrapper script + binary path로 메인테이너 우회
+
+**vault_id 정규식 강제** (ADR-0011·0012 정합):
+- vault_id는 wikihub.yaml 스키마 검증에서 `^[a-z][a-z0-9_]*$` 강제 (Step 1)
+- 정규식 통과한 vault_id만 ExecStart prompt에 substitution → injection 방지
+
+**예시 (Hermes default)**:
+```
+ExecStart=/usr/local/bin/hermes -z "/wh:ingest --vault gdrive"
+```
+
+**예시 (codex 가설 — F4 검증 후 확정)**:
+```
+ExecStart=/usr/local/bin/codex exec "/wh:ingest --vault gdrive"
+```
+
+### Step 3. agent skill 메타 갱신
+
+agent CLI에 wikihub skill의 메타(vault 목록, 운영 모드 등) 알림. 변경된 항목:
+- 신규/제거된 vault → skill description 갱신
+- skill_prefix가 fallback으로 변경된 경우 (install.sh가 yaml에 기록한 값을 agent에 전달)
+
+agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh:setup은 그 등록 상태를 재확인·갱신만.
+
+### Step 4. systemd 반영 (v0.1.0 v5 — ADR-0022 흐름 역전 정합)
+
+- `systemctl --user daemon-reload`
+- `--enable` 플래그 시: `lint.timer` (+ 조건부 `disk-watch.timer`) **만** `enable --now`. **vault-ingest.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
+- 미플래그 시: 권장 액션 출력만.
+
+### Step 5. 보고
+
+```
+SETUP 결과 — 2026-05-13 15:30 KST
+
+✓ wikihub.yaml 스키마 OK (1 vault enabled: gdrive)
+✓ vault gdrive: OAuth 토큰 유효 (Workspace Internal, refresh 가능)
+✓ wiki/ 디렉토리: 생성 0, 기존 5
+✓ _state/gdrive/: 생성 0, 기존 3
+✓ agent skill_prefix: wh:
+
+systemd unit 갱신:
+  gdrive-ingest.service (interval 600s)
+  gdrive-ingest.timer
+  lint.service (interval 24h)
+  lint.timer
+  ops-alert.service
+
+daemon-reload 완료.
+
+다음 권장 액션 (--enable 미사용 시):
+  systemctl --user enable --now gdrive-ingest.timer lint.timer
+  systemctl --user list-timers
+```
+
+### Step 5.5. rclone Service Account 등록 (ADR-0025 Path C+ + ADR-0029 SA 정본, vault 별 1회성)
+
+**진입 조건**: Step 1~5 통과 + `vaults[*].options.rclone_remote_name` 정의 + `~/.config/rclone/rclone.conf` 의 해당 remote 미등록 + `~/wikihub-instance/.credentials/sa_<vault_id>.json` 배치 완료 (SA JSON key, chmod 0600).
+
+**SA 사전 준비** (메인테이너 1회):
+1. Google Cloud Console → IAM & Admin → Service Accounts → "Create service account"
+2. Drive API 활성화 (Cloud Console → APIs & Services → Library → "Google Drive API" → Enable)
+3. SA 의 키 발급: Service Accounts → 본 SA → Keys → "Add Key" → "Create new key" → JSON → download
+4. **dev box (macOS) 로컬 보관** — repo working tree 외부 격리:
+   ```bash
+   mkdir -p ~/.credentials/wikihub && chmod 0700 ~/.credentials ~/.credentials/wikihub
+   mv ~/Downloads/<project>-<hash>.json ~/.credentials/wikihub/sa_<project>.json
+   chmod 0600 ~/.credentials/wikihub/sa_<project>.json
+   ```
+   repo 내부에 절대 두지 말 것 — `.gitignore` 패턴 의존 금지 (메인테이너 가이드 §1 Separation of Concerns).
+5. **운영 VM/서버 로 scp**:
+   ```bash
+   ssh user@oci 'mkdir -p ~/wikihub-instance/.credentials && chmod 0700 ~/wikihub-instance/.credentials'
+   scp ~/.credentials/wikihub/sa_<project>.json user@oci:~/wikihub-instance/.credentials/sa_<vault_id>.json
+   ssh user@oci 'chmod 0600 ~/wikihub-instance/.credentials/sa_<vault_id>.json'
+   ```
+   로컬 파일명은 `sa_<project>.json` (Cloud project 1:1), 운영 파일명은 `sa_<vault_id>.json` (vault 1:1 — yaml `credentials_path` 와 정합).
+6. Drive vault 폴더 (`root_folder_id`) UI → "Share" → SA 이메일 (`<sa>@<project>.iam.gserviceaccount.com`) **Editor** 권한 부여
+
+**Interactive mode** (default — 운영자가 SSH 세션 에 직접 입력):
+
+1. `rclone config` 실행 — 안내
+2. `n` (new remote) → name 입력 (`wikihub.yaml.vaults.<id>.options.rclone_remote_name` 과 정합, 권장: `gdrive`)
+3. type 선택: `18` (drive)
+4. client_id/secret: 빈칸 (rclone 기본 사용)
+5. scope: `1` (full access)
+6. **service_account_file**: `~/wikihub-instance/.credentials/sa_<vault_id>.json` (절대 경로) — SA JSON key (ADR-0029)
+7. Edit advanced config: `n`
+8. Use auto config — SA 채택 시 browser OAuth flow 불필요, 자동 skip
+9. Configure as Shared Drive: `n` (메인테이너 Personal Drive 의 폴더 공유 모델)
+10. 완료 후 `~/.config/rclone/rclone.conf` 에 `[<remote_name>]` + `service_account_file = ...` 라인 확인
+11. **`chmod 0600 ~/.config/rclone/rclone.conf`** 실행 — SA 키 경로 노출 차단 (v9 R12-MED-2 정합)
+
+**Non-interactive 빠른 등록** (권장 — ADR-0029 자동화 친화):
+```bash
+rclone config create <remote_name> drive \
+    scope=drive \
+    service_account_file=$HOME/wikihub-instance/.credentials/sa_<vault_id>.json
+chmod 0600 ~/.config/rclone/rclone.conf
+```
+
+**검증**:
+- `rclone lsd <remote_name>:` 로 SA 동작 확인 (Drive root listing — SA 공유받은 폴더만 보임)
+- 실패 시: SA 이메일이 폴더에 공유됐는지 + `private_key` 유효성 (Cloud Console → SA → Keys 의 상태 확인)
+
+**책임 분배 (v9 R12-MED-2)**:
+
+| 책임자 | 위치 | 시점 |
+|---|---|---|
+| install.sh §Step 4.5 `_enforce_rclone_conf_perms` | 자동 chmod 0600 (정본 enforce) | 매 install.sh 호출 |
+| setup.md §Step 5.5 step 11 | 운영자 수동 setup 직후 한 번 더 확인 | 첫 OAuth 발급 시 |
+| mount.service | `Environment=RCLONE_CONFIG=` 만 주입 (권한 검증은 install.sh 책임) | mount 시작 시 |
+
+ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진입 가능.
+
+### Step 6. 첫 ingest prompt + timer enable 게이트 (v0.1.0 v5 신설 — ADR-0022)
+
+**진입 조건**: `--enable` 플래그 + Step 1~5 통과 + `bootstrap_allowed: true` vault 1개 이상.
+
+**동작**:
+
+1. enabled vault 중 `bootstrap_allowed: true` 인 vault 별로 prompt:
+   ```
+   vault 'gdrive' 의 첫 ingest 를 지금 실행하시겠습니까? [Y/n] (default Y)
+   ```
+   비대화 모드 (`--run-first-ingest` / `--skip-first-ingest` / `WIKIHUB_FIRST_INGEST=yes/no` env / `/dev/tty` 부재 시 자동 비대화) 면 prompt skip + 사전 결정 사용.
+
+2. **`Y` 응답**:
+   - `vault-fetch.py --vault <id> --bootstrap` 직접 호출 (timer 우회).
+   - stdout JSON 보고 + exit code 캡처.
+   - **exit 0**: timer enable + `bootstrap_allowed: true → false` atomic write.
+   - **exit 75 + cursor 존재**: timer enable + `bootstrap_allowed` 환원 + “일시 결함, 다음 사이클 재시도” 안내.
+   - **exit 75 + cursor 미생성**: timer enable **보류** (fatal loop 회피) + “cursor 미생성, 진단 후 수동 enable” 안내.
+   - **exit 2**: timer enable **보류** + `last_failure.json` 영속화 (ADR-0024) + “fatal — 진단 후 수동 enable” 안내.
+
+3. **`N` 응답**: vault-fetch + timer enable 모두 skip.
+
+4. **bootstrap_allowed 환원** (`Y` + exit 0/75 with cursor 시):
+   - `wikihub.yaml` 의 해당 vault `bootstrap_allowed: true → false` atomic write (fsync 정합).
+   - yaml writer 는 본 명령의 새 책임 (ADR-0009 확장).
+
+5. **timer enable** (`Y` + exit 0/75 with cursor 시):
+   - `systemctl --user enable --now {vault_id}-ingest.timer`.
+
+**비대화 모드 spec**:
+
+| flag / env | 동작 |
+|---|---|
+| `--run-first-ingest` | 모든 vault 의 prompt 자동 `Y` |
+| `--skip-first-ingest` | 모든 vault 의 prompt 자동 `N` |
+| `WIKIHUB_FIRST_INGEST=yes` | `--run-first-ingest` 동등 |
+| `WIKIHUB_FIRST_INGEST=no` | `--skip-first-ingest` 동등 |
+| 미지정 + `/dev/tty` 부재 | default `Y` |
+
+## 출력 산출물
+
+| 변경 대상 | 조건 |
+|---|---|
+| `wiki/` 카테고리 디렉토리 | 없을 때만 생성 |
+| `_state/{vault_id}/` 초기 파일 | 없을 때만 생성 |
+| `~/.config/systemd/user/*.service`·`*.timer` | 매 호출 시 yaml 값으로 갱신 (덮어쓰기 — yaml이 정본) |
+| systemd state | daemon-reload + (선택) enable. **vault-ingest.timer 는 Step 6 결과 위임** |
+| agent skill 메타 | 변경 시만 갱신 |
+| `wikihub.yaml` (bootstrap_allowed: true → false) | Step 6 의 `Y` + (exit 0 또는 exit 75 with cursor) 시만. atomic write + fsync. **ADR-0022 정본** |
+
+## 실패 처리
+
+| 실패 시점 | 동작 |
+|---|---|
+| wikihub.yaml 스키마 위반 | stdout 보고 + exit 1. unit 동기화 안 함 |
+| OAuth 토큰 무효 (일부 vault) | 해당 vault의 unit은 생성하되 enable 권장에서 제외. 보고 + exit 0 |
+| OAuth 토큰 무효 (모든 vault) | 보고 + exit 1 (운영 시작 불가 상태) |
+| systemd unit 파일 쓰기 실패 | exit 2 (권한 의심) |
+| daemon-reload 실패 | exit 2 + ops-alert 트리거 |
+| agent skill 갱신 실패 | 보고 + exit 0 (skill 동작 자체에는 영향 없을 가능성. 다음 호출에서 재시도) |
+| Step 6 첫 ingest exit 2 | timer enable 보류 + 사용자 안내 + 보고에 "timer 비활성" 명시 + exit 0 (Step 6 자체는 정상 종료) |
+| Step 6 첫 ingest exit 75 + cursor 미생성 | timer enable 보류 (exit 2 동등 취급, fatal loop 회피) + 사용자 안내 + exit 0 |
+| Step 6 yaml writer 실패 (bootstrap_allowed 환원 실패) | 안내 + timer enable 은 진행 + exit 0 (위생 결함이라 fatal 아님) |
+
+## 멱등성 보장
+
+- 디렉토리·초기 state는 존재 확인 후 생성
+- unit 파일은 매번 덮어쓰기 (yaml = always 정본)
+- `--enable`은 idempotent
+
+## install.sh와의 관계
+
+| 항목 | install.sh (1회 bootstrap + 정본 update) | /wh:setup (yaml 변경 시 반복) |
+|---|---|---|
+| OS deps (Python venv, libs) | ✓ | — |
+| 정본 파일 fetch (`_system/`, `scripts/`) | ✓ | — |
+| `wikihub.yaml.example` → `wikihub.yaml` 복사 | ✓ (없을 때만) | — |
+| agent skill 초기 등록 | ✓ | — (메타 갱신만) |
+| wiki/·_state/ 디렉토리 | — | ✓ |
+| systemd unit 생성·갱신 | — | ✓ |
+| OAuth 토큰 검증 | — | ✓ |
+| daemon-reload·enable | — | ✓ |
+
+## 관련 ADR
+
+- ADR-0003 OAuth (Step 1 토큰 검증)
+- ADR-0006 unified orchestration (ExecStart의 명령 형식)
+- ADR-0007 state all JSON (Step 1 초기 파일)
+- ADR-0008 lint 권한 (lint.timer는 기본 모드만)
+- ADR-0009 setup 책임 (본 명령의 정본)
+- ADR-0010 운영 도구 책임 분할 (install.sh와의 경계)
+- ADR-0011 skill namespace prefix (Step 3 메타 갱신 시 prefix 적용)

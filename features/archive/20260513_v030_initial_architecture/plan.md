@@ -31,6 +31,7 @@
 | ADR-0001 | source-collision-policy | 소스 페이지 충돌 정책 (α/β/γ) |
 | ADR-0002 | hermes-invocation-interface | Hermes 호출 인터페이스 (CLI/HTTP/IPC) |
 | ADR-0003 | headless-oauth-strategy | OAuth 헤드리스 방식 (token-scp / device-code) |
+| ADR-0004 | drive-access-mechanism | Drive 접근 메커니즘 (Direct API vs gws CLI) — Step 2 진행 중 추가 발의 |
 
 각 ADR은 Step 2(분석및설계)에서 결정 시점에 `docs/adr/`에 생성된다.
 

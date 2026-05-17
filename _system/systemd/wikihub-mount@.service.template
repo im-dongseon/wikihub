@@ -1,0 +1,43 @@
+[Unit]
+Description=WikiHub rclone mount — %i
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+OnFailure=ops-alert.service
+
+[Service]
+Type=simple
+WorkingDirectory={instance_root}
+Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=RCLONE_CONFIG={rclone_config_path}
+ExecStartPre=-/bin/fusermount3 -uz {instance_root}/vault/%i
+ExecStartPre=/bin/mkdir -p {instance_root}/vault/%i
+ExecStart={rclone_bin} mount {remote_name_for_%i}: {instance_root}/vault/%i \
+  --vfs-cache-mode minimal \
+  --vfs-cache-max-size {vfs_cache_max_size} \
+  --drive-export-formats docx,xlsx,pptx,md \
+  --dir-cache-time 5m \
+  --log-level NOTICE \
+  --rc \
+  --rc-addr 127.0.0.1:{rc_port_for_%i}
+ExecStop=/bin/fusermount3 -u {instance_root}/vault/%i
+Restart=always
+RestartSec=10s
+RemainAfterExit=no
+SyslogIdentifier=wikihub-mount-%i
+
+# ExecStartPre= -fusermount3 -uz — kill -9 등 비정상 종료 시 stale FUSE mount entry 가
+#   ExecStartPre 의 mkdir 을 "Transport endpoint is not connected" 로 fail 시키는 restart loop
+#   결함 차단 (V<N> Phase 2 결함 #3, 2026-05-17). `-` prefix 로 exit code 무시 (mount 안 됐을
+#   땐 자연스럽게 no-op). `-z` lazy unmount — busy mount (열린 파일 / cwd 안에 있는 process)
+#   에서도 detach 강제, restart loop 재발 회피 (R16-H5 V<N> R16 SRE 리뷰, 2026-05-17).
+# Type=simple — daemon 상시 살아있음. process 시작 시점이 active (FUSE 준비 완료 시점 아님 — assert_mount_alive 가 보강).
+# Restart=always + StartLimitBurst=5/300s — 5회 fail/5min 초과 시 permanently failed → OnFailure=ops-alert.service.
+# --rc-addr — vault@.service 가 mount.vfs_refresh 호출. per-vault port (yaml.vaults[*].options.rclone_rc_port).
+# --vfs-cache-mode minimal — ADR-0025 β2. β3(full) 은 Google native (Docs/Sheets/Slides) read=0 silent fail (V15a 진단, 2026-05-17). minimal 은 stream read path 라 backend export 자동 트리거 + 큰 파일 캐시 효과 유지.
+# --drive-export-formats — Google native → markdown/docx/xlsx/pptx 변환 우선순위. RWFileHandle 우회 stream read 시 backend export call 에 적용.
+# --log-level NOTICE — INFO 는 token 노출 위험 (ADR-0025 v9). trouble-shoot 시 RCLONE_LOG_LEVEL=DEBUG override.
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=WikiHub lint timer
+
+# OnBootSec=5min: reboot 직후 vault-ingest 다음으로 fire
+# OnUnitInactiveSec={lint_interval_hours}h: default 24h (wikihub.yaml.operations.lint_interval_hours)
+# !! systemd unit syntax — trailing inline comment 미지원 (V<N> 결함 #5, 2026-05-17)
+[Timer]
+Unit=lint.service
+OnBootSec=5min
+OnUnitInactiveSec={lint_interval_hours}h
+Persistent=true
+AccuracySec=15min
+
+[Install]
+WantedBy=timers.target

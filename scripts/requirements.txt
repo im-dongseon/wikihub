@@ -1,0 +1,8 @@
+# Runtime dependencies (OCI server)
+# OAuth & Google Drive 접근은 gws CLI subprocess가 담당 (ADR-0014) — google-* lib는 dev only
+
+PyYAML>=6.0,<7
+python-pptx>=0.6.21,<1
+python-docx>=1.1.0,<2
+openpyxl>=3.1.0,<4
+pdfminer.six>=20231228

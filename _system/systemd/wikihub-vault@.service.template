@@ -1,0 +1,41 @@
+[Unit]
+Description=WikiHub vault ingest — %i
+After=network-online.target wikihub-mount@%i.service
+Wants=network-online.target
+Requires=wikihub-mount@%i.service
+OnFailure=ops-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={instance_root}
+# WorkingDirectory 가 부재 시 systemd 가 즉시 203/CHDIR fail — 운영자가 instance.root 디렉토리를
+# 직접 변경한 후 mkdir 누락 시 fatal. /wh:setup 의 Step 1 (디렉토리 ensure) 가 매 호출 보장 책임.
+# R10 CRIT-2 추가 안전망: ExecStartPre 가 yaml 편집 후 setup 미호출 + reboot 케이스 자가 복구.
+ExecStartPre=/bin/mkdir -p {instance_root}
+Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WIKIHUB_YAML={instance_root}/wikihub.yaml
+Environment=GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={credentials_path}
+Environment=RCLONE_RC_ADDR=127.0.0.1:{rc_port_for_%i}
+ExecStart={agent_invocation} "{skill_prefix}ingest --vault %i"
+SuccessExitStatus=0 75
+TimeoutStartSec=15min
+SyslogIdentifier=wikihub-vault-%i
+
+# v7~v9 (ADR-0025·0026·0027 — Path C+ rclone mount 도입):
+# After/Requires=wikihub-mount@%i.service — mount 가 active 상태에서만 vault@ fire.
+#   mount permanently failed (StartLimitBurst 초과) 시 vault@ trigger 가 cancel — mount@ 의
+#   OnFailure=ops-alert 가 직접 발화 (layer 2, ADR-0024 v9). ops-alert.py 가 last_failure.json
+#   부재 시 journalctl --user -u wikihub-mount@%i tail 을 fallback diagnostic 첨부.
+#   mount 가 starting (Type=simple active, FUSE 미준비) 인 race 는 vault-fetch.py 의
+#   assert_mount_alive 가 Retryable 로 흡수 → exit 75 → SuccessExitStatus 로 success 분류 →
+#   ops-alert 오발화 차단. assert_mount_alive 가 MOUNT_RETRYABLE_FATAL_THRESHOLD (default 6,
+#   약 1시간) 회 누적되면 VaultSyncFatal escalate (layer 1).
+# Environment=RCLONE_RC_ADDR — mount.py 의 vfs_refresh 가 호출 (ADR-0026 K1 race window 차단).
+#   per-vault port 는 wikihub.yaml.vaults[*].options.rclone_rc_port 가 정본.
+
+# Restart= 미설정 (F1 §4.8.2 + ADR-0021 D1 surgical lift, R15-L3 명확화) — oneshot 의 재시작은 timer 책임.
+# exit 75 (Retryable) 는 SuccessExitStatus 로 success 분류 → journal 정상 항목 + 다음 timer fire 가 자연 재시도.
+# exit 2 (Fatal) 는 failure 로 분류 → OnFailure=ops-alert.service 발동 (ADR-0024) + 다음 timer 도 재시도.
+# 운영자가 cursor·credentials 등 개입 전까지 fatal 사이클은 ops-alert dedup 정책 (alerted_at + failed_count) 으로 빈도 제어.
+
+# [Install] 미작성 — timer 가 service 를 trigger. service 자체는 enable 안 함.

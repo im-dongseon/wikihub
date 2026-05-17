@@ -1,0 +1,20 @@
+[Unit]
+Description=WikiHub lint — 위키 일관성 검사 (ADR-0008)
+After=network-online.target
+Wants=network-online.target
+OnFailure=ops-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={instance_root}
+# R10 CRIT-2: instance.root 미존재 시 자가 복구 — yaml 편집 후 setup 미호출 케이스 안전망.
+ExecStartPre=/bin/mkdir -p {instance_root}
+Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WIKIHUB_YAML={instance_root}/wikihub.yaml
+ExecStart={agent_invocation} "{skill_prefix}lint"
+SuccessExitStatus=0 75
+TimeoutStartSec=10min
+SyslogIdentifier=wikihub-lint
+
+# Restart= 미설정 (F1 §4.8.2 정합) — oneshot 의 재시도는 timer 책임.
+# [Install] 미작성 — timer 가 service 를 trigger.

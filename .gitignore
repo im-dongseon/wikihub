@@ -3,6 +3,14 @@
 wikihub.yaml
 .wikihub
 
+# Service Account / OAuth credentials — NEVER commit (ADR-0029)
+gen-lang-client-*.json
+sa_*.json
+token_*.json
+*-sa-key.json
+*-credentials.json
+.credentials/
+
 # OS-specific files
 .DS_Store
 Thumbs.db
