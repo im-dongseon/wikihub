@@ -82,6 +82,31 @@ gws OAuth (macOS dev box 의 `scripts/auth_gdrive.py`) 와 token 분리 — 같�
 
 ---
 
+## 설치 / 업데이트 (ADR-0010 + ADR-0030)
+
+운영 시 install 과 update 는 **동일 명령**. install.sh 가 `$WIKIHUB_HOME/_system/VERSION` + `.git` 존재 여부로 자동 분기.
+
+```bash
+# 표준 — install / update 공용
+curl -fsSL --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
+
+# 특정 tag 명시 (rollback 포함)
+curl -fsSL ... | bash -s -- --version v0.1.0
+
+# 명시적 destructive 재설치 (5초 confirm + safety guard)
+curl -fsSL ... | bash -s -- --force-fresh
+```
+
+동작:
+- **fresh install** (`_system/VERSION` 부재): `git clone` + venv + systemd render + 운영자 안내.
+- **update** (`_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
+- 현재 버전 조회: `cat $WIKIHUB_HOME/_system/VERSION` (default `~/wikihub/_system/VERSION`).
+
+상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`features/20260517_update_mode/analysis_and_design.md`](features/20260517_update_mode/analysis_and_design.md).
+
+---
+
 ## 개발 방법론
 
 WikiHub는 5단계 Feature-based Workflow를 따릅니다. 상세 가이드: [`AGENTS.md`](AGENTS.md), [`docs/agent_dev_guide.md`](docs/agent_dev_guide.md).
@@ -152,10 +177,10 @@ v0.1.0 feature 진행 상황 (2026-05-17 기준):
 | **F3: `vault_gdrive_api`** | `scripts/sync.py` + Drive API + cursor/file_map 영속화 | ✅ archive |
 | **F4: `install_runtime`** | `install.sh` + systemd unit (mount@/vault@/timer/ops-alert/lint) + rclone mount + vfs/refresh + SA 인증 (ADR-0029) | ✅ archive (2026-05-17) |
 | **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh:*` skill ↔ Hermes skill 시스템 정합화. F4 surface 의 결함 #12 lock | ⏸ 진행 예정 |
-| `update_mode` | `install.sh --update` flag + Step 2 idempotent + systemd auto-redeploy. F4 의 결함 #A·#B·#C·#D 일괄 fix | ⏸ 진행 예정 |
+| **`update_mode`** | `install.sh` dual-mode (fresh / update) + `_system/VERSION` detect + tag `latest` ref + rollback trap + systemd orchestration + log rotation. F4 의 결함 #A·#B·#C·#D + R16-L2 일괄 fix. ADR-0030 신설 | ✅ archive (2026-05-17) |
 | **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
 
-v0.1.0 acceptance = F4 (✅) + F5 + (선택) update_mode. v0.1.0 일괄 deployment 는 F5 완료 후 진행.
+v0.1.0 acceptance = F4 (✅) + F5 + update_mode (✅). v0.1.0 일괄 deployment 는 F5 완료 후 진행.
 
 자세한 backlog (R15·R16 Could 8건 + 결함 surface) 는 [`features/backlog.md`](features/backlog.md) 참조.
 

@@ -42,77 +42,26 @@
 
 실패 시: stdout 상세 보고 + exit 1. unit 동기화는 일부만 진행하거나 전체 중단 (정책: 스키마 위반은 전체 중단, OAuth 토큰 무효는 해당 vault만 unit 갱신 제외).
 
-### Step 2. systemd unit 동기화 (write)
+### Step 2. systemd unit 동기화 (책임 이관 — 2026-05-17, ADR-0030)
 
-F4 산출물인 `_system/systemd/`의 unit template을 읽어 yaml 값으로 instance화한 결과를 `~/.config/systemd/user/`에 작성.
-
-대상 (v9 — ADR-0025 instantiated `@` 패턴):
-- 각 enabled vault에 대해 `wikihub-vault@<vault_id>.service` + `wikihub-vault@<vault_id>.timer` + `wikihub-mount@<vault_id>.service` (v9 신규)
-- 단일 `lint.service` + `lint.timer`
-- 단일 `ops-alert.service`
-- 조건부 (operations.disk.* 활성): `disk-watch.service` + `disk-watch.timer`
-
-template 치환 변수 (F4 가 unit template 정의 + /wh:setup 의 Python helper 가 substitution):
-- `{vault_id}` — vault id
-- `{sync_interval_sec}` — 해당 vault 의 sync_interval_sec
-- `{lint_interval_hours}` — operations.lint_interval_hours
-- `{instance_root}` — instance.root
-- `{agent_invocation}` — `agent.binary` + `agent.oneshot_args` 공백 join (ADR-0012)
-- `{skill_prefix}` — agent.skill_prefix (default `"wh:"`, fallback `"wh-"` per ADR-0011)
-- `{venv_path}` — `{wikihub_home}/.venv_path` 사이드카 파일에서 read (install.sh Step 3 이 기록 — ADR-0020·0019)
-- `{credentials_path}` — `vaults[id].options.credentials_path` (per-vault. `~` 는 `os.path.expanduser` 로 expand)
-- `{wikihub_home}` — `WIKIHUB_HOME` env (default `~/wikihub`. install.sh 가 export — ADR-0023)
-- **`{rclone_bin}`** (v9, ADR-0025) — `/usr/local/bin/rclone` (install.sh Step 4.5 가 install location lock)
-- **`{rclone_config_path}`** (v9, ADR-0025) — `${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}`
-- **`{vfs_cache_max_size}`** (v9, ADR-0025) — `operations.vfs_cache_max_size` (default `10G`)
-- **`{rc_port_for_<vault_id>}`** (v9, ADR-0026) — `vaults[*].options.rclone_rc_port` 에서 vault_id 별로 lookup (default 5572 + 순번)
-- **`{remote_name_for_<vault_id>}`** (v9, ADR-0025) — `vaults[*].options.rclone_remote_name` 에서 vault_id 별로 lookup
-
-#### Substitution 순서 (v9 R13-MED-2 — 2-pass)
-
-`wikihub-mount@.service.template` + `wikihub-vault@.service.template` 의 systemd `%i` 와 Python `.format_map()` brace 가 한 template 에 공존. Python substitution helper 는 **2-pass** 처리:
-
-1. **Pass 1 — `%i` 전치환**: template 내 모든 `%i` 를 vault_id literal 로 치환. 예:
-   - `{rc_port_for_%i}` → `{rc_port_for_gdrive}`
-   - `{remote_name_for_%i}` → `{remote_name_for_gdrive}`
-   - `ExecStart=... mount @%i.service ...` → `ExecStart=... mount @gdrive.service ...` (만약 ExecStart 본문에 literal `%i` 가 있다면)
-2. **Pass 2 — `.format_map(subst_dict)` 로 brace 치환**: `subst_dict` 에 vault_id 가 합쳐진 key 들이 등록되어 lookup
-
-이유: systemd `%i` 는 systemd 런타임에 unit 이름 (`wikihub-mount@gdrive.service`) 에서 추출하여 ExecStart 토큰 해석 시 적용. Python `.format_map()` 은 unit 파일 deploy 전 stage. 두 메커니즘이 같은 token (`%i`) 으로 보이나 stage 가 분리됨 — Python helper 가 brace 안의 `%i` 를 먼저 명시 치환해야 `.format_map()` 이 정확한 key 를 lookup. ADR-0019 의 단일 pass 패턴을 per-vault 키 prefix 방식으로 확장.
-
-deploy 시점:
-- install.sh §Step 6 `_step6_agent_skill` 또는 /wh:setup 의 본 Step 2 가 호출 — vault_id 별로 substitution dict 산출 + 2-pass + 결과 파일을 `~/.config/systemd/user/wikihub-mount@<vid>.service` 등으로 write
-- systemd 가 unit enable 후 시작 시점에 `%i` 가 unit 이름에서 추출되어 ExecStart 의 `%i` (이미 Python pass 1 으로 치환됨) 와 정합
-
-본 spec은 unit ini 내용을 정의하지 않음 — **F4가 unit template의 single source of truth**. 본 명령은 template 적용 helper.
-
-#### Step 2.x ExecStart 조립 규약 (B4 — F4·F5 정본)
-
-`ExecStart` 라인 형식 (systemd parser 기준):
-```
-ExecStart={agent.binary} {agent.oneshot_args 공백 join} "{prompt}"
-```
-
-**규칙**:
-- prompt 전체는 systemd `"..."` 1개 토큰으로 감싸야 함 (slash·공백·인자 모두 포함)
-- prompt 내부에 큰따옴표 사용 금지 (systemd escape 미지원 — v0.1.0은 slash command 인자에 큰따옴표 안 들어감 가정. 발생 시 별도 ADR로 wrapper script 도입 검토)
-- `oneshot_args` 다중 토큰 예: `["chat", "-q"]` → `hermes chat -q "/wh:..."` 
-- `oneshot_args` 빈 list면 binary 직후 prompt: `agent "/wh:..."` (PATH 단일 토큰)
-- stdin 모드 custom agent는 v0.1.0 미지원 — wrapper script + binary path로 메인테이너 우회
-
-**vault_id 정규식 강제** (ADR-0011·0012 정합):
-- vault_id는 wikihub.yaml 스키마 검증에서 `^[a-z][a-z0-9_]*$` 강제 (Step 1)
-- 정규식 통과한 vault_id만 ExecStart prompt에 substitution → injection 방지
-
-**예시 (Hermes default)**:
-```
-ExecStart=/usr/local/bin/hermes -z "/wh:ingest --vault gdrive"
-```
-
-**예시 (codex 가설 — F4 검증 후 확정)**:
-```
-ExecStart=/usr/local/bin/codex exec "/wh:ingest --vault gdrive"
-```
+> **책임 이관 (update_mode feature, ADR-0030)**: v0.1.0 의 update_mode feature 부터 **systemd unit template 의 render·daemon-reload 책임은 install.sh 로 이관**. `/wh:setup` 은 본 Step 2 를 더 이상 수행하지 않음. 이유:
+>
+> 1. install.sh 가 정본 변경 (`_system/systemd/*.template` 갱신) 직후 자동 render → unit 갱신 race window 차단.
+> 2. install.sh 가 hermes·F5 가용성과 독립적으로 동작 — F5 미완 상태에서도 update path full functional.
+> 3. `/wh:setup` 은 hermes skill 메타 갱신·yaml validate·first ingest prompt 책임으로 축소.
+>
+> install.sh 의 책임:
+> - `scripts/_helpers/render_systemd_units.py --render --out ~/.config/systemd/user/` 호출.
+> - 2-pass substitution + idempotent atomic write + enabled=false vault 의 stale unit 정리.
+> - render 후 `systemctl --user daemon-reload`.
+> - 대상 unit 목록 · 치환 변수 · substitution 순서의 정본 spec 은 [features/20260517_update_mode/analysis_and_design.md §6.1](../../features/20260517_update_mode/analysis_and_design.md#61-scripts_helpersrender_systemd_unitspy-contract) 의 helper Contract.
+>
+> 본 step 은 호환을 위해 placeholder 로 유지 — `/wh:setup` 이 호출됐을 때 운영자 안내만:
+>
+> ```
+> Step 2: skip — install.sh 가 systemd unit render 책임 (ADR-0030).
+>         최신 spec 적용은 \`install.sh\` 재호출.
+> ```
 
 ### Step 3. agent skill 메타 갱신
 

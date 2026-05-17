@@ -19,6 +19,9 @@ Thumbs.db
 *.bak
 /tmp/
 
+# install.sh runtime sidecar (Step 3 venv path 기록) — ADR-0020·0019, 매 호출 재생성
+.venv_path
+
 # Python
 __pycache__/
 *.py[cod]

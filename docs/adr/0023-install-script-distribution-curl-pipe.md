@@ -75,3 +75,14 @@ curl -fsSL --proto '=https' --tlsv1.2 \
 
   - v0.1.0 의 보안 모델 = 메인테이너 GitHub 계정 보안 + TLS + shasum (gws) 의 3중. v0.2.x 에서 signed commit/tag · CodeSign · reproducible build 추가 계획.
   - V11 verification 이 idempotency 회귀 방지 (4 시나리오 — wipe+clone 재구성, 운영 state 무영향, safety guard fail-fast, origin 검증).
+
+## Note (2026-05-17, feature `update_mode`)
+
+본 ADR 의 clean wipe 패턴 (`rm -rf + git clone`) 의 **scope 가 fresh install + `--force-fresh` 명시 호출** 로 한정. update path 는 ADR-0030 (`update workflow orchestration`) 의 `git fetch + reset --hard` 로 분리.
+
+- detect 시그널 = `$WIKIHUB_HOME/_system/VERSION` AND `$WIKIHUB_HOME/.git` 존재. 둘 다 있으면 update path, 둘 다 없으면 fresh, 한쪽만 있으면 fatal partial state.
+- 운영자가 의도적 clean wipe 가 필요한 경우 `--force-fresh` flag 명시 — 5초 confirm + 3중 safety guard (system path · git+origin · cwd) 통과 후 진행.
+- 본 ADR 의 "매 호출 동일 상태" idempotency 는 update path 에서도 보존 — 동일 ref 재호출 시 `git fetch + reset` 의 no-op 처리로 동등.
+- Decision §`--update` flag 비채택은 유지 — update path 진입은 ADR-0030 의 detect 시그널 자동 분기 (flag 없음).
+
+Status 변경 없음. 의미론 일관, 운영 scope 만 명시화.
