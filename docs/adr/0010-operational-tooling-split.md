@@ -178,3 +178,12 @@ precondition 미충족 시 install.sh는 fail-fast + remediation 안내 (예: `a
 - **install.sh `_step6_agent_skill`** 책임 — Hermes 의 SKILL.md materialization (frontmatter + `_system/commands/<cmd>.md` 본문 결합) + `~/.hermes/config.yaml` 의 `skills.external_dirs` 패치 + 등록 검증. ADR-0032 정본.
 - **playbook path 정본** — `_system/commands/<cmd>.md` 유지 (ADR-0006 정합, F5 의 5.2.B 채택). `_system/skills/_generated/wh-<cmd>/SKILL.md` 는 install-time build artifact (git untracked).
 - **Hermes 미설치 시** — `_step6_agent_skill` 가 detect → `SKIP_SYSTEMD_RENDER` flag → systemd unit render/enable 둘 다 skip. install.sh exit 0. 운영자가 Hermes 설치 후 재호출 권장 (CR2-CRIT-1 해결).
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
+
+Dev/Ops Zone 분리의 path 구체화:
+
+- **install.sh** = `$WIKIHUB_SRC` (XDG `~/.local/share/wikihub/src/`) 책임 — git clone target, 모든 시스템 코드 (install.sh, _system/, scripts/, _system/skills/_generated/).
+- **`/wh-setup`** = `$WIKIHUB_HOME` (`~/wikihub/`) 책임 — 운영 자산 dir. yaml materialize + state + wiki/vault.
+
+이전 model 의 `WIKIHUB_HOME` (repo 의미) + `WIKIHUB_INSTANCE_ROOT` (운영 의미) 가 ADR-0034 로 변수 swap. 본 ADR-0010 의 책임 분리 원칙 보존 + path 변경만 정합.

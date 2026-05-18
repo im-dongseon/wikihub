@@ -105,3 +105,21 @@ F4 backlog 의 결함 #C·#D + R16-L2 + design review 3 round (R1·R2·R3) 의 C
 본 ADR §Decision sub-3 의 trap rollback 명세 (`_step8_systemd_render` 재호출) 는 함수명 정확 — F5 의 v1 오기 (`_step8_best_effort_wh_setup`) 는 v3 에서 정합.
 
 Status 변경 없음. 부정/제약 항목 확장.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
+
+ADR-0034 data-first layout invert 후 본 ADR 의 4 sub-decision 모두 path 변경만 정합:
+
+### cwd 변경
+
+- **`_step2_update`**: cwd = `$WIKIHUB_SRC` (이전 `$WIKIHUB_HOME` 의미였음). git fetch + reset 가 시스템 코드 dir 한정. 운영 자산 (`$WIKIHUB_HOME`) 절대 무관.
+- **`_step8_systemd_render`**: yaml read = `$WIKIHUB_HOME/wikihub.yaml`. render_systemd_units.py 실행 = `$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py`.
+
+### sub-decision 정합
+
+- **sub-1 (stop/start sequence)**: `migrate_layout.sh` 의 helper 가 ADR-0030 패턴 reuse — vault@.timer → vault@.service grace 15min → mount@. legacy migration helper 가 본 패턴 직접 호출.
+- **sub-2 (unstaged guard)**: `git status --porcelain` cwd 변경 ($WIKIHUB_SRC). `.git/index.lock` 검증 동일.
+- **sub-3 (rollback trap)**: `PRE_UPDATE_REF="$(git -C "$WIKIHUB_SRC" rev-parse HEAD)"`. rollback 시 `git -C "$WIKIHUB_SRC" reset --hard $PRE_UPDATE_REF`. migrate_layout.sh 의 phase-aware rollback trap 은 본 ADR 패턴의 architectural extension.
+- **sub-4 (ref resolution chain)**: `--version > BRANCH > latest > local cache > main HEAD` — 모두 `git -C "$WIKIHUB_SRC"` 컨텍스트.
+
+Status 변경 없음. cwd 변경만, 4 sub-decision invariant 보존.

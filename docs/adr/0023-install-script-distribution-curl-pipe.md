@@ -156,3 +156,27 @@ git -C "$WIKIHUB_HOME" checkout
 - F5 의 외부 자산 mutate 는 **운영자 동의 surface 추가 layer**: 명시 prompt (interactive) 또는 NONINTERACTIVE=1 환경 변수 동의 record. wikihub 가 외부 자산을 silent mutate 하지 않음 보장.
 
 Status 변경 없음. safety guard scope 만 확장.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 본문 변경 (ADR-0034)
+
+ADR-0034 의 data-first layout invert 에 따른 본 ADR §Decision 갱신:
+
+### self-replace destination 변경
+- **Before**: `exec ~/wikihub/install.sh "$@"` (이전 `WIKIHUB_HOME` 의미 = repo)
+- **After**: `exec $WIKIHUB_SRC/install.sh "$@"` (default `~/.local/share/wikihub/src/install.sh`)
+
+### wipe target 변경
+- **Before**: `rm -rf $WIKIHUB_HOME` (repo 의미)
+- **After**: `rm -rf $WIKIHUB_SRC` (운영 자산 `$WIKIHUB_HOME` 은 wipe scope 외 — 절대 안전)
+
+### safety guard 4번째 추가 (CR1-CRIT-2 → R2 v2)
+1. system path 차단 (`$WIKIHUB_SRC` ∈ `/`·`/usr`·`/etc` 등 → exit 1)
+2. `$WIKIHUB_SRC/.git` 존재 검증
+3. git remote.origin.url = im-dongseon/wikihub 검증
+4. **(신규)** `$WIKIHUB_SRC` prefix 가 `$HOME/.local/share/wikihub/` 외이면 NONINTERACTIVE 거부 + 명시 confirm — XDG path 외 wipe 는 운영자 의도 명시 요구
+
+### `--force-fresh` 의 운영 자산 안전성
+
+본 변경 후 `--force-fresh` 가 운영 자산 (`$WIKIHUB_HOME`) wipe 절대 안 함. 별도 backup 불요 — 운영 자산은 wipe scope 외.
+
+Status 변경 없음. self-replace + wipe path + safety guard 본문 갱신.

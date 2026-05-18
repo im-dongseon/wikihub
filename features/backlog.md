@@ -88,8 +88,9 @@ V3 (--force-fresh confirm), V4 (vault@ mid-sync grace), V5a/b (downgrade), V6 (l
 |---|---|---|
 | ~~`hermes_adapter` (F5)~~ | ✅ archive (2026-05-18) — ADR-0032·ADR-0033 신설. wh- prefix lock + external_dirs + install-time materialized SKILL.md + Hermes detect gate (SKIP_SYSTEMD_RENDER) + flock·backup·sha256. V3 end-to-end PASS | — |
 | ~~`update_mode`~~ | ✅ archive (2026-05-17) — ADR-0030 신설 | — |
-| ~~`install_scope_reduction`~~ | ✅ **Step 3 완료** (2026-05-18) — ADR-0023 §"Clone scope" Note + ADR-0031 (Proposed) + install.sh sparse + yaml_writer.py 신규. Step 4 code review + V<N> 검증 통과 후 archive (ADR-0031 → Accepted) | — |
+| ~~`install_scope_reduction`~~ | ✅ archive (2026-05-18) — ADR-0031 신설 | — |
+| ~~`dir_layout_refactor`~~ | ✅ archive (2026-05-19) — ADR-0034 신설 + 7 ADR Note. data-first layout invert (WIKIHUB_HOME=운영, WIKIHUB_SRC=시스템 XDG) + scripts/migrate_layout.sh (9-phase) + hermes_config_migrate.py. V1·V2·V3 e2e PASS | — |
 | `lint_authoring` (F2 잔여) | wiki 의 정합성 검증 자동화 (lint.service) | F2 spec |
-| `wiki_query` (F6) | 메인테이너/사용자가 wiki 검색 / 그래프 탐색 (`wh:query`) | F5 (hermes_adapter) |
+| `wiki_query` (F6) | 메인테이너/사용자가 wiki 검색 / 그래프 탐색 (`wh-query`) | F5 (hermes_adapter) |
 
-v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅) + F5 (✅, 2026-05-18). **달성**. v0.2.x 는 lint_authoring·wiki_query·multi-vault·#G (mount@ root_folder_id 전파) 등.
+v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅) + F5 (✅) + dir_layout_refactor (✅, 2026-05-19). **달성**. v0.2.x 는 lint_authoring·wiki_query·multi-vault·#G (mount@ root_folder_id 전파)·dir_layout_refactor 의 잔존 R3 surface 항목·yaml.example credentials_path 절대경로 명시 등.

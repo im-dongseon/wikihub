@@ -253,7 +253,7 @@ def vfs_refresh(
                 "scope": "mount",
                 "reason": f"rclone OAuth/SA revoked/corrupt: {error_snippet[:200]!r}",
                 "remediation": (
-                    f"SA JSON 갱신 (~/wikihub-instance/.credentials/sa_{vault_id}.json) "
+                    f"SA JSON 갱신 (~/.credentials/wikihub/sa_{vault_id}.json) "
                     f"+ chmod 0600 + systemctl --user restart wikihub-mount@{vault_id}.service"
                 ),
                 "source_id": None,

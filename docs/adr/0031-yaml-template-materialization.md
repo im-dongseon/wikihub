@@ -273,3 +273,31 @@ design review (`design_review_1.md` SRE/Systems + `design_review_2.md` Spec/Arch
 `_migrate_agent_schema` 는 idempotent — 2번째 호출 시 이미 `wh-` + `{skill}` placeholder 형식이면 no-op. 운영자가 patch 후 yaml 을 다시 `wh:` 로 손편집한 경우는 marker comment (ADR-0032 §sub-3) 패턴 적용 — 운영자 의도 명시 보호.
 
 Status 변경 없음. §Decision B catalog 의 의도 (agent.* 미관여) 보존.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
+
+ADR-0034 data-first layout invert 후 본 ADR §Decision B catalog 의 default 값 변경:
+
+### `instance.root` default 변경
+
+- **Before**: `~/wikihub-instance` (이전 `WIKIHUB_INSTANCE_ROOT` 의미)
+- **After**: `~/wikihub` (ADR-0034 의 `WIKIHUB_HOME` = 운영 자산 dir)
+
+### derived 4필드 catalog 값 변경
+
+| 필드 | After (ADR-0034 정합) |
+|---|---|
+| `instance.root` | `$WIKIHUB_HOME` (default: `~/wikihub`) |
+| `vaults[*].local_path` | `$WIKIHUB_HOME/vault/<vault_id>` |
+| `vaults[*].options.mount_path` | `$WIKIHUB_HOME/vault/<vault_id>` |
+| `vaults[*].options.credentials_path` | `~/.credentials/wikihub/sa_<vault_id>.json` (ADR-0029 §Decision 갱신 정합 — 외부 격리) |
+
+### schema version
+
+`version: 1` 유지 (ADR-0031 §Decision E 정합 — key 변경 없음, 값 의미 변경. schema version bump 불요).
+
+### `/wh-setup` Step 0 의 single-writer 정책 보존
+
+`/wh-setup` 이 `$WIKIHUB_HOME/wikihub.yaml` atomic write 단독 책임 (ADR-0031 §Decision A). install.sh yaml 미관여 정책 ADR-0034 후에도 그대로.
+
+Status 변경 없음. default 값 정합.

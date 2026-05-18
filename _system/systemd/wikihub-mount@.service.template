@@ -8,12 +8,12 @@ OnFailure=ops-alert.service
 
 [Service]
 Type=simple
-WorkingDirectory={instance_root}
+WorkingDirectory={wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=RCLONE_CONFIG={rclone_config_path}
-ExecStartPre=-/bin/fusermount3 -uz {instance_root}/vault/%i
-ExecStartPre=/bin/mkdir -p {instance_root}/vault/%i
-ExecStart={rclone_bin} mount {remote_name_for_%i}: {instance_root}/vault/%i \
+ExecStartPre=-/bin/fusermount3 -uz {wikihub_home}/vault/%i
+ExecStartPre=/bin/mkdir -p {wikihub_home}/vault/%i
+ExecStart={rclone_bin} mount {remote_name_for_%i}: {wikihub_home}/vault/%i \
   --vfs-cache-mode minimal \
   --vfs-cache-max-size {vfs_cache_max_size} \
   --drive-export-formats docx,xlsx,pptx,md \
@@ -21,7 +21,7 @@ ExecStart={rclone_bin} mount {remote_name_for_%i}: {instance_root}/vault/%i \
   --log-level NOTICE \
   --rc \
   --rc-addr 127.0.0.1:{rc_port_for_%i}
-ExecStop=/bin/fusermount3 -u {instance_root}/vault/%i
+ExecStop=/bin/fusermount3 -u {wikihub_home}/vault/%i
 Restart=always
 RestartSec=10s
 RemainAfterExit=no

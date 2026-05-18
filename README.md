@@ -82,16 +82,43 @@ gws OAuth (macOS dev box 의 `scripts/auth_gdrive.py`) 와 token 분리 — 같�
 
 ---
 
-## 설치 / 업데이트 (ADR-0010 + ADR-0030 + ADR-0032)
+## 설치 / 업데이트 (ADR-0010 + ADR-0030 + ADR-0032 + ADR-0034)
 
-운영 시 install 과 update 는 **동일 명령**. install.sh 가 `$WIKIHUB_HOME/_system/VERSION` + `.git` 존재 여부로 자동 분기.
+운영 시 install 과 update 는 **동일 명령**. install.sh 가 `$WIKIHUB_SRC/_system/VERSION` + `.git` 존재 여부로 자동 분기.
 
-### Prerequisites (F5 ADR-0032 안내)
+### 디렉토리 layout (ADR-0034 — data-first)
+
+```
+~/wikihub/                          ★ 운영 자산 (WIKIHUB_HOME — 사용자 일상 자산)
+├── wikihub.yaml                    # 운영 정본 (/wh-setup materialize)
+├── wiki/                           # wiki 콘텐츠 — index·sources·entities·concepts·analyses
+├── vault/<vault_id>/               # FUSE mount (rclone)
+└── _state/<vault_id>/              # cursor·file_map·last_sync
+
+~/.local/share/wikihub/             XDG data root (ADR-0020·0034)
+├── src/                            # 시스템 코드 (WIKIHUB_SRC — git clone target, install.sh)
+└── venv/                           # Python venv (ADR-0020)
+
+~/.credentials/wikihub/             # SA credentials 외부 격리 (ADR-0029)
+~/.config/systemd/user/             # systemd user units
+~/.hermes/                          # Hermes config (외부 도구, ADR-0032 external_dirs)
+```
+
+### Prerequisites
 
 - **Hermes CLI** 사전 설치 필수 — wikihub 가 직접 설치하지 않음. `command -v hermes` 가 absolute path 반환 가능해야 함 (alias/wrapper 미지원).
 - install.sh 가 `~/.hermes/config.yaml` 의 `skills.external_dirs` 에 wikihub skill path 추가. 변경 시 backup 자동 생성 (`~/.hermes/config.yaml.wikihub-bak.<ts>`, 7일 retention).
 - `WIKIHUB_NONINTERACTIVE=1` 모드 사용 시 외부 자산 (~/.hermes/config.yaml) mutate 도 자동 동의 포함. 의도 안 하면 unset 후 호출.
 - Hermes 미설치 시 install.sh 는 success exit 하되 systemd unit render/enable skip (운영자가 Hermes 설치 후 재호출 권장).
+
+### env 변수 (ADR-0034)
+
+| env | 의미 | default |
+|---|---|---|
+| `WIKIHUB_HOME` | 운영 자산 dir | `~/wikihub` |
+| `WIKIHUB_SRC` | 시스템 코드 dir | `~/.local/share/wikihub/src` |
+
+multi-instance: 두 env 모두 override 가능 (`WIKIHUB_HOME=/var/wikihub-prod WIKIHUB_SRC=/var/wikihub-src/prod`).
 
 ### 호출
 
@@ -103,18 +130,22 @@ curl -fsSL --proto '=https' --tlsv1.2 \
 # 특정 tag 명시 (rollback 포함)
 curl -fsSL ... | bash -s -- --version v0.1.0
 
-# 명시적 destructive 재설치 (5초 confirm + safety guard)
+# 명시적 destructive 재설치 (5초 confirm + safety guard 4중) — WIKIHUB_SRC 만 wipe, WIKIHUB_HOME 안전
 curl -fsSL ... | bash -s -- --force-fresh
 ```
 
 ### 동작
 
-- **fresh install** (`_system/VERSION` 부재): `git clone` + venv + skill materialize + ~/.hermes/config.yaml 패치 + systemd render + 운영자 안내.
-- **update** (`_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → skill 재materialize + schema migration (필요시) → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
-- 현재 버전 조회: `cat $WIKIHUB_HOME/_system/VERSION` (default `~/wikihub/_system/VERSION`).
-- Hermes skill 5건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-graphify`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list | grep ^wh-`.
+- **fresh install** (`$WIKIHUB_SRC/_system/VERSION` 부재): `git clone` → `$WIKIHUB_SRC` + venv + skill materialize + `~/.hermes/config.yaml` 패치 + systemd render + 운영자 안내.
+- **update** (`$WIKIHUB_SRC/_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → skill 재materialize + schema migration (필요시) → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
+- 현재 버전 조회: `cat $WIKIHUB_SRC/_system/VERSION`.
+- Hermes skill 5건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-graphify`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list`.
 
-상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md) + [`features/20260517_update_mode/analysis_and_design.md`](features/20260517_update_mode/analysis_and_design.md).
+### Migration (pre-ADR-0034 layout 운영자 — v0.1.0 미배포 시점은 영향 0)
+
+이전 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) 운영자는 install.sh `_step0_legacy_detect` 가 자동 detect → `scripts/migrate_layout.sh` 호출 prompt. 9-phase state machine + 부분 실패 시 resume.
+
+상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md) + [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md).
 
 ---
 
@@ -190,9 +221,10 @@ v0.1.0 feature 진행 상황 (2026-05-18 기준 — **acceptance 달성**):
 | **`update_mode`** | `install.sh` dual-mode (fresh / update) + `_system/VERSION` detect + tag `latest` ref + rollback trap + systemd orchestration + log rotation. F4 결함 #A·#B·#C·#D + R16-L2 일괄 fix. ADR-0030 신설 | ✅ archive (2026-05-17) |
 | **`install_scope_reduction`** | sparse-checkout 6필드 lock + install.sh yaml 미관여 + `/wh-setup` Step 0 yaml writer 단독 책임 + ruamel.yaml round-trip. F4 결함 #E·#F closure. ADR-0031 신설 | ✅ archive (2026-05-18) |
 | **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh-*` skill ↔ Hermes skill 시스템 정합화 (`hermes chat --skills <name> --quiet --query "/<name> ..."`). install-time materialized SKILL.md (frontmatter + commands body) + external_dirs + flock·backup·sha256 + Hermes detect gate. F4 결함 #12 closure. ADR-0032 (skill registration policy) + ADR-0033 (`wh-` prefix lock, supersedes ADR-0011) 신설 | ✅ archive (2026-05-18) |
+| **`dir_layout_refactor`** | Data-first layout invert — `~/wikihub/` = 운영 자산 (WIKIHUB_HOME), `~/.local/share/wikihub/src/` = 시스템 코드 (WIKIHUB_SRC, XDG). env swap + 폐기 + WIKIHUB_INSTANCE_ROOT 폐기. migration helper (`scripts/migrate_layout.sh`, 9-phase state machine + flock + rollback trap + rclone FUSE unmount retry). ADR-0034 신설 + 7 ADR Note (0010·0020·0023·0029·0030·0031·0032). e2e PASS (wikihub-test VM Ubuntu 24.04 ARM + Hermes v0.14.0 + deepseek-v4-pro) | ✅ archive (2026-05-19) |
 | **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
 
-**v0.1.0 acceptance 달성** = F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 (모두 archive). install + update + skill registration + sync→ingest 자동화 사슬 end-to-end 검증 (multipass VM `wikihub-fresh` + Hermes v0.14.0 + Opencode.ai/deepseek-v4-pro provider 환경에서 V1·V2·V3·V5a·V6·V7·V8·V9 PASS). v0.1.0 일괄 deployment 진행 가능.
+**v0.1.0 acceptance 달성** = F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 + dir_layout_refactor (모두 archive). install + update + skill registration + sync→ingest 자동화 사슬 + data-first layout end-to-end 검증 (multipass VM Ubuntu 24.04 ARM + Hermes v0.14.0 + LLM provider 환경에서 V1·V2·V3·V5a·V6·V7·V8·V9 PASS). v0.1.0 일괄 deployment 진행 가능.
 
 자세한 backlog (R15·R16 Could 8건 + F5 surface 의 #G mount@ root_folder_id 전파 등) 는 [`features/backlog.md`](features/backlog.md) 참조.
 

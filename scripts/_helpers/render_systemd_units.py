@@ -13,8 +13,8 @@ modes (mutually exclusive):
     --validate                 : yaml schema validate only
 
 options:
-    --yaml PATH                : yaml 경로. default `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml`
-                                 (env 미설정 시 ~/wikihub-instance/wikihub.yaml)
+    --yaml PATH                : yaml 경로. default `$WIKIHUB_HOME/wikihub.yaml`
+                                 (env 미설정 시 ~/wikihub/wikihub.yaml — ADR-0034)
 
 exit codes:
     0 — success
@@ -51,18 +51,20 @@ _VAULT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")   # ADR-0019 정합
 
 # ── path 산출 ──────────────────────────────────────────────────────────
 def _wikihub_home() -> Path:
+    """운영 자산 dir (ADR-0034 v0.1.0 layout — data-first). 이전 WIKIHUB_INSTANCE_ROOT 의미."""
     return Path(os.environ.get("WIKIHUB_HOME", str(Path.home() / "wikihub"))).resolve()
 
 
-def _instance_root_default() -> Path:
+def _wikihub_src() -> Path:
+    """시스템 코드 dir (ADR-0034 — XDG, ADR-0020 venv 와 동일 root). 이전 WIKIHUB_HOME 의미."""
     return Path(os.environ.get(
-        "WIKIHUB_INSTANCE_ROOT",
-        str(Path.home() / "wikihub-instance"),
+        "WIKIHUB_SRC",
+        str(Path.home() / ".local" / "share" / "wikihub" / "src"),
     )).resolve()
 
 
 def _systemd_templates_dir() -> Path:
-    return _wikihub_home() / "_system" / "systemd"
+    return _wikihub_src() / "_system" / "systemd"
 
 
 # ── yaml 로딩·검증 ─────────────────────────────────────────────────────
@@ -122,14 +124,16 @@ def _validate_schema(cfg: dict) -> list[str]:
 
 # ── substitution 값 산출 ───────────────────────────────────────────────
 def _read_venv_path() -> str:
-    sidecar = _wikihub_home() / ".venv_path"
+    """`.venv_path` sidecar — install.sh 가 시스템 코드 dir 에 기록 (ADR-0034)."""
+    sidecar = _wikihub_src() / ".venv_path"
     if sidecar.is_file():
         return sidecar.read_text(encoding="utf-8").strip()
     return str(Path.home() / ".local" / "share" / "wikihub" / "venv")
 
 
 def _instance_root(cfg: dict) -> Path:
-    raw = cfg.get("instance", {}).get("root", str(_instance_root_default()))
+    """yaml.instance.root — 운영 자산 dir (ADR-0031). default = _wikihub_home() (ADR-0034)."""
+    raw = cfg.get("instance", {}).get("root", str(_wikihub_home()))
     return Path(os.path.expanduser(raw)).resolve()
 
 
@@ -166,6 +170,7 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
     instance_root = _instance_root(cfg)
     venv_path = _read_venv_path()
     wikihub_home = _wikihub_home()
+    wikihub_src = _wikihub_src()
 
     ops = cfg.get("operations") or {}
     agent = cfg.get("agent") or {}
@@ -181,9 +186,14 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
     rclone_bin = os.environ.get("RCLONE_BIN", "/usr/local/bin/rclone")
 
     subs: dict[str, str] = {
-        "instance_root": str(instance_root),
-        "venv_path": venv_path,
+        # ADR-0034 (v0.1.0 layout — data-first):
+        # - wikihub_home = 운영 자산 dir (이전 WIKIHUB_INSTANCE_ROOT 의미)
+        # - wikihub_src  = 시스템 코드 dir (XDG)
+        # - instance_root = deprecated alias of wikihub_home (transition 호환)
         "wikihub_home": str(wikihub_home),
+        "wikihub_src": str(wikihub_src),
+        "instance_root": str(instance_root),   # deprecated alias (5.4.4 transition 안전망)
+        "venv_path": venv_path,
         "rclone_config_path": rclone_config_path,
         "rclone_bin": rclone_bin,
         "vfs_cache_max_size": str(ops.get("vfs_cache_max_size", "10G")),
@@ -506,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="render 출력 디렉토리 (--render 필수)")
     args = parser.parse_args(argv)
 
-    yaml_path = args.yaml or (_instance_root_default() / "wikihub.yaml")
+    yaml_path = args.yaml or (_wikihub_home() / "wikihub.yaml")
     cfg = _load_yaml(yaml_path)
 
     # render mode 가 아닌 다른 mode 도 schema 가 깨지면 unsafe — minimal validation 만 silent.

@@ -90,3 +90,24 @@ V8 acceptance gate (2026-05-17) 통과 후 V<N> Phase 2 진입 시점에 ADR-000
 - 운영 가정 갱신 (progress.md §운영 환경 가정): "Google Workspace Internal user-type OAuth" → "Google Cloud project 의 Service Account JSON key (Personal Google 도 OK)".
 - V18 (rclone OAuth revoke 감지) — SA 채택 후엔 "SA 키 revoke 감지" 로 의미 갱신. 본 검증 mechanism 은 동일 (rclone stderr 패턴 매칭, `_RCLONE_AUTH_PATTERNS`).
 - 재검토 트리거: SA 키 노출 사고 발생 시 (D2) secret manager 검토 또는 (K2) Workload Identity Federation 으로 keyless 전환.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 본문 변경 (ADR-0034)
+
+ADR-0034 data-first layout refactor 의 §sub-1 정합:
+
+### credentials_path default 변경
+
+- **Before**: `~/wikihub-instance/.credentials/sa_<vault_id>.json` (instance 내부)
+- **After**:  `~/.credentials/wikihub/sa_<vault_id>.json` (외부 격리, CLAUDE.md 보안 권장 정합)
+
+### 변경 이유
+
+- ADR-0034 후 `$WIKIHUB_HOME` = 운영 자산 dir (data-first). 보안 비밀 (SA JSON) 을 운영 자산 dir 내부에 두는 것은 격리 약화 — 외부 분리 권장.
+- CLAUDE.md 의 메인테이너 가이드 (`SA JSON kept in ~/.credentials/wikihub/sa_<project>.json (outside repo working tree)`) 와 정합.
+- 본 변경은 v0.1.0 미배포 시점이라 운영자 base 영향 0.
+
+### install.sh 의 처리
+
+`_step5_instance_dirs` 가 `~/.credentials/wikihub/` 디렉토리 ensure (chmod 700) + `*.json` 권한 검증 (chmod 600 enforce). install.sh 가 credentials 자체를 만들지 않음 — 운영자 scp 후 권한 검증만.
+
+Status 변경 없음. §Decision 본문 path 갱신 + ADR-0023 §safety guard 와 정합.

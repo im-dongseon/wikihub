@@ -8,7 +8,7 @@
 # 또는 로컬 호출 (개발/사전 inspection 후):
 #   ./install.sh [--gws-version <ver>] [--skip-confirm] [--branch <ref>] [--version <tag>] [--force-fresh]
 #
-# detect signal: $WIKIHUB_HOME/_system/VERSION + $WIKIHUB_HOME/.git 둘 다 존재 → update mode
+# detect signal: $WIKIHUB_SRC/_system/VERSION + $WIKIHUB_SRC/.git 둘 다 존재 → update mode
 #   (ADR-0010 + ADR-0030). 둘 다 없으면 fresh install. 한쪽만 있으면 partial state fatal.
 # --version <tag>     : 특정 tag pin (rollback 포함). 인자 강제 소비.
 # --force-fresh       : 명시적 destructive 재설치. detect 무시 + 5초 confirm.
@@ -30,9 +30,11 @@ ok()    { echo "${C_OK}OK${C_RST}    [$(_ts)] $*"; }
 warn()  { echo "${C_WARN}WARN${C_RST}  [$(_ts)] $*" >&2; }
 err()   { echo "${C_ERR}ERROR${C_RST} [$(_ts)] $*" >&2; }
 
-# ─── 기본값 + env override ─────────────────────────────────────────────
-export WIKIHUB_HOME="${WIKIHUB_HOME:-$HOME/wikihub}"
-export WIKIHUB_INSTANCE_ROOT="${WIKIHUB_INSTANCE_ROOT:-$HOME/wikihub-instance}"
+# ─── 기본값 + env override (ADR-0034 v0.2.0 — data-first layout) ──────
+# WIKIHUB_HOME 의미 swap (v0.2.0): 운영 자산 dir (이전 repo dir 의미는 WIKIHUB_SRC 로 이전).
+# WIKIHUB_INSTANCE_ROOT 폐기 — _step0_env_semantic_check 가 detect 시 fail-fast.
+export WIKIHUB_HOME="${WIKIHUB_HOME:-$HOME/wikihub}"                            # 운영 자산 dir
+export WIKIHUB_SRC="${WIKIHUB_SRC:-$HOME/.local/share/wikihub/src}"             # 시스템 코드 dir (XDG, ADR-0020 venv 와 동일 root)
 WIKIHUB_REPO_URL="${WIKIHUB_REPO_URL:-https://github.com/im-dongseon/wikihub.git}"
 # BRANCH default empty (ADR-0030) — `_resolve_ref` 가 우선순위 chain 으로 결정.
 # 명시 export 또는 `--branch <name>` 시에만 path 2 (branch direct) 진입.
@@ -72,11 +74,36 @@ _abs_path() {
     esac
 }
 WIKIHUB_HOME="$(_abs_path "$WIKIHUB_HOME")"
-WIKIHUB_INSTANCE_ROOT="$(_abs_path "$WIKIHUB_INSTANCE_ROOT")"
+WIKIHUB_SRC="$(_abs_path "$WIKIHUB_SRC")"
 
 # R10 HIGH-7: install.sh stdout/stderr 의 log mirror — curl-pipe 모드 fail 시 사후 분석.
-INSTALL_LOG="${WIKIHUB_INSTANCE_ROOT}/install.log"
-mkdir -p "$WIKIHUB_INSTANCE_ROOT"
+# v0.2.0 layout: install.log 는 운영 자산 dir 에 위치 (이전 INSTANCE_ROOT)
+INSTALL_LOG="${WIKIHUB_HOME}/install.log"
+mkdir -p "$WIKIHUB_HOME"
+
+# ─── Step 0a — env semantic check (ADR-0034 §sub-2 — v0.1.0 release 전 architectural refactor) ──
+# WIKIHUB_INSTANCE_ROOT env detect: ADR-0034 로 폐기. WIKIHUB_HOME 으로 통일.
+if [[ -n "${WIKIHUB_INSTANCE_ROOT:-}" ]]; then
+    err "WIKIHUB_INSTANCE_ROOT env 는 ADR-0034 로 폐기됨. WIKIHUB_HOME 으로 통일."
+    err "  마이그레이션:"
+    err "    unset WIKIHUB_INSTANCE_ROOT"
+    err "    export WIKIHUB_HOME=<이전 INSTANCE_ROOT 값>"
+    err "    export WIKIHUB_SRC=<시스템 코드 dir, 기본: \$HOME/.local/share/wikihub/src>"
+    err "  ※ WIKIHUB_HOME 의 의미가 ADR-0034 로 변경 — 운영 자산 dir (이전 repo dir 의미는 WIKIHUB_SRC 로 이전)"
+    err "  detail: docs/adr/0034-data-first-layout.md"
+    exit 1
+fi
+# WIKIHUB_HOME silent bug detect: 명시 설정됐고 그 path 가 이전 의미 repo (= .git + im-dongseon/wikihub) 면 fail-fast
+if [[ -d "$WIKIHUB_HOME/.git" ]] && \
+   (cd "$WIKIHUB_HOME" 2>/dev/null && git config --get remote.origin.url 2>/dev/null | grep -q "im-dongseon/wikihub"); then
+    err "WIKIHUB_HOME=$WIKIHUB_HOME 가 이전 semantic (repo dir) 로 사용됨."
+    err "ADR-0034 후 WIKIHUB_HOME 의 의미 = 운영 자산 dir (data-first)."
+    err "  마이그레이션 helper: ~/.local/share/wikihub/src/scripts/migrate_layout.sh (legacy detect 자동 진입 권장)"
+    err "  또는 운영자 명시 env 갱신:"
+    err "    export WIKIHUB_HOME=<운영 자산 dir>"
+    err "    export WIKIHUB_SRC=$WIKIHUB_HOME"
+    exit 1
+fi
 
 # R16-L2 + R2-HIGH-6 (update_mode v3): log rotation — tee fd 보존 race 회피 위해 tee 시작 전 호출.
 # 7일 또는 10MB 초과 시 rename, 7개 보관 (`tail -n +8` 의 8 = 보관수+1).
@@ -113,10 +140,10 @@ while [ $# -gt 0 ]; do
         --skip-confirm) SKIP_CONFIRM=1; shift ;;
         --branch) BRANCH="$2"; shift 2 ;;
         # ADR-0030 / HIGH-N3: --version 인자 강제 소비. no-arg 분기 없음.
-        # version 조회는 `cat $WIKIHUB_HOME/_system/VERSION` 사용.
+        # version 조회는 `cat $WIKIHUB_SRC/_system/VERSION` 사용.
         --version)
             if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-                err "--version 인자 필요 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_HOME/_system/VERSION\`."
+                err "--version 인자 필요 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_SRC/_system/VERSION\`."
                 exit 1
             fi
             EXPLICIT_VERSION="$2"
@@ -145,23 +172,23 @@ bootstrap_clone_then_exec() {
     exec 200>&- 2>/dev/null || true
 
     if [[ "$INSTALL_MODE" == "update" ]]; then
-        info "curl-pipe + update mode — 기존 $WIKIHUB_HOME/install.sh 로 self-replace (clone 없이)"
-        if [ ! -f "$WIKIHUB_HOME/install.sh" ]; then
-            err "$WIKIHUB_HOME/install.sh 부재 — partial state 의심. --force-fresh 권장."
+        info "curl-pipe + update mode — 기존 $WIKIHUB_SRC/install.sh 로 self-replace (clone 없이)"
+        if [ ! -f "$WIKIHUB_SRC/install.sh" ]; then
+            err "$WIKIHUB_SRC/install.sh 부재 — partial state 의심. --force-fresh 권장."
             exit 2
         fi
-        exec bash "$WIKIHUB_HOME/install.sh" "${ORIGINAL_ARGS[@]}"
+        exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
     fi
     # fresh path — repo clone (기존 동작)
     info "curl-pipe + fresh mode — repo 부트스트랩 진행"
     _step2_clone
-    if [ ! -f "$WIKIHUB_HOME/install.sh" ]; then
-        err "clone 후 $WIKIHUB_HOME/install.sh 가 없음 — repo 구조 결함 의심"
+    if [ ! -f "$WIKIHUB_SRC/install.sh" ]; then
+        err "clone 후 $WIKIHUB_SRC/install.sh 가 없음 — repo 구조 결함 의심"
         exit 2
     fi
-    info "→ $WIKIHUB_HOME/install.sh 로 self-replace (args: ${ORIGINAL_ARGS[*]:-(none)})"
+    info "→ $WIKIHUB_SRC/install.sh 로 self-replace (args: ${ORIGINAL_ARGS[*]:-(none)})"
     # R9 HIGH-2 fix: ORIGINAL_ARGS 보존 — CLI 파싱 후 $@ 가 비어 있어도 운영자 원본 args 전달
-    exec bash "$WIKIHUB_HOME/install.sh" "${ORIGINAL_ARGS[@]}"
+    exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
 }
 
 # Step 0 의 감지 — curl-pipe 모드 판별
@@ -247,31 +274,54 @@ _step1_env_check() {
 # update path 는 _step2_update (ADR-0030).
 # ──────────────────────────────────────────────────────────────────────
 
-# H4: safety guard 3중 추출 — fresh / --force-fresh 양쪽에서 재사용.
+# H4: safety guard — fresh / --force-fresh 양쪽에서 재사용.
+# ADR-0023 §Decision 갱신 (ADR-0034 정합):
+#   1. system path 차단
+#   2. .git 존재 검증
+#   3. origin = im-dongseon/wikihub 검증
+#   4. (신규) WIKIHUB_SRC 의 prefix 가 $HOME/.local/share/wikihub/ 외이면
+#      NONINTERACTIVE 거부 + 명시 confirm — XDG path 외 wipe 는 운영자 의도 명시 요구
 _validate_wipe_target() {
-    case "$WIKIHUB_HOME" in
+    case "$WIKIHUB_SRC" in
         ""|"/"|"/usr"|"/usr/local"|"/etc"|"/opt"|"/home"|"$HOME"|"$HOME/")
-            err "WIKIHUB_HOME=$WIKIHUB_HOME 는 wipe 대상으로 안전하지 않음"
-            err "       WIKIHUB_HOME env 로 다른 위치 지정 (default: ~/wikihub)"
+            err "WIKIHUB_SRC=$WIKIHUB_SRC 는 wipe 대상으로 안전하지 않음"
+            err "       WIKIHUB_SRC env 로 다른 위치 지정 (default: ~/.local/share/wikihub/src)"
             exit 1
             ;;
     esac
-    [ -e "$WIKIHUB_HOME" ] || return 0   # 신규 install 은 검증 대상 없음
-    if [ ! -d "$WIKIHUB_HOME/.git" ]; then
-        err "$WIKIHUB_HOME 가 존재하지만 git repo 가 아님 — wipe 거부."
+    # safety guard 4번째 (ADR-0034) — XDG path 외 wipe 명시 confirm
+    local xdg_prefix="$HOME/.local/share/wikihub"
+    case "$WIKIHUB_SRC" in
+        "$xdg_prefix"/*) ;;   # XDG path — 정상
+        *)
+            warn "WIKIHUB_SRC=$WIKIHUB_SRC 가 XDG path ($xdg_prefix/) 외부"
+            if [[ -n "${SKIP_CONFIRM:-}" ]]; then
+                err "  NONINTERACTIVE 모드는 XDG path 외 wipe 거부 — 운영자 명시 confirm 요구"
+                err "  수동 호출: WIKIHUB_SRC=... ./install.sh (NONINTERACTIVE 해제)"
+                exit 1
+            fi
+            printf "       continue? [y/N] " >&2
+            local ans; read -r ans
+            [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]] \
+                || { err "wipe 거부"; exit 1; }
+            ;;
+    esac
+    [ -e "$WIKIHUB_SRC" ] || return 0   # 신규 install 은 검증 대상 없음
+    if [ ! -d "$WIKIHUB_SRC/.git" ]; then
+        err "$WIKIHUB_SRC 가 존재하지만 git repo 가 아님 — wipe 거부."
         err "       wikihub 설치 위치가 아닐 가능성. 수동 확인 후 재시도."
         exit 1
     fi
     local existing_origin
-    existing_origin="$(cd "$WIKIHUB_HOME" && git config --get remote.origin.url 2>/dev/null || true)"
+    existing_origin="$(cd "$WIKIHUB_SRC" && git config --get remote.origin.url 2>/dev/null || true)"
     case "$existing_origin" in
         *im-dongseon/wikihub*|*wikihub.git*) ;;
         *)
-            err "$WIKIHUB_HOME 의 origin=$existing_origin — wikihub repo 가 아님. wipe 거부."
+            err "$WIKIHUB_SRC 의 origin=$existing_origin — wikihub repo 가 아님. wipe 거부."
             exit 1 ;;
     esac
     case "$(pwd)" in
-        "$WIKIHUB_HOME"|"$WIKIHUB_HOME"/*) cd "$HOME" ;;
+        "$WIKIHUB_SRC"|"$WIKIHUB_SRC"/*) cd "$HOME" ;;
     esac
 }
 
@@ -279,7 +329,7 @@ _validate_wipe_target() {
 _confirm_force_fresh_wipe() {
     _validate_wipe_target
     [ -n "${WIKIHUB_NONINTERACTIVE:-}${SKIP_CONFIRM:-}" ] && return 0
-    info "[--force-fresh confirmed target: $WIKIHUB_HOME]"
+    info "[--force-fresh confirmed target: $WIKIHUB_SRC]"
     info "  Ctrl+C within 5s to abort. wipe 실행."
     sleep 5
 }
@@ -293,23 +343,23 @@ WIKIHUB_SPARSE_PATHS=(_system scripts install.sh wikihub.yaml.example README.md 
 # 셋 다 호출 (ADR-0023 §"Clone scope" + ADR-0030 §부정/제약 sparse-checkout 영속화).
 # git >=2.27 필요 (Ubuntu 22.04 의 2.34 OK, OCI custom image 가 2.20 이하면 fail-fast).
 _apply_sparse_checkout() {
-    git -C "$WIKIHUB_HOME" sparse-checkout init --no-cone >/dev/null 2>&1 \
+    git -C "$WIKIHUB_SRC" sparse-checkout init --no-cone >/dev/null 2>&1 \
         || { err "sparse-checkout init 실패 — git >=2.27 필요. 현재: $(git --version 2>/dev/null || echo 'git 미설치')"; return 2; }
-    git -C "$WIKIHUB_HOME" sparse-checkout set "${WIKIHUB_SPARSE_PATHS[@]}" >/dev/null \
+    git -C "$WIKIHUB_SRC" sparse-checkout set "${WIKIHUB_SPARSE_PATHS[@]}" >/dev/null \
         || { err "sparse-checkout set 실패 — paths: ${WIKIHUB_SPARSE_PATHS[*]}"; return 2; }
 }
 
 _step2_clone() {
     _validate_wipe_target
-    if [ -e "$WIKIHUB_HOME" ]; then
+    if [ -e "$WIKIHUB_SRC" ]; then
         info "기존 wikihub repo 발견 → clean re-install 진행"
-        rm -rf "$WIKIHUB_HOME"
+        rm -rf "$WIKIHUB_SRC"
     fi
 
     # ref 결정 — fresh path 도 _resolve_ref chain 사용 (ADR-0030).
     local clone_ref
     clone_ref="$(_resolve_ref)"
-    info "git clone --branch $clone_ref --depth 1 $WIKIHUB_REPO_URL → $WIKIHUB_HOME (sparse)"
+    info "git clone --branch $clone_ref --depth 1 $WIKIHUB_REPO_URL → $WIKIHUB_SRC (sparse)"
     # _resolve_ref 가 `refs/tags/<tag>` 또는 branch name 또는 `origin/main` 반환 — git clone
     # 의 `--branch` 는 tag 또는 branch 둘 다 받음. `origin/main` 같은 prefixed ref 는 fallback.
     if [[ "$clone_ref" == refs/tags/* ]]; then
@@ -320,9 +370,9 @@ _step2_clone() {
     # ADR-0023 §"Clone scope": --no-checkout 후 sparse-checkout init + set + checkout.
     # blob filter 미사용 (HIGH-S2 design review — partial clone + --unshallow 호환 위험 회피).
     git clone --no-checkout --depth 1 --branch "$clone_ref" \
-        "$WIKIHUB_REPO_URL" "$WIKIHUB_HOME"
+        "$WIKIHUB_REPO_URL" "$WIKIHUB_SRC"
     _apply_sparse_checkout
-    git -C "$WIKIHUB_HOME" checkout
+    git -C "$WIKIHUB_SRC" checkout
     ok "Step 2 repo clone 완료 (ref=$clone_ref, scope=sparse: ${WIKIHUB_SPARSE_PATHS[*]})"
 }
 
@@ -406,7 +456,7 @@ _step3_venv() {
     # uv pip install 은 already-installed 시 fast no-op (idempotent) — skip 최적화 제거.
     # 이전 MED-N3 의 PRE_UPDATE_REF diff 기반 skip 은 venv 가 partial install state 일 때 결함
     # (V1 VM 테스트 surface: previous install 이 Step 3 후 fail → venv 존재하지만 deps 미설치).
-    local req_file="$WIKIHUB_HOME/scripts/requirements.txt"
+    local req_file="$WIKIHUB_SRC/scripts/requirements.txt"
     if [ -f "$req_file" ]; then
         info "deps 설치/갱신: scripts/requirements.txt (uv pip — idempotent)"
         uv pip install --python "$VENV_PATH/bin/python" -r "$req_file"
@@ -415,7 +465,7 @@ _step3_venv() {
     fi
 
     # 사이드카 — /wh:setup 의 substitution 시 read
-    echo "$VENV_PATH" > "$WIKIHUB_HOME/.venv_path"
+    echo "$VENV_PATH" > "$WIKIHUB_SRC/.venv_path"
     ok "Step 3 venv ($PYTHON_VERSION) + .venv_path 기록 완료"
 }
 
@@ -611,7 +661,7 @@ _enforce_rclone_conf_perms() {
 # atomic write (CR1-HIGH-3 review 반영): tmpfile + sync + mv. same-directory + PID suffix +
 # cleanup trap (errexit 또는 중단 시 orphan tmp 회수) + stale tmp 5분 이상 자동 정리.
 _write_installed_versions_sidecar() {
-    local target="$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json"
+    local target="$WIKIHUB_SRC/_system/INSTALLED_VERSIONS.json"
     local target_dir; target_dir="$(dirname "$target")"
     local target_base; target_base="$(basename "$target")"
     mkdir -p "$target_dir"
@@ -630,7 +680,7 @@ _write_installed_versions_sidecar() {
   "gws": "${GWS_VERSION}",
   "rclone": "${rclone_v:-}",
   "uv": "${UV_VERSION}",
-  "wikihub": "$(cat "$WIKIHUB_HOME/_system/VERSION" 2>/dev/null || echo unknown)",
+  "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
   "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -646,9 +696,9 @@ _step45_rclone() {
     _enforce_rclone_conf_perms
     _write_installed_versions_sidecar
     # rc port pre-check — yaml 이 이미 Step 5 에서 복사된 상태 가정. 첫 실행 (yaml 미복사) 시 skip.
-    if [[ -f "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" ]]; then
+    if [[ -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
         local ports
-        ports="$(_yaml_get_vault_rc_ports "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" 2>/dev/null || true)"
+        ports="$(_yaml_get_vault_rc_ports "$WIKIHUB_HOME/wikihub.yaml" 2>/dev/null || true)"
         if [[ -n "$ports" ]]; then
             while IFS= read -r port; do
                 [[ -z "$port" ]] && continue
@@ -670,15 +720,18 @@ _step45_rclone() {
 # 메인테이너가 install.sh 직후 `/wh:setup` 호출 시 .example → operational yaml materialize.
 
 _step5_instance_dirs() {
-    mkdir -p "$WIKIHUB_INSTANCE_ROOT"
-    mkdir -p "$WIKIHUB_INSTANCE_ROOT/.credentials"
-    chmod 700 "$WIKIHUB_INSTANCE_ROOT/.credentials"
+    mkdir -p "$WIKIHUB_HOME"
+    # ADR-0029 §Decision 갱신 (ADR-0034 정합): credentials 외부 격리 — ~/.credentials/wikihub/
+    # 운영 자산 dir 내부 비밀 미배치 (data-first + secret separation)
+    local creds_dir="$HOME/.credentials/wikihub"
+    mkdir -p "$creds_dir"
+    chmod 700 "$creds_dir"
 
     # R10 HIGH-5 fix: credentials 파일 chmod 600 enforce — 이미 배치된 파일 검증.
     # install.sh 가 credentials 자체를 만들지 않지만, 메인테이너 scp 후 권한 미설정 케이스 회피.
     local cred_count=0
     local bad_perm_count=0
-    for cred in "$WIKIHUB_INSTANCE_ROOT/.credentials"/*.json; do
+    for cred in "$creds_dir"/*.json; do
         [ -f "$cred" ] || continue
         cred_count=$((cred_count + 1))
         local mode
@@ -690,7 +743,7 @@ _step5_instance_dirs() {
         fi
     done
     if [ "$cred_count" -gt 0 ]; then
-        ok "Step 5 credentials 검증 ($cred_count 건, $bad_perm_count 건 권한 fix)"
+        ok "Step 5 credentials 검증 ($cred_count 건 at $creds_dir, $bad_perm_count 건 권한 fix)"
     fi
 }
 
@@ -710,7 +763,7 @@ _hermes_config_path() {
 # 1회성 schema lift — `wh:` / `["-z"]` 잔존 operational yaml 의 drift fix.
 # ADR-0033 + R3-CR3-1-HIGH-N1 (idempotent + marker 보호)
 _migrate_agent_schema() {
-    local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
     local needs_migrate=0
     local skill_prefix oneshot_args_str
@@ -772,7 +825,7 @@ PYEOF
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
 # frontmatter source + _system/commands/<cmd>.md 본문 결합 (ADR-0032 §sub-2 β).
 _materialize_skills() {
-    local generated="$WIKIHUB_HOME/_system/skills/_generated"
+    local generated="$WIKIHUB_SRC/_system/skills/_generated"
     mkdir -p "$generated"
 
     # stale cleanup (R3-CR3-2 B-MED-5) — 5건 외 entries 제거
@@ -794,8 +847,8 @@ _materialize_skills() {
     local count=0
     for skill in "${WIKIHUB_SKILLS[@]}"; do
         local cmd="${skill#wh-}"   # wh-ingest → ingest
-        local frontmatter="$WIKIHUB_HOME/_system/skills/$skill.frontmatter.yaml"
-        local commands_md="$WIKIHUB_HOME/_system/commands/$cmd.md"
+        local frontmatter="$WIKIHUB_SRC/_system/skills/$skill.frontmatter.yaml"
+        local commands_md="$WIKIHUB_SRC/_system/commands/$cmd.md"
         local target_dir="$generated/$skill"
         local target="$target_dir/SKILL.md"
 
@@ -830,7 +883,7 @@ _patch_hermes_external_dirs() {
     local lock_path="$hermes_config.lock"
     local wikihub_skill_dir
     wikihub_skill_dir="$("$VENV_PATH/bin/python3" -c \
-        "import os; print(os.path.realpath('$WIKIHUB_HOME/_system/skills/_generated'))")"
+        "import os; print(os.path.realpath('$WIKIHUB_SRC/_system/skills/_generated'))")"
 
     mkdir -p "$hermes_dir"
 
@@ -973,7 +1026,7 @@ _step6_agent_skill() {
     # 1. Hermes 존재 검사 (ADR-0032 §sub-1·sub-2 의 Hermes detect gate, CR2-CRIT-1)
     local agent_binary="${HERMES_BIN:-}"
     if [[ -z "$agent_binary" ]]; then
-        local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+        local yaml="$WIKIHUB_HOME/wikihub.yaml"
         if [[ -f "$yaml" ]]; then
             agent_binary="$("$VENV_PATH/bin/python3" -c \
                 "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('binary',''))" \
@@ -1070,15 +1123,15 @@ _step8_guide() {
 ${C_OK}=== WikiHub 설치 완료 ===${C_RST}
 
 [경로 구조]
-  $WIKIHUB_HOME/                          # repo (install.sh 가 git clone — sparse, ADR-0023)
+  $WIKIHUB_HOME/                          # ★ 운영 자산 (ADR-0034 — data-first, 메인테이너 편집 대상)
+      ├── wikihub.yaml                    # 운영 정본 — **/wh-setup 첫 호출이 .example 으로부터 생성 (ADR-0031)**
+      ├── _state/<vault_id>/              # cursor·file_map·retry·last_sync (자동)
+      ├── vault/<vault_id>/               # vault local mirror — rclone mount (자동)
+      └── wiki/                           # 통합 wiki (자동)
+  $WIKIHUB_SRC/                           # 시스템 코드 (XDG, install.sh 가 git clone — sparse, ADR-0023·ADR-0034)
+  ~/.credentials/wikihub/                 # SA credentials 외부 격리 (ADR-0029 §Decision 갱신 + ADR-0034)
   $VENV_PATH/                             # Python venv (install.sh 관리, 메인테이너 미관여)
   $GWS_BIN_DIR/gws                        # gws binary (install.sh 관리)
-  $WIKIHUB_INSTANCE_ROOT/                 # 운영 state (instance.root) — 메인테이너 편집 대상
-      ├── wikihub.yaml                    # 운영 정본 — **/wh:setup 첫 호출이 .example 으로부터 생성 (ADR-0031)**
-      ├── .credentials/                   # OAuth tokens (scp 배치 + chmod 600)
-      ├── _state/<vault_id>/              # cursor·file_map·retry·last_sync (자동)
-      ├── vault/<vault_id>/               # vault local mirror — rclone mount (자동, wikihub.yaml.example default 정합)
-      └── wiki/                           # 통합 wiki (자동)
   ~/.config/systemd/user/                 # systemd unit (install.sh _step8_systemd_render 관리)
 
 ${C_WARN}⚠ wikihub.yaml 은 아직 부재합니다 (ADR-0031 §Decision A — install.sh 는 yaml 미관여).${C_RST}
@@ -1088,9 +1141,9 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   1. /wh:setup 호출 — .example 으로부터 wikihub.yaml 자동 생성 (ADR-0031 Step 0):
        <agent_invocation> "/wh:setup"
      생성된 yaml 의 maintainer field (vault id, root_folder_id, fatal_webhook_url 등) 편집.
-  2. credentials 배치 — dev box (macOS) 에서 scripts/auth_gdrive.py 실행 후 scp:
-       scp ~/wikihub-credentials/token_gdrive.json user@$(hostname):$WIKIHUB_INSTANCE_ROOT/.credentials/
-       ssh user@$(hostname) 'chmod 600 $WIKIHUB_INSTANCE_ROOT/.credentials/token_*.json'
+  2. credentials 배치 — dev box (macOS) 에서 scripts/auth_gdrive.py 실행 후 scp (ADR-0029):
+       scp ~/wikihub-credentials/sa_gdrive.json user@$(hostname):~/.credentials/wikihub/
+       ssh user@$(hostname) 'chmod 600 ~/.credentials/wikihub/sa_*.json'
   3. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
        <agent_invocation> "/wh:setup --enable"
 
@@ -1098,7 +1151,7 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
 
 [install/update 동작 — dual-mode (ADR-0030)]
-  detect: $WIKIHUB_HOME/_system/VERSION + .git AND → update path / 미만족 → fresh path.
+  detect: $WIKIHUB_SRC/_system/VERSION + .git AND → update path / 미만족 → fresh path.
   update path: unstaged guard → systemd stop (15min grace) → git fetch + reset → render →
                daemon-reload → systemd start → verify. 실패 시 자동 rollback (직전 ref 복귀).
   fresh path: clean wipe + clone (ADR-0023 보존). user 파일 (instance.root) 미터치.
@@ -1112,8 +1165,8 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
                        (alert 발송 실패는 "webhook 발송 실패" warn 로 기록)
   mount 로그:         journalctl --user -t wikihub-mount-<vault_id> --since '24h ago'
   timer 상태:         systemctl --user list-timers '*wikihub*' 'lint*' '*-ingest*'
-  install 로그:       cat $WIKIHUB_INSTANCE_ROOT/install.log
-  last_failure 요약:  for s in \$WIKIHUB_INSTANCE_ROOT/_state/*/last_failure.json; do
+  install 로그:       cat $WIKIHUB_HOME/install.log
+  last_failure 요약:  for s in $WIKIHUB_HOME/_state/*/last_failure.json; do
                         [ -f "\$s" ] && echo "─ \$s" && cat "\$s"; done
                        (scope=vault: sync layer, scope=mount: rclone OAuth/SA — V<N> 결함 #7)
 
@@ -1134,7 +1187,7 @@ EOF
 # R2-HIGH-4: 동시 install.sh 호출 차단. fd 200 = flock target.
 # HIGH-N4 정합: bootstrap_clone_then_exec 진입 시 명시 close 후 exec.
 _acquire_install_lock() {
-    local lock="$WIKIHUB_INSTANCE_ROOT/install.lock"
+    local lock="$WIKIHUB_HOME/install.lock"
     exec 200>"$lock"
     if ! flock -n 200; then
         err "다른 install.sh 가 진행 중 (lock: $lock)"
@@ -1144,14 +1197,14 @@ _acquire_install_lock() {
 }
 
 # ─── mode detect ─────────────────────────────────────────────────────
-# C1 + #B: $WIKIHUB_HOME/_system/VERSION + .git AND → update mode.
+# C1 + #B: $WIKIHUB_SRC/_system/VERSION + .git AND → update mode.
 _detect_mode() {
-    if [[ -f "$WIKIHUB_HOME/_system/VERSION" ]] && [[ -d "$WIKIHUB_HOME/.git" ]]; then
+    if [[ -f "$WIKIHUB_SRC/_system/VERSION" ]] && [[ -d "$WIKIHUB_SRC/.git" ]]; then
         INSTALL_MODE="update"
         _verify_version_tag_integrity
-    elif [[ -f "$WIKIHUB_HOME/_system/VERSION" ]] || [[ -d "$WIKIHUB_HOME/.git" ]]; then
-        err "WIKIHUB_HOME ($WIKIHUB_HOME) 가 partial state — _system/VERSION 또는 .git 한쪽만 존재."
-        err "  진단: ls -la $WIKIHUB_HOME"
+    elif [[ -f "$WIKIHUB_SRC/_system/VERSION" ]] || [[ -d "$WIKIHUB_SRC/.git" ]]; then
+        err "WIKIHUB_SRC ($WIKIHUB_SRC) 가 partial state — _system/VERSION 또는 .git 한쪽만 존재."
+        err "  진단: ls -la $WIKIHUB_SRC"
         err "  복구: 의도적으로 wipe 하려면 --force-fresh, 이전 backup 복구는 수동."
         exit 1
     else
@@ -1168,8 +1221,8 @@ _detect_mode() {
 # HIGH-N2: VERSION 파일 값 vs git tag (exact-match) 비교 — warn only (dev branch 정합).
 _verify_version_tag_integrity() {
     local version_str tag_exact
-    IFS= read -r version_str < "$WIKIHUB_HOME/_system/VERSION" 2>/dev/null || version_str=""
-    tag_exact="$(git -C "$WIKIHUB_HOME" describe --tags --exact-match HEAD 2>/dev/null || true)"
+    IFS= read -r version_str < "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || version_str=""
+    tag_exact="$(git -C "$WIKIHUB_SRC" describe --tags --exact-match HEAD 2>/dev/null || true)"
     if [[ -n "$version_str" && -n "$tag_exact" ]]; then
         if [[ "${tag_exact#v}" != "$version_str" ]]; then
             warn "_system/VERSION ($version_str) 과 git tag ($tag_exact) mismatch — VERSION 위조 의심 또는 dev branch."
@@ -1185,9 +1238,9 @@ _resolve_ref() {
     if [[ -n "$EXPLICIT_VERSION" ]]; then
         # update mode 에서만 local check — fresh path 의 _step2_clone 은 git clone --branch 가 검증.
         if [[ "$INSTALL_MODE" == "update" ]]; then
-            if ! git -C "$WIKIHUB_HOME" rev-parse "refs/tags/${EXPLICIT_VERSION}" >/dev/null 2>&1; then
+            if ! git -C "$WIKIHUB_SRC" rev-parse "refs/tags/${EXPLICIT_VERSION}" >/dev/null 2>&1; then
                 err "--version ${EXPLICIT_VERSION}: tag 부재."
-                err "  fetch 후 tag 목록 확인: git -C $WIKIHUB_HOME tag --list"
+                err "  fetch 후 tag 목록 확인: git -C $WIKIHUB_SRC tag --list"
                 exit 1
             fi
         fi
@@ -1210,10 +1263,10 @@ _resolve_ref() {
     # FETCH_FAILED env 가 set 이면 path 4 (semver local cache) 또는 path 5 (main) 로.
     if [[ -z "${FETCH_FAILED:-}" ]]; then
         # 3. tag `latest` (ADR-0010 정본)
-        # CR2-HIGH-1: fresh path 에선 $WIKIHUB_HOME 부재 → local rev-parse 항상 fail → 무조건 path 5.
+        # CR2-HIGH-1: fresh path 에선 $WIKIHUB_SRC 부재 → local rev-parse 항상 fail → 무조건 path 5.
         # ls-remote 로 remote 의 `latest` 존재 여부 probe (네트워크 1회 추가).
         if [[ "$INSTALL_MODE" == "update" ]] \
-            && git -C "$WIKIHUB_HOME" rev-parse refs/tags/latest >/dev/null 2>&1; then
+            && git -C "$WIKIHUB_SRC" rev-parse refs/tags/latest >/dev/null 2>&1; then
             printf 'refs/tags/latest\n'
             return 0
         fi
@@ -1227,7 +1280,7 @@ _resolve_ref() {
     fi
     # 4. local cache fallback — semver max tag (R2-HIGH-3 + MED-N2)
     local local_semver
-    local_semver="$(git -C "$WIKIHUB_HOME" for-each-ref --sort=-v:refname --format='%(refname)' 'refs/tags/v*.*.*' 2>/dev/null | head -1 || true)"
+    local_semver="$(git -C "$WIKIHUB_SRC" for-each-ref --sort=-v:refname --format='%(refname)' 'refs/tags/v*.*.*' 2>/dev/null | head -1 || true)"
     if [[ -n "$local_semver" ]]; then
         warn "[network offline — using local semver max tag (not 'latest'): $local_semver]"
         printf '%s\n' "$local_semver"
@@ -1250,14 +1303,14 @@ _semver_gt() {
 # ─── update path (#B + C3 + LOW-N3) ──────────────────────────────────
 _step2_update() {
     # LOW-N3: trap 등록을 함수 진입 즉시 — VERSION read 실패 silent exit 회피
-    PRE_UPDATE_REF="$(git -C "$WIKIHUB_HOME" rev-parse HEAD)"
+    PRE_UPDATE_REF="$(git -C "$WIKIHUB_SRC" rev-parse HEAD)"
     export PRE_UPDATE_REF
     # CR2-HIGH-3: TERM·HUP 추가 — ssh disconnect / systemd shutdown / OOM kill 시 rollback 보장
     trap '_rollback_if_failed' ERR EXIT INT TERM HUP
 
-    info "[detected wikihub at $WIKIHUB_HOME]"
+    info "[detected wikihub at $WIKIHUB_SRC]"
     local current_version=""
-    IFS= read -r current_version < "$WIKIHUB_HOME/_system/VERSION" || current_version=""
+    IFS= read -r current_version < "$WIKIHUB_SRC/_system/VERSION" || current_version=""
     if [[ -z "$current_version" ]]; then
         err "_system/VERSION empty — 파일 손상 의심. \`--force-fresh\` 로 재설치 또는 수동 복구."
         exit 1
@@ -1267,14 +1320,14 @@ _step2_update() {
     [[ -z "${WIKIHUB_NONINTERACTIVE:-}${SKIP_CONFIRM:-}" ]] && sleep 5
 
     # 2a. unstaged guard (R2-HIGH-2 + index.lock 보강)
-    if [[ -f "$WIKIHUB_HOME/.git/index.lock" ]]; then
+    if [[ -f "$WIKIHUB_SRC/.git/index.lock" ]]; then
         err ".git/index.lock 잔존 — 직전 git 명령이 비정상 종료된 흔적."
-        err "  대처: 다른 git process 부재 확인 후 \`rm $WIKIHUB_HOME/.git/index.lock\` 후 재호출."
+        err "  대처: 다른 git process 부재 확인 후 \`rm $WIKIHUB_SRC/.git/index.lock\` 후 재호출."
         exit 1
     fi
-    if [[ -n "$(cd "$WIKIHUB_HOME" && git status --porcelain)" ]]; then
-        err "WIKIHUB_HOME 에 unstaged 변경 있음."
-        err "  대처: \`git -C ${WIKIHUB_HOME} stash\` 또는 \`--force-fresh\` 로 재설치"
+    if [[ -n "$(cd "$WIKIHUB_SRC" && git status --porcelain)" ]]; then
+        err "WIKIHUB_SRC 에 unstaged 변경 있음."
+        err "  대처: \`git -C ${WIKIHUB_SRC} stash\` 또는 \`--force-fresh\` 로 재설치"
         exit 1
     fi
 
@@ -1285,35 +1338,35 @@ _step2_update() {
     # F4 install.sh 의 `git clone --branch X --depth 1` 가 refspec 을 single-branch 로 제한.
     # update path 에서 다른 ref 를 fetch 하려면 refspec 을 default 로 normalize 필요 (운영
     # 첫 F4→update_mode 전환 시 critical).
-    git -C "$WIKIHUB_HOME" config --replace-all remote.origin.fetch \
+    git -C "$WIKIHUB_SRC" config --replace-all remote.origin.fetch \
         '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null || true
     # shallow clone 도 unshallow — arbitrary ref fetch 가능하도록 (idempotent).
-    git -C "$WIKIHUB_HOME" fetch --unshallow 2>/dev/null || true
+    git -C "$WIKIHUB_SRC" fetch --unshallow 2>/dev/null || true
 
     # CR2-MED-4: stderr 분리 (2>&1 제거) + CR2-HIGH-2: FETCH_FAILED export → _resolve_ref 가 path 3 skip
-    if ! git -C "$WIKIHUB_HOME" fetch origin --tags; then
+    if ! git -C "$WIKIHUB_SRC" fetch origin --tags; then
         warn "git fetch 실패 — local cache fallback 시도 (stale 'latest' 신뢰 안 함)"
         export FETCH_FAILED=1
     fi
     local target_ref
     target_ref="$(_resolve_ref)"
     info "git reset --hard ${target_ref}"
-    git -C "$WIKIHUB_HOME" reset --hard "$target_ref"
+    git -C "$WIKIHUB_SRC" reset --hard "$target_ref"
     # ADR-0023 §"Clone scope" + ADR-0030 §부정/제약 (HIGH-S1 design review):
     # _apply_sparse_checkout 호출 위치는 reset --hard **이후** — working tree mutation 의
     # origin = target_ref 채택 후. pre-feature 풀-clone 운영 서버가 본 update 에서 sparse
     # 로 자동 전환 + 이후 update 는 idempotent.
     _apply_sparse_checkout
     # post-condition (R2-HIGH-5)
-    if ! git -C "$WIKIHUB_HOME" diff --quiet HEAD --; then
+    if ! git -C "$WIKIHUB_SRC" diff --quiet HEAD --; then
         err "git reset --hard 후 working tree 여전히 dirty — disk full / 디스크 오류 의심"
-        err "  진단: df -h $WIKIHUB_HOME; git -C $WIKIHUB_HOME status"
+        err "  진단: df -h $WIKIHUB_SRC; git -C $WIKIHUB_SRC status"
         exit 2   # trap 이 rollback
     fi
 
     # 2e. VERSION 비교 + downgrade 분기 (R2-MED-2)
     local new_version=""
-    IFS= read -r new_version < "$WIKIHUB_HOME/_system/VERSION" || new_version=""
+    IFS= read -r new_version < "$WIKIHUB_SRC/_system/VERSION" || new_version=""
     if [[ "$current_version" == "$new_version" ]]; then
         info "already at v${new_version} — proceeding to systemd reorchestrate (idempotent)"
     elif _semver_gt "$current_version" "$new_version"; then
@@ -1343,7 +1396,7 @@ _rollback_if_failed() {
     if [[ $exit_code -eq 130 ]]; then
         err "사용자 abort (Ctrl+C) — 직전 systemd state 복구 시도"
         local current_ref
-        current_ref="$(git -C "$WIKIHUB_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
+        current_ref="$(git -C "$WIKIHUB_SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
         if [[ "$current_ref" == "${PRE_UPDATE_REF:-}" ]]; then
             warn "git tree 미변경. stop sequence 중간 abort 의심 — systemd 재기동 시도."
             _systemd_start_after_update 2>/dev/null \
@@ -1354,7 +1407,7 @@ _rollback_if_failed() {
 
     [[ -z "${PRE_UPDATE_REF:-}" ]] && return 0
     local current_ref
-    current_ref="$(git -C "$WIKIHUB_HOME" rev-parse HEAD 2>/dev/null || echo unknown)"
+    current_ref="$(git -C "$WIKIHUB_SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
     if [[ "$current_ref" == "$PRE_UPDATE_REF" ]]; then
         err "update 실패 (exit ${exit_code}) — git reset 전 단계. systemd 재기동 시도."
         _systemd_start_after_update 2>/dev/null || warn "systemd 재기동 실패 — 수동 복구"
@@ -1362,7 +1415,7 @@ _rollback_if_failed() {
     fi
 
     err "update 실패 (exit ${exit_code}) — 직전 ref ${PRE_UPDATE_REF:0:7} 로 자동 rollback"
-    git -C "$WIKIHUB_HOME" reset --hard "$PRE_UPDATE_REF" \
+    git -C "$WIKIHUB_SRC" reset --hard "$PRE_UPDATE_REF" \
         || { warn "rollback reset 실패 — 수동 복구"; exit $exit_code; }
     # ADR-0030 §부정/제약 (HIGH-S1): sparse-checkout 정책은 .git/info/sparse-checkout 에
     # 영속이라 PRE_UPDATE_REF (sparse 이전 ref) 의 install.sh 가 sparse 를 몰라도 working
@@ -1381,12 +1434,12 @@ _rollback_if_failed() {
 
 # ─── systemd orchestration (C4 + R2-CRIT-2 + CRIT-N2 + MED-N7) ──────
 _enabled_vaults_yaml() {
-    local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
     if [[ -x "$VENV_PATH/bin/python3" ]] \
-        && [[ -f "$WIKIHUB_HOME/scripts/_helpers/render_systemd_units.py" ]]; then
+        && [[ -f "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" ]]; then
         "$VENV_PATH/bin/python3" \
-            "$WIKIHUB_HOME/scripts/_helpers/render_systemd_units.py" \
+            "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" \
             --yaml "$yaml" --list-enabled 2>/dev/null
         return $?
     fi
@@ -1469,8 +1522,8 @@ _systemd_start_after_update() {
 _wait_mount_ready() {
     local v="$1" timeout="$2" elapsed=0 mount_path
     mount_path="$("$VENV_PATH/bin/python3" \
-        "$WIKIHUB_HOME/scripts/_helpers/render_systemd_units.py" \
-        --yaml "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" \
+        "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" \
+        --yaml "$WIKIHUB_HOME/wikihub.yaml" \
         --get-mount-path "$v" 2>/dev/null || true)"
     [[ -z "$mount_path" ]] && return 1
     mount_path="${mount_path/#\~/$HOME}"
@@ -1490,7 +1543,7 @@ _step8_systemd_render() {
         info "SKIP_SYSTEMD_RENDER 세팅됨 (Hermes 부재) — systemd render skip"
         return 0
     fi
-    local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
     if [[ ! -f "$yaml" ]]; then
         warn "wikihub.yaml 부재 — systemd render skip (yaml 편집 후 install.sh 재호출)"
         return 0
@@ -1498,7 +1551,7 @@ _step8_systemd_render() {
     info "systemd unit render → ~/.config/systemd/user/"
     mkdir -p "$HOME/.config/systemd/user"
     "$VENV_PATH/bin/python3" \
-        "$WIKIHUB_HOME/scripts/_helpers/render_systemd_units.py" \
+        "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" \
         --yaml "$yaml" \
         --render --out "$HOME/.config/systemd/user/" \
         || { err "render_systemd_units.py 실패"; return 2; }
@@ -1513,7 +1566,7 @@ _step8_wh_setup_skill_meta() {
         return 0
     fi
     [[ "$INSTALL_MODE" != "update" ]] && return 0
-    local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
     local agent_binary timeout_sec
     agent_binary="$("$VENV_PATH/bin/python3" -c \
@@ -1578,7 +1631,7 @@ _step11_banner() {
         # ADR-0031 (HIGH-S3): update path 에서도 yaml 부재 시 warn — update 도중 instance dir
         # wipe 또는 신규 vault 추가 시나리오 mitigation. _step8_guide 는 fresh 만 호출되므로
         # update path 전용 안내가 별도 필요.
-        if [[ ! -f "$WIKIHUB_INSTANCE_ROOT/wikihub.yaml" ]]; then
+        if [[ ! -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
             echo "  ${C_WARN}⚠ wikihub.yaml 부재 — /wh:setup 호출 전에는 systemd timer enable 금지 (ADR-0031).${C_RST}"
         fi
     fi
@@ -1635,7 +1688,7 @@ main() {
 }
 
 # main guard — `source install.sh` 또는 `. install.sh` 시 main path 가 자동 실행되어
-# Step 2 의 `rm -rf $WIKIHUB_HOME` 가 의도치 않게 trigger 되는 결함 차단
+# Step 2 의 `rm -rf $WIKIHUB_SRC` 가 의도치 않게 trigger 되는 결함 차단
 # (V<N> Phase 2 결함 #10, 2026-05-17 incident).
 #
 # 표준 실행 패턴은 직접 실행 (`bash install.sh`) 또는 curl-pipe (`curl ... | bash`).

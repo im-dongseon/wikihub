@@ -45,3 +45,14 @@ ADR-0021 의 reboot resilience 전략 (user-level systemd + linger) 과 결합 �
 - **후속 영향**:
   - install.sh 의 deps 갱신은 매 호출 `pip install -r requirements.txt --upgrade` — venv 자체는 idempotent skip.
   - venv 손상 시 운영자 수동 복구 절차: `rm -rf ~/.local/share/wikihub/venv && install.sh` 재호출.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
+
+XDG `~/.local/share/wikihub/` root 공유:
+
+| dir | 책임 | ADR |
+|---|---|---|
+| `~/.local/share/wikihub/venv/` | Python venv (uv 관리) | ADR-0020 (현행) |
+| `~/.local/share/wikihub/src/` | 시스템 코드 (git clone) | ADR-0034 (신규) |
+
+venv 위치 변경 없음. `WIKIHUB_SRC` env 가 src 부분만 override 가능 — venv 도 동일 root override 시 운영자 명시 설정.

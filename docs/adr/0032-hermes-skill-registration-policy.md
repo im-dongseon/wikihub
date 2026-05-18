@@ -77,3 +77,29 @@ F5 feature 가 5건의 wikihub skill (ingest·lint·query·graphify·setup) 의 
   - **ADR-0012** §Decision 갱신 — `oneshot_args` 의 `{skill}` placeholder semantics 추가 (per-unit substitution).
   - **ADR-0006** 영향 없음 — `_system/commands/` 정본성 보존 (install-time materialization 패턴).
   - **재검토 트리거**: (1) Hermes 가 advisory lock 도입 시 sub-4 protection 강화 가능. (2) codex/gemini 등 다른 agent 의 skill 시스템 매핑 추가 시 ADR-0012 의 agent-agnostic 모델과 본 ADR 의 wire format 정합 재평가. (3) Hermes 가 `external_dirs` 의 즉시 인식 보장 (재시작 불요) 안 하면 install.sh 가 `hermes skills audit` 자동 호출 정책 추가.
+
+## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
+
+ADR-0034 data-first layout invert 후 본 ADR §Decision 의 path 변경:
+
+### external_dirs path 변경
+
+- **Before**: `$WIKIHUB_HOME/_system/skills/_generated/` (이전 `WIKIHUB_HOME` = repo 의미)
+- **After**: `$WIKIHUB_SRC/_system/skills/_generated/` (ADR-0034 시스템 코드 dir)
+
+### sub-decision 영향
+
+- **sub-1 (`external_dirs` 채택)**: path 변경만, 정책 유지.
+- **sub-2 (install-time materialized)**: frontmatter source 위치 = `$WIKIHUB_SRC/_system/skills/wh-<cmd>.frontmatter.yaml`. commands body = `$WIKIHUB_SRC/_system/commands/<cmd>.md`. 결합 결과 = `$WIKIHUB_SRC/_system/skills/_generated/wh-<cmd>/SKILL.md`.
+- **sub-3 (marker comment + realpath 비교 idempotent guard)**: install.sh `_step6_agent_skill _patch_hermes_external_dirs` 가 realpath 비교 — path 만 변경되면 자동 detect. migration helper (`scripts/_helpers/hermes_config_migrate.py`) 가 stale entry (이전 `$WIKIHUB_HOME/_system/skills/_generated/`) 제거 + 신규 entry 추가 (marker comment 검증으로 wikihub-managed 만 영향, 운영자 등록 entry 보존).
+- **sub-4 (flock + backup + sha256 + retention)**: 정책 유지. migration helper 도 동일 safety 패턴.
+
+### migration 자동화 (ADR-0034 §sub-3 정합)
+
+`scripts/migrate_layout.sh` 의 Step 5 가 `scripts/_helpers/hermes_config_migrate.py` 호출:
+- `--remove-stale "$LEGACY_REPO/_system/skills/_generated"`
+- `--add-new "$NEW_SRC/_system/skills/_generated"`
+
+운영자가 직접 등록한 marker 부재 entry 는 보존 (CR2-HIGH-1 정합).
+
+Status 변경 없음. path + migration 자동화 추가.

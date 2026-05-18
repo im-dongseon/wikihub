@@ -52,15 +52,15 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 
 #### Step 0.2. Materialize 또는 Drift Sync 분기
 
-##### Case A — `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml` 부재
+##### Case A — `$WIKIHUB_HOME/wikihub.yaml` 부재
 
 1. `yaml_writer.load_yaml_rt($WIKIHUB_HOME/wikihub.yaml.example)` 로 round-trip load (주석 보존).
 2. **Derived 4필드 patching** (ADR-0031 §Decision B catalog):
-   - `instance.root` → `$WIKIHUB_INSTANCE_ROOT` env
+   - `instance.root` → `$WIKIHUB_HOME` env
    - `vaults[*].local_path` → `<instance.root>/vault/<vault.id>`
    - `vaults[*].options.credentials_path` → `<instance.root>/.credentials/sa_<vault.id>.json`
    - `operations.gws_min_version` → `$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json` 의 `gws` 필드 (file 부재 시 `gws --version` stdout fallback)
-3. `yaml_writer.atomic_yaml_write($WIKIHUB_INSTANCE_ROOT/wikihub.yaml, data, round_trip=True)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os.replace).
+3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data, round_trip=True)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os.replace).
 4. 보고:
    ```
    wikihub.yaml 생성 완료 (.example → operational, 4 필드 patching 적용).
@@ -69,7 +69,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
    ```
 5. Step 1 진입.
 
-##### Case B — `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml` 존재
+##### Case B — `$WIKIHUB_HOME/wikihub.yaml` 존재
 
 1. `yaml_writer.load_yaml_rt(target)` 로 round-trip load.
 2. Step 0.1 의 schema version 검증.
@@ -180,7 +180,7 @@ daemon-reload 완료.
 
 ### Step 5.5. rclone Service Account 등록 (ADR-0025 Path C+ + ADR-0029 SA 정본, vault 별 1회성)
 
-**진입 조건**: Step 1~5 통과 + `vaults[*].options.rclone_remote_name` 정의 + `~/.config/rclone/rclone.conf` 의 해당 remote 미등록 + `~/wikihub-instance/.credentials/sa_<vault_id>.json` 배치 완료 (SA JSON key, chmod 0600).
+**진입 조건**: Step 1~5 통과 + `vaults[*].options.rclone_remote_name` 정의 + `~/.config/rclone/rclone.conf` 의 해당 remote 미등록 + `~/.credentials/wikihub/sa_<vault_id>.json` 배치 완료 (SA JSON key, chmod 0600).
 
 **SA 사전 준비** (메인테이너 1회):
 1. Google Cloud Console → IAM & Admin → Service Accounts → "Create service account"
@@ -195,9 +195,9 @@ daemon-reload 완료.
    repo 내부에 절대 두지 말 것 — `.gitignore` 패턴 의존 금지 (메인테이너 가이드 §1 Separation of Concerns).
 5. **운영 VM/서버 로 scp**:
    ```bash
-   ssh user@oci 'mkdir -p ~/wikihub-instance/.credentials && chmod 0700 ~/wikihub-instance/.credentials'
-   scp ~/.credentials/wikihub/sa_<project>.json user@oci:~/wikihub-instance/.credentials/sa_<vault_id>.json
-   ssh user@oci 'chmod 0600 ~/wikihub-instance/.credentials/sa_<vault_id>.json'
+   ssh user@oci 'mkdir -p ~/.credentials/wikihub && chmod 0700 ~/.credentials/wikihub'
+   scp ~/.credentials/wikihub/sa_<project>.json user@oci:~/.credentials/wikihub/sa_<vault_id>.json
+   ssh user@oci 'chmod 0600 ~/.credentials/wikihub/sa_<vault_id>.json'
    ```
    로컬 파일명은 `sa_<project>.json` (Cloud project 1:1), 운영 파일명은 `sa_<vault_id>.json` (vault 1:1 — yaml `credentials_path` 와 정합).
 6. Drive vault 폴더 (`root_folder_id`) UI → "Share" → SA 이메일 (`<sa>@<project>.iam.gserviceaccount.com`) **Editor** 권한 부여
@@ -209,7 +209,7 @@ daemon-reload 완료.
 3. type 선택: `18` (drive)
 4. client_id/secret: 빈칸 (rclone 기본 사용)
 5. scope: `1` (full access)
-6. **service_account_file**: `~/wikihub-instance/.credentials/sa_<vault_id>.json` (절대 경로) — SA JSON key (ADR-0029)
+6. **service_account_file**: `~/.credentials/wikihub/sa_<vault_id>.json` (절대 경로) — SA JSON key (ADR-0029)
 7. Edit advanced config: `n`
 8. Use auto config — SA 채택 시 browser OAuth flow 불필요, 자동 skip
 9. Configure as Shared Drive: `n` (메인테이너 Personal Drive 의 폴더 공유 모델)
@@ -220,7 +220,7 @@ daemon-reload 완료.
 ```bash
 rclone config create <remote_name> drive \
     scope=drive \
-    service_account_file=$HOME/wikihub-instance/.credentials/sa_<vault_id>.json
+    service_account_file=$HOME/.credentials/wikihub/sa_<vault_id>.json
 chmod 0600 ~/.config/rclone/rclone.conf
 ```
 

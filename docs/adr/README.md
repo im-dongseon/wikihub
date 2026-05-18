@@ -88,6 +88,7 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0031](0031-yaml-template-materialization.md) | wikihub.yaml template materialization — `/wh:setup` Step 0 단독 writer + 4-필드 patching + confirm drift fix + ruamel.yaml round-trip + Step 6 helper 통합 + §E schema version 정책 | Accepted | 2026-05-17 / 2026-05-18 (v2 + Step 4 통과) | `20260517_install_scope_reduction` |
 | [ADR-0032](0032-hermes-skill-registration-policy.md) | Hermes skill 등록 정책 — `external_dirs` + install-time materialized SKILL.md + marker comment + flock·backup·sha256 safety (4 sub-decision) | Accepted | 2026-05-18 | `20260518_hermes_adapter` |
 | [ADR-0033](0033-skill-prefix-hyphen-lock.md) | Skill namespace prefix lock — `wh-` (hyphen) — **Supersedes ADR-0011** | Accepted | 2026-05-18 | `20260518_hermes_adapter` |
+| [ADR-0034](0034-data-first-layout.md) | Data-first layout — `~/wikihub/` = 운영 자산 + `~/.local/share/wikihub/src/` = 시스템 코드 (XDG). env swap (WIKIHUB_HOME 의미 변경 + WIKIHUB_SRC 신규 + WIKIHUB_INSTANCE_ROOT 폐기) + migration helper + mv-only backup (4 sub-decision) | Accepted | 2026-05-19 | `20260519_dir_layout_refactor` |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

@@ -12,58 +12,65 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 
 ## 디렉토리 구조
 
+ADR-0034 (data-first layout) 후 디렉토리는 **운영 자산** 과 **시스템 코드** 가 분리:
+
 ```
-/opt/wikihub/                         # WikiHub 인스턴스 (instance.root, wikihub.yaml로 설정 가능)
-├── _system/                          # 정본 룰 + 명령어 playbook (install.sh가 fetch·갱신)
-│   ├── VERSION                       #   설치 버전 (예: 0.1.0)
-│   ├── wiki-schema.md                #   본 문서 (지식 모델 정본)
-│   ├── commands/                     #   /wh-* 명령어 playbook (ADR-0033 — wh- hyphen lock)
-│   │   ├── ingest.md
-│   │   ├── lint.md
-│   │   ├── query.md
-│   │   ├── graphify.md
-│   │   └── setup.md
-│   └── systemd/                      #   systemd unit template (F4 산출물)
-│       ├── *-ingest.{service,timer}
-│       ├── lint.{service,timer}
-│       └── ops-alert.service
+${WIKIHUB_HOME}/                      ★ 운영 자산 (default ~/wikihub, ADR-0034)
+├── wikihub.yaml                      # 운영 정본 (/wh-setup materialize, ADR-0031)
 ├── wiki/                             # LLM이 작성·관리하는 마크다운 + sync가 작성한 source 페이지
 │   ├── index.md                      #   전체 카탈로그 (단일, /wh-lint가 재구성)
 │   ├── sources/                      #   원시 입력의 wiki 표현 (sync 작성)
 │   │   └── {vault_id}/               #   vault namespace 분리 (ADR-0001)
 │   │       ├── log.md                #     vault별 sync·ingest 이력 (append-only)
 │   │       └── {path}.{ext}.md       #     단일 파일 모델 (원본 binary는 vault에 보존)
-│   ├── entities/                     #   인물·조직·제품·프로젝트 hub (agent 작성)
-│   │   └── <name>.md
-│   ├── concepts/                     #   개념·용어·방법론 hub (agent 작성)
-│   │   └── <name>.md
-│   ├── analyses/                     #   합성 분석 — /wh-query 자동 저장 (agent 작성)
-│   │   └── <slug>.md
-│   ├── _lint/                        #   /wh-lint 진단 보고서
-│   │   └── report.md
+│   ├── entities/<name>.md            #   인물·조직·제품·프로젝트 hub (agent 작성)
+│   ├── concepts/<name>.md            #   개념·용어·방법론 hub (agent 작성)
+│   ├── analyses/<slug>.md            #   합성 분석 — /wh-query 자동 저장 (agent 작성)
+│   ├── _lint/report.md               #   /wh-lint 진단 보고서
 │   └── .archived/                    #   --apply로 archive된 페이지 (보존)
-│       └── {category}/{name}-{utc_iso}.md
-├── _state/                           # vault별 sync 영속 상태 (all JSON, ADR-0007)
-│   └── {vault_id}/
-│       ├── cursor.json
-│       ├── file_map.json
-│       ├── last_sync.json
-│       ├── pending_ingest.json       #   부분 실패 복구 (있을 때만)
-│       └── retry.json
-├── .credentials/                     # OAuth 토큰 (chmod 600, ADR-0003)
-│   └── token_{vault_id}.json          # JSON 포맷 (gws GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE 호환, ADR-0014)
-├── scripts/                          # sync 스크립트 (install.sh가 fetch)
-│   └── vault-fetch.py
-├── wikihub.yaml                      # 운영 정본 (메인테이너 수기, git 미추적)
-├── wikihub.yaml.example              # template (install.sh가 복사 source)
+├── _state/{vault_id}/                # vault별 sync 영속 상태 (all JSON, ADR-0007)
+│   ├── cursor.json
+│   ├── file_map.json
+│   ├── last_sync.json
+│   ├── pending_ingest.json           #   부분 실패 복구 (있을 때만)
+│   ├── retry.json
+│   └── last_failure.json             #   ADR-0024
+├── vault/{vault_id}/                 # rclone FUSE mount (ADR-0025) — vault 다운로드 위치 (binary 포함)
 ├── graphify-out/                     # graphify 산출물 (자동 생성, git 미추적)
 │   ├── graph.json
 │   └── GRAPH_REPORT.md
-└── logs/                             # runtime 로그
-    └── *.log
+├── install.log                       # install.sh stdout/stderr (R10 HIGH-7)
+└── logs/*.log                        # runtime 로그
 
-/opt/vault-{vault_id}/                # 외부 vault (sync 다운로드 대상, wikihub 외부)
-    └── ...                           #   원본 파일 (binary 포함, 그대로 보존)
+${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/wikihub/src, ADR-0034 XDG)
+├── .git/                             # install.sh git clone target
+├── _system/                          # 정본 룰 + 명령어 playbook (install.sh fetch·갱신)
+│   ├── VERSION                       #   설치 버전 (예: 0.1.0)
+│   ├── wiki-schema.md                #   본 문서 (지식 모델 정본)
+│   ├── commands/                     #   /wh-* 명령어 playbook (ADR-0033 — wh- hyphen lock)
+│   │   └── {ingest,lint,query,graphify,setup}.md
+│   ├── skills/                       #   Hermes skill — frontmatter source + materialized SKILL.md
+│   │   ├── wh-{ingest,lint,query,graphify,setup}.frontmatter.yaml
+│   │   └── _generated/wh-{cmd}/SKILL.md   # install-time materialized (.gitignore)
+│   └── systemd/                      #   systemd unit template (F4 산출물)
+│       ├── wikihub-{vault,mount}@.service.template
+│       ├── lint.{service,timer}.template
+│       └── ops-alert.service
+├── scripts/                          # 인프라 스크립트
+│   ├── vault-fetch.py
+│   ├── ops-alert.py
+│   ├── migrate_layout.sh             #   ADR-0034 layout migration helper
+│   └── _helpers/{render_systemd_units,hermes_config_migrate}.py
+├── install.sh
+├── wikihub.yaml.example              # /wh-setup 의 read-only template (ADR-0031)
+└── .venv_path                        # venv path sidecar (ADR-0020)
+
+~/.local/share/wikihub/venv/          # Python venv (ADR-0020 — WIKIHUB_SRC 와 동일 XDG root)
+~/.credentials/wikihub/               # SA credentials 외부 격리 (ADR-0029 §Decision 갱신)
+│   └── sa_{vault_id}.json            #   chmod 0600
+~/.config/systemd/user/               # systemd user units (install.sh _step8 render)
+~/.hermes/                            # Hermes config (외부 도구, ADR-0032 external_dirs 참조)
+~/.config/rclone/rclone.conf          # rclone config (chmod 0600)
 ```
 
 **상세 디렉토리 책임**은 F1 archive `analysis_and_design.md` §4.1.1 + 본 문서 §책임 매트릭스 참조.
@@ -268,7 +275,7 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참�
 
 | 자원 | sync (vault-fetch.py) | agent (/wh-* 명령) |
 |---|---|---|
-| `/opt/vault-{vault}/*` | 다운로드·갱신 | read-only |
+| `${WIKIHUB_HOME}/vault/{vault}/*` | 다운로드·갱신 | read-only |
 | `wiki/sources/{vault}/*.md` | 통째 작성 (frontmatter + body) | read-only |
 | `wiki/sources/{vault}/log.md` | append (sync 사이클 메타) + agent append (semantic phase 메타) | append (semantic 결과) |
 | `wiki/entities/`, `concepts/` | 미접근 | 생성·갱신 (`referenced_by` 추가, stub) |

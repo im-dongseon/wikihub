@@ -1,14 +1,16 @@
 # WikiHub 운영 정본 (wikihub.yaml) 의 read-only template — ADR-0031.
-# `/wh:setup` 첫 호출이 본 파일을 read → derived 4필드 patching → $WIKIHUB_INSTANCE_ROOT/wikihub.yaml 에 atomic write.
+# `/wh-setup` 첫 호출이 본 파일을 read → derived 4필드 patching → $WIKIHUB_HOME/wikihub.yaml 에 atomic write.
 # install.sh 는 yaml 미관여 (ADR-0031 §Decision A — Partially supersedes ADR-0010).
-# 이후 메인테이너가 operational yaml 에서 vault 정의·credentials_path·bootstrap_allowed 등 채운 후 /wh:setup --enable 재호출.
+# 이후 메인테이너가 operational yaml 에서 vault 정의·credentials_path·bootstrap_allowed 등 채운 후 /wh-setup --enable 재호출.
 #
-# 본 파일은 v0.1.0 schema v1 정합 (analysis_and_design.md §4.5 + ADR-0031).
+# 본 파일은 v0.1.0 schema v1 정합 (ADR-0031·ADR-0034).
+# v0.1.0 layout (ADR-0034): ~/wikihub/ = 운영 자산 (WIKIHUB_HOME), ~/.local/share/wikihub/src/ = 시스템 코드 (WIKIHUB_SRC).
+# WIKIHUB_INSTANCE_ROOT env 폐기 — WIKIHUB_HOME 으로 통일 (ADR-0034 §sub-2 — v0.1.0 release 전 architectural refactor, backwards-incompat concern 없음).
 
 version: 1
 
 instance:
-  root: ~/wikihub-instance
+  root: ~/wikihub                     # ADR-0034: WIKIHUB_HOME 의미 = 운영 자산 dir (data-first)
   timezone: Asia/Seoul
 
 vaults:
@@ -16,15 +18,15 @@ vaults:
     type: gdrive_api
     enabled: false             # 운영 시작 시 true 로 변경
     sync_interval_sec: 600     # 10분
-    local_path: ~/wikihub-instance/vault/gdrive    # v9: rclone mount 가 마운트하는 path (= mount_path 정합). ADR-0025
+    local_path: ~/wikihub/vault/gdrive             # v9: rclone mount 가 마운트하는 path (= mount_path 정합). ADR-0025
     options:
-      credentials_path: ~/wikihub-instance/.credentials/sa_gdrive.json   # ADR-0029: Service Account JSON key (Google Cloud Console 발급). gws 는 GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE env, rclone 은 rclone.conf 의 service_account_file 로 동일 path 참조
+      credentials_path: ~/.credentials/wikihub/sa_gdrive.json   # ADR-0029 (v0.2.0 §Decision 갱신): SA JSON 외부 격리 (운영 자산 dir 내부 비밀 미배치). chmod 0600. gws 는 GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE env, rclone 은 rclone.conf 의 service_account_file 로 동일 path 참조
       root_folder_id: ""              # Drive 의 vault root folder ID. SA 채택 (ADR-0029) 후엔 명시 필수 — SA 가 공유받은 폴더만 접근, 빈 문자열이면 SA 의 본인 home (빈 상태) 만 보임
       exclude_shared_with_me: true    # sharedWithMe 파일 제외 (trust boundary). SA 채택 시 ownedByMe 자체 부재 — 의미적으로 SA 가 공유받은 폴더 = sharedWithMe 라 기본 false 후보 (v0.2.x 재검토)
       max_file_size_mb: 50            # 큰 파일 skip threshold (F3 SIG-3)
-      bootstrap_allowed: false        # 첫 sync 시에만 true → /wh:setup Step 6 prompt 가 자동 false 환원
+      bootstrap_allowed: false        # 첫 sync 시에만 true → /wh-setup Step 6 prompt 가 자동 false 환원
       # v9 신규 (ADR-0025·0026·0027 — Path C+):
-      mount_path: ~/wikihub-instance/vault/gdrive   # local_path 와 동일 — rclone mount 가 마운트하는 path. ADR-0025
+      mount_path: ~/wikihub/vault/gdrive            # local_path 와 동일 — rclone mount 가 마운트하는 path. ADR-0025
       rclone_remote_name: gdrive                    # ~/.config/rclone/rclone.conf 의 remote 이름 (setup.md Step 5.5 정합)
       rclone_rc_port: 5572                          # per-vault rclone rc port. 다중 vault 시 +1 순번 (install.sh Step 5.5c pre-check)
 

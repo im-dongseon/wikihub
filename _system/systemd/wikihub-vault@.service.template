@@ -7,13 +7,13 @@ OnFailure=ops-alert.service
 
 [Service]
 Type=oneshot
-WorkingDirectory={instance_root}
+WorkingDirectory={wikihub_home}
 # WorkingDirectory 가 부재 시 systemd 가 즉시 203/CHDIR fail — 운영자가 instance.root 디렉토리를
 # 직접 변경한 후 mkdir 누락 시 fatal. /wh-setup 의 Step 1 (디렉토리 ensure) 가 매 호출 보장 책임.
 # R10 CRIT-2 추가 안전망: ExecStartPre 가 yaml 편집 후 setup 미호출 + reboot 케이스 자가 복구.
-ExecStartPre=/bin/mkdir -p {instance_root}
+ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
-Environment=WIKIHUB_YAML={instance_root}/wikihub.yaml
+Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
 Environment=GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE={credentials_path}
 Environment=RCLONE_RC_ADDR=127.0.0.1:{rc_port_for_%i}
 ExecStart={agent_invocation_for_wh_ingest} "/wh-ingest --vault %i"

@@ -8,13 +8,13 @@ StartLimitBurst=3
 [Service]
 Type=oneshot
 RemainAfterExit=no
-WorkingDirectory={instance_root}
+WorkingDirectory={wikihub_home}
 # R10 CRIT-2: instance.root 미존재 시 자가 복구. ops-alert 자체가 final dispatcher 이므로
 # ExecStartPre 실패는 StartLimitBurst 로 차단 (OnFailure recursion 회피).
-ExecStartPre=/bin/mkdir -p {instance_root}
+ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
-Environment=WIKIHUB_YAML={instance_root}/wikihub.yaml
-ExecStart={venv_path}/bin/python {wikihub_home}/scripts/ops-alert.py
+Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
+ExecStart={venv_path}/bin/python {wikihub_src}/scripts/ops-alert.py
 # R16-M1 (V<N> R16 SRE 리뷰): 30s → 180s. ops-alert.py 의 collect_mount_fallback_failures
 # 가 vault 마다 systemctl is-failed (5s) + journalctl -u (10s) 호출 — N vault 시 최악 N*15s.
 # 5 vault 시 75s 가능 → 30s timeout 초과 → StartLimitBurst 카운트 소진 시 silent. 180s 면
