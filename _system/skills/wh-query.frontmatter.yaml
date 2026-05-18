@@ -1,0 +1,12 @@
+name: wh-query
+description: 자연어 질의 + 분석 결과 wiki 저장. wikihub spec — _system/commands/query.md playbook.
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, query, search]
+  category: knowledge-management
+  config:
+    wikihub_home_required: true
+required_environment_variables:
+  - WIKIHUB_HOME
+  - WIKIHUB_INSTANCE_ROOT

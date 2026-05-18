@@ -1,0 +1,12 @@
+name: wh-ingest
+description: 특정 vault 의 변경 콘텐츠를 wiki 에 통합. systemd timer 가 호출하는 sync→ingest 자동화 사슬의 진입점. wikihub spec — ADR-0006 unified orchestration.
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, vault, ingest, sync]
+  category: knowledge-management
+  config:
+    wikihub_home_required: true
+required_environment_variables:
+  - WIKIHUB_HOME
+  - WIKIHUB_INSTANCE_ROOT

@@ -170,3 +170,11 @@ precondition 미충족 시 install.sh는 fail-fast + remediation 안내 (예: `a
 - v1 → v2 같은 incompatible 변경 시: install.sh가 schema migration guide URL 안내 + fail-fast (메인테이너가 yaml 수기 마이그레이션 후 재실행)
 - 동일 major version 내 키 추가는 install.sh가 기본값으로 yaml에 append (메인테이너 review 권장 안내)
 - v0.1.0 → v0.1.x는 동일 schema 가정. v1.0 진입 시 migration 정책 정식 확정
+
+## Note (2026-05-18, feature `hermes_adapter` F5)
+
+본 ADR 의 §"도구별 책임 매트릭스" 의 install.sh Step 6 책임 (`hermes skill add --name <prefix><cmd> --playbook /opt/wikihub/_system/commands/<cmd>.md`) 명세화:
+
+- **install.sh `_step6_agent_skill`** 책임 — Hermes 의 SKILL.md materialization (frontmatter + `_system/commands/<cmd>.md` 본문 결합) + `~/.hermes/config.yaml` 의 `skills.external_dirs` 패치 + 등록 검증. ADR-0032 정본.
+- **playbook path 정본** — `_system/commands/<cmd>.md` 유지 (ADR-0006 정합, F5 의 5.2.B 채택). `_system/skills/_generated/wh-<cmd>/SKILL.md` 는 install-time build artifact (git untracked).
+- **Hermes 미설치 시** — `_step6_agent_skill` 가 detect → `SKIP_SYSTEMD_RENDER` flag → systemd unit render/enable 둘 다 skip. install.sh exit 0. 운영자가 Hermes 설치 후 재호출 권장 (CR2-CRIT-1 해결).

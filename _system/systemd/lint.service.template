@@ -11,9 +11,9 @@ WorkingDirectory={instance_root}
 ExecStartPre=/bin/mkdir -p {instance_root}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WIKIHUB_YAML={instance_root}/wikihub.yaml
-ExecStart={agent_invocation} "{skill_prefix}lint"
+ExecStart={agent_invocation_for_wh_lint} "/wh-lint"
 SuccessExitStatus=0 75
-TimeoutStartSec=10min
+TimeoutStartSec={timeout_start_sec}sec
 SyslogIdentifier=wikihub-lint
 
 # Restart= 미설정 (F1 §4.8.2 정합) — oneshot 의 재시도는 timer 책임.

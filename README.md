@@ -8,15 +8,15 @@
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-Design%20Phase-orange)](features/20260513_v030_initial_architecture/analysis_and_design.md)
-[![Version](https://img.shields.io/badge/Version-0.1.0--alpha-blue)](AGENTS.md)
+[![Status](https://img.shields.io/badge/Status-v0.1.0%20ready-green)](features/archive/)
+[![Version](https://img.shields.io/badge/Version-0.1.0-blue)](AGENTS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
 ---
 
-> **개발 상태**: 본 리포는 설계 단계입니다. 메소드론과 첫 feature의 분석·설계가 진행 중이며, 운영 가능한 구현체는 아직 없습니다. 운영 사용은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate)을 참조하십시오.
+> **개발 상태** (2026-05-18 기준): v0.1.0 acceptance 달성 — F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 hermes_adapter 모두 archive. install.sh 의 dual-mode lifecycle (fresh/update + ADR-0030 rollback trap) + Hermes skill registration (ADR-0032·0033) + multipass VM end-to-end 검증 (V3 dispatch chain: systemd vault@gdrive.service → hermes wh-ingest → vault-fetch.py → wiki/sources/gdrive/) 정합. v0.1.0 일괄 deployment 진행 가능. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
 
 ---
 
@@ -82,9 +82,18 @@ gws OAuth (macOS dev box 의 `scripts/auth_gdrive.py`) 와 token 분리 — 같�
 
 ---
 
-## 설치 / 업데이트 (ADR-0010 + ADR-0030)
+## 설치 / 업데이트 (ADR-0010 + ADR-0030 + ADR-0032)
 
 운영 시 install 과 update 는 **동일 명령**. install.sh 가 `$WIKIHUB_HOME/_system/VERSION` + `.git` 존재 여부로 자동 분기.
+
+### Prerequisites (F5 ADR-0032 안내)
+
+- **Hermes CLI** 사전 설치 필수 — wikihub 가 직접 설치하지 않음. `command -v hermes` 가 absolute path 반환 가능해야 함 (alias/wrapper 미지원).
+- install.sh 가 `~/.hermes/config.yaml` 의 `skills.external_dirs` 에 wikihub skill path 추가. 변경 시 backup 자동 생성 (`~/.hermes/config.yaml.wikihub-bak.<ts>`, 7일 retention).
+- `WIKIHUB_NONINTERACTIVE=1` 모드 사용 시 외부 자산 (~/.hermes/config.yaml) mutate 도 자동 동의 포함. 의도 안 하면 unset 후 호출.
+- Hermes 미설치 시 install.sh 는 success exit 하되 systemd unit render/enable skip (운영자가 Hermes 설치 후 재호출 권장).
+
+### 호출
 
 ```bash
 # 표준 — install / update 공용
@@ -98,12 +107,14 @@ curl -fsSL ... | bash -s -- --version v0.1.0
 curl -fsSL ... | bash -s -- --force-fresh
 ```
 
-동작:
-- **fresh install** (`_system/VERSION` 부재): `git clone` + venv + systemd render + 운영자 안내.
-- **update** (`_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
-- 현재 버전 조회: `cat $WIKIHUB_HOME/_system/VERSION` (default `~/wikihub/_system/VERSION`).
+### 동작
 
-상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`features/20260517_update_mode/analysis_and_design.md`](features/20260517_update_mode/analysis_and_design.md).
+- **fresh install** (`_system/VERSION` 부재): `git clone` + venv + skill materialize + ~/.hermes/config.yaml 패치 + systemd render + 운영자 안내.
+- **update** (`_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → skill 재materialize + schema migration (필요시) → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
+- 현재 버전 조회: `cat $WIKIHUB_HOME/_system/VERSION` (default `~/wikihub/_system/VERSION`).
+- Hermes skill 5건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-graphify`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list | grep ^wh-`.
+
+상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md) + [`features/20260517_update_mode/analysis_and_design.md`](features/20260517_update_mode/analysis_and_design.md).
 
 ---
 
@@ -168,7 +179,7 @@ wikihub/
 
 ## 로드맵
 
-v0.1.0 feature 진행 상황 (2026-05-17 기준):
+v0.1.0 feature 진행 상황 (2026-05-18 기준 — **acceptance 달성**):
 
 | Feature | 범위 | 상태 |
 |---|---|---|
@@ -176,13 +187,14 @@ v0.1.0 feature 진행 상황 (2026-05-17 기준):
 | **F2: `wikihub_schema_v1`** | `_system/wiki-schema.md` + `_system/commands/*` 구현 | ✅ archive |
 | **F3: `vault_gdrive_api`** | `scripts/sync.py` + Drive API + cursor/file_map 영속화 | ✅ archive |
 | **F4: `install_runtime`** | `install.sh` + systemd unit (mount@/vault@/timer/ops-alert/lint) + rclone mount + vfs/refresh + SA 인증 (ADR-0029) | ✅ archive (2026-05-17) |
-| **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh:*` skill ↔ Hermes skill 시스템 정합화. F4 surface 의 결함 #12 lock | ⏸ 진행 예정 |
-| **`update_mode`** | `install.sh` dual-mode (fresh / update) + `_system/VERSION` detect + tag `latest` ref + rollback trap + systemd orchestration + log rotation. F4 의 결함 #A·#B·#C·#D + R16-L2 일괄 fix. ADR-0030 신설 | ✅ archive (2026-05-17) |
+| **`update_mode`** | `install.sh` dual-mode (fresh / update) + `_system/VERSION` detect + tag `latest` ref + rollback trap + systemd orchestration + log rotation. F4 결함 #A·#B·#C·#D + R16-L2 일괄 fix. ADR-0030 신설 | ✅ archive (2026-05-17) |
+| **`install_scope_reduction`** | sparse-checkout 6필드 lock + install.sh yaml 미관여 + `/wh-setup` Step 0 yaml writer 단독 책임 + ruamel.yaml round-trip. F4 결함 #E·#F closure. ADR-0031 신설 | ✅ archive (2026-05-18) |
+| **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh-*` skill ↔ Hermes skill 시스템 정합화 (`hermes chat --skills <name> --quiet --query "/<name> ..."`). install-time materialized SKILL.md (frontmatter + commands body) + external_dirs + flock·backup·sha256 + Hermes detect gate. F4 결함 #12 closure. ADR-0032 (skill registration policy) + ADR-0033 (`wh-` prefix lock, supersedes ADR-0011) 신설 | ✅ archive (2026-05-18) |
 | **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
 
-v0.1.0 acceptance = F4 (✅) + F5 + update_mode (✅). v0.1.0 일괄 deployment 는 F5 완료 후 진행.
+**v0.1.0 acceptance 달성** = F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 (모두 archive). install + update + skill registration + sync→ingest 자동화 사슬 end-to-end 검증 (multipass VM `wikihub-fresh` + Hermes v0.14.0 + Opencode.ai/deepseek-v4-pro provider 환경에서 V1·V2·V3·V5a·V6·V7·V8·V9 PASS). v0.1.0 일괄 deployment 진행 가능.
 
-자세한 backlog (R15·R16 Could 8건 + 결함 surface) 는 [`features/backlog.md`](features/backlog.md) 참조.
+자세한 backlog (R15·R16 Could 8건 + F5 surface 의 #G mount@ root_folder_id 전파 등) 는 [`features/backlog.md`](features/backlog.md) 참조.
 
 ---
 

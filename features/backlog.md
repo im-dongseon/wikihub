@@ -8,7 +8,8 @@
 
 | ID | 영역 | 항목 | 해결 방향 (제안) |
 |---|---|---|---|
-| #12 | agent integration | Hermes 의 `-z` 가 LLM prompt 직접 전달 — wikihub spec 의 `wh:<skill>` slash-command 자동 매핑 안 함. ADR-0002·0011·0012 의 hermes invocation 가정과 실 Hermes 동작 mismatch | F5 (hermes_adapter) — Hermes skill 정의 (SKILL.md) 또는 ADR-0012 옵션 β (wrapper script dispatcher) 채택. v0.1.0 운영 시작의 blocker |
+| ~~#12~~ | ~~agent integration~~ | ~~Hermes 의 `-z` 가 LLM prompt 직접 전달 — wikihub spec 의 `wh:<skill>` slash-command 자동 매핑 안 함~~ | ✅ **closed** by `hermes_adapter` (2026-05-18) — ADR-0032 (registration policy, external_dirs + install-time materialized SKILL.md) + ADR-0033 (`wh-` prefix lock, supersedes ADR-0011). systemd ExecStart `hermes chat --skills <name> --quiet --query "/<name> ..."`. VM `wikihub-fresh` 에서 V1·V2·V5a·V6·V7·V8·V9 + V3 end-to-end (vault@gdrive.service → hermes wh-ingest → vault-fetch.py → wiki/sources/gdrive/) PASS |
+| #G | rclone mount | `_system/systemd/wikihub-mount@.service.template` 의 ExecStart 가 yaml `vaults[*].options.root_folder_id` 를 `--drive-root-folder-id` flag 로 전파 안 함 — SA 가 본인 home (empty) 만 mount → 운영자 rclone.conf 직접 편집 필요. F5 V3 검증 시 surface | F6 (또는 별도 micro feature) — `render_systemd_units.py` 의 `_cross_vault_subs` 에 `root_folder_id_for_{vid}` 추가 + mount template ExecStart 에 `--drive-root-folder-id={root_folder_id_for_%i}` substitution. yaml 의 빈 root_folder_id 케이스 fail-fast 또는 omit flag |
 | ~~#A~~ | ~~install update~~ | ~~`BRANCH default=latest` 가 GitHub 부재~~ | ✅ **closed** by `update_mode` (2026-05-17) — ADR-0030 ref chain (`--version > BRANCH > latest tag > local cache > main`) |
 | ~~#B~~ | ~~install update~~ | ~~Step 2 `rm -rf $WIKIHUB_HOME` destructive~~ | ✅ **closed** by `update_mode` — `_step2_update` git fetch + reset, fresh path 는 `--force-fresh` 명시 동의로 한정 |
 | ~~#C~~ | ~~install update~~ | ~~update 중 vault@ timer race~~ | ✅ **closed** by `update_mode` — `_systemd_stop_before_update` 15min in-flight grace + reset-failed + daemon-reload |
@@ -85,10 +86,10 @@ V3 (--force-fresh confirm), V4 (vault@ mid-sync grace), V5a/b (downgrade), V6 (l
 
 | feat_id | 목적 | 의존 |
 |---|---|---|
-| `hermes_adapter` (F5) | wikihub 의 `wh:*` skill 을 Hermes skill 시스템에 정합화. ADR-0011·0012 spec 보강 또는 wrapper dispatcher 채택. 결함 #12 lock | F4 archive |
+| ~~`hermes_adapter` (F5)~~ | ✅ archive (2026-05-18) — ADR-0032·ADR-0033 신설. wh- prefix lock + external_dirs + install-time materialized SKILL.md + Hermes detect gate (SKIP_SYSTEMD_RENDER) + flock·backup·sha256. V3 end-to-end PASS | — |
 | ~~`update_mode`~~ | ✅ archive (2026-05-17) — ADR-0030 신설 | — |
 | ~~`install_scope_reduction`~~ | ✅ **Step 3 완료** (2026-05-18) — ADR-0023 §"Clone scope" Note + ADR-0031 (Proposed) + install.sh sparse + yaml_writer.py 신규. Step 4 code review + V<N> 검증 통과 후 archive (ADR-0031 → Accepted) | — |
 | `lint_authoring` (F2 잔여) | wiki 의 정합성 검증 자동화 (lint.service) | F2 spec |
 | `wiki_query` (F6) | 메인테이너/사용자가 wiki 검색 / 그래프 탐색 (`wh:query`) | F5 (hermes_adapter) |
 
-v0.1.0 acceptance = F4 (✅) + F5 + (선택) update_mode (✅) + install_scope_reduction (Step 3 완료, Step 4 V<N> 대기). v0.2.x 는 lint_authoring·wiki_query·multi-vault 등.
+v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅) + F5 (✅, 2026-05-18). **달성**. v0.2.x 는 lint_authoring·wiki_query·multi-vault·#G (mount@ root_folder_id 전파) 등.

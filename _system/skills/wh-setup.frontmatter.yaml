@@ -1,0 +1,12 @@
+name: wh-setup
+description: wikihub.yaml materialization + 검증 + systemd unit 동기화 + skill 메타 갱신. install.sh 직후 + yaml 편집 후 + vault 추가/삭제 후 호출. wikihub spec — _system/commands/setup.md playbook (ADR-0031 yaml writer 단독 책임).
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, setup, bootstrap, materialization]
+  category: knowledge-management
+  config:
+    wikihub_home_required: true
+required_environment_variables:
+  - WIKIHUB_HOME
+  - WIKIHUB_INSTANCE_ROOT

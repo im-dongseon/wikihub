@@ -1,11 +1,11 @@
-# /wh:ingest
+# /wh-ingest
 
 특정 vault의 변경 사항을 wiki에 통합한다. 본 playbook은 agent-agnostic(Hermes·codex-cli·gemini-cli·copilot 등 어떤 CLI agent로도 실행 가능).
 
 ## 호출
 
 ```
-<agent_invocation> "/wh:ingest --vault <vault_id>"
+<agent_invocation> "/wh-ingest --vault <vault_id>"
 ```
 
 - **트리거**: systemd timer (정상 주기) 또는 사용자 수동 호출
@@ -138,14 +138,14 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
 3. 각 entity·concept에 대해:
    - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
    - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + 본문은 1줄 요약, `referenced_by: [<source>]`)
-4. **analyses는 갱신 안 함** — `/wh:query`가 분석 저장 트리거 (별도 명령)
-5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wh:lint`가 책임 (--apply 시 archive)
+4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
+5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wh-lint`가 책임 (--apply 시 archive)
 
 각 `deleted[*]`에 대해:
 
 1. 해당 wiki 경로 = `wiki/sources/<vault_id>/<path>.md`
 2. **이미 script가 삭제 처리** (script는 file_map 기준 wiki source 파일도 같이 삭제)
-3. agent는 entities/concepts의 `referenced_by`에서 해당 source 경로 제거 (남는 reference 0건이면 entity·concept 페이지 자체는 보존 — `/wh:lint`가 고아 페이지 판단)
+3. agent는 entities/concepts의 `referenced_by`에서 해당 source 경로 제거 (남는 reference 0건이면 entity·concept 페이지 자체는 보존 — `/wh-lint`가 고아 페이지 판단)
 
 **Source 페이지 본문·frontmatter는 절대 수정 안 함** (책임 경계: source = script, entities/concepts = agent)
 
@@ -189,8 +189,8 @@ Step 5까지 무에러 완료 시:
 | `_state/<vault_id>/pending_ingest.json` | agent | 작성 (Step 3) → 삭제 (Step 6) |
 | `wiki/entities/<name>.md`, `wiki/concepts/<name>.md` | agent | 생성·갱신 |
 | `wiki/sources/<vault_id>/log.md` | agent | append |
-| `wiki/index.md` | **본 명령은 수정 안 함** (ADR-0005 — `/wh:lint` 책임) | — |
-| `wiki/analyses/` | **본 명령은 수정 안 함** (`/wh:query` 책임) | — |
+| `wiki/index.md` | **본 명령은 수정 안 함** (ADR-0005 — `/wh-lint` 책임) | — |
+| `wiki/analyses/` | **본 명령은 수정 안 함** (`/wh-query` 책임) | — |
 
 ## 실패 처리
 
@@ -210,13 +210,13 @@ Step 5까지 무에러 완료 시:
 
 ## 동시성
 
-- vault별 systemd unit이 Type=oneshot → 같은 vault의 /wh:ingest 중복 실행 차단 (F1 §4.6.5)
+- vault별 systemd unit이 Type=oneshot → 같은 vault의 /wh-ingest 중복 실행 차단 (F1 §4.6.5)
 - 다중 vault 간 직렬화는 wikihub.yaml `operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede)
 
 ## 관련 ADR
 
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지
 - ADR-0002 agent CLI subprocess (`hermes -z`)
-- ADR-0005 wiki/index.md 갱신은 `/wh:lint`가, log는 vault별
+- ADR-0005 wiki/index.md 갱신은 `/wh-lint`가, log는 vault별
 - ADR-0006 unified orchestration (본 playbook이 mechanical + semantic 둘 다)
 - ADR-0007 state는 all JSON (`pending_ingest.json` 형식)

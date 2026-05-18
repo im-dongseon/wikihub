@@ -22,6 +22,9 @@ Thumbs.db
 # install.sh runtime sidecar (Step 3 venv path 기록) — ADR-0020·0019, 매 호출 재생성
 .venv_path
 
+# Hermes skill install artifacts (F5 — install.sh _step6_agent_skill materialized, ADR-0032)
+_system/skills/_generated/
+
 # Python
 __pycache__/
 *.py[cod]

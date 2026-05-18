@@ -181,3 +181,26 @@ MOUNT_RETRYABLE_FATAL_THRESHOLD = 6   # 약 1시간 @ 10min cycle
 - ADR-0025 (rclone mount 채택) — mount lifecycle 의 fatal case 정의
 - ADR-0027 (rclone vs gws 책임 분리) — mount.py 가 writer 책임의 정본
 - features/20260514_install_runtime/analysis_and_design.md §10.4.1·§10.4.6·§10.4.7 — mount scope 의 case 분배 및 spec 코드
+
+## Note (2026-05-18, feature `hermes_adapter` F5)
+
+본 ADR 의 last_failure.json producer (vault-fetch.py 의 `save_last_failure`) 가 hermes 의 subprocess 로 호출되는 가정 유지 (ADR-0006 unified orchestration). F5 의 (α) 채택 (Hermes skill 등록) 이 본 가정 보존:
+
+- ExecStart = `hermes chat --skills wh-ingest --quiet --query "/wh-ingest --vault X"` (F5 정합).
+- Hermes 가 skill body 의 procedure (`_system/commands/ingest.md`) 를 LLM 으로 해석 → mechanical phase 에서 vault-fetch.py subprocess 호출 → last_failure.json producer 정상 작동.
+
+### Hermes 미설치 시 dead chain 방지 (CR2-CRIT-1 해결)
+
+Hermes binary 부재 시 systemd ExecStart 자체가 `203/EXEC` fail → vault-fetch.py 미도달 → last_failure.json producer 미실행 → ops-alert 의 fallback diagnostic 도 mount scope 한정이라 **fatal 알림 0건 도달** 위험.
+
+F5 의 해결:
+- install.sh `_step6_agent_skill` 의 Hermes detect gate — 부재 시 `SKIP_SYSTEMD_RENDER=1` → systemd unit render/enable 자체 skip → timer 미가동 → silent dead chain 회피.
+- 운영자가 Hermes 설치 후 install.sh 재호출 시 정상 진입.
+
+본 ADR 의 fatal 알림 contract 는 Hermes 설치 + 정상 dispatch 가정 하에 보존.
+
+### v0.2.x — `notify_via_hermes()` stub 채움 (별도 feature)
+
+본 ADR 의 §v0.2.x notify_via_hermes stub 은 F5 범위 밖 — 별도 v0.2.x feature 가 Telegram 통지 본문 채움. F5 는 invocation 정합 한정.
+
+Status 변경 없음.

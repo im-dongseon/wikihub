@@ -46,12 +46,12 @@ operations:
   vfs_refresh_mode: recursive         # ADR-0026 K1 채택 (recursive | per-file | none — K2/K3 v0.2.x deferred)
 
 # agent: Hermes (또는 codex/gemini) 는 install.sh 설치 범위 밖 — 메인테이너가 별도 설치 후 binary 경로 확인 필수.
-# 미설치 시 systemd timer 활성화 후 첫 fire 시점에 `203/EXEC` fail → OnFailure → ops-alert 매 사이클 발화.
-# 권장 검증: `command -v hermes` 가 binary path 와 일치하는지 /wh:setup Step 1 가 확인.
+# 미설치 시 install.sh _step6_agent_skill 가 detect → systemd unit render/enable skip (ADR-0032). 운영자가 hermes 설치 후 install.sh 재호출.
+# 권장 검증: `command -v hermes` 가 binary path 와 일치하는지 /wh-setup Step 1 가 확인.
 agent:
-  type: hermes                        # ADR-0012 — 다른 값: codex, gemini
-  binary: /usr/local/bin/hermes       # R10 MED-8: 미설치 시 운영자가 별도 설치 책임
-  oneshot_args: ["-z"]                # `hermes -z "/wh:..."` 형식
-  skill_prefix: "wh:"                 # ADR-0011 (fallback "wh-")
-  timeout_sec: 600
-  notify_on_fatal: true               # ADR-0024 — Hermes 통지 (v0.1.0 은 stub, v0.2.x 활성화)
+  type: hermes                                                            # ADR-0012 — 다른 값: codex, gemini
+  binary: /usr/local/bin/hermes                                           # R10 MED-8: 미설치 시 운영자가 별도 설치 책임
+  oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--query"]     # ADR-0032 — `{skill}` per-unit placeholder, `--quiet` 로 transcript 차단
+  skill_prefix: "wh-"                                                     # ADR-0033 (ADR-0011 supersedes — colon `wh:` → hyphen `wh-`)
+  timeout_sec: 600                                                        # bash timeout + systemd TimeoutStartSec sync source (ADR-0032 §sub-4)
+  notify_on_fatal: true                                                   # ADR-0024 — Hermes 통지 (v0.1.0 은 stub, v0.2.x 활성화)

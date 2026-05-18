@@ -1,12 +1,12 @@
-# /wh:lint
+# /wh-lint
 
 wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 명령은 self-maintaining wiki의 핵심 — 사용자 개입 없이 위키 위생을 유지한다.
 
 ## 호출
 
 ```
-<agent_invocation> "/wh:lint"            # 기본 모드: 비파괴 작업만 (timer 자동 호출)
-<agent_invocation> "/wh:lint --apply"    # 파괴 가능 작업까지 수행 (메인테이너 수동 호출)
+<agent_invocation> "/wh-lint"            # 기본 모드: 비파괴 작업만 (timer 자동 호출)
+<agent_invocation> "/wh-lint --apply"    # 파괴 가능 작업까지 수행 (메인테이너 수동 호출)
 ```
 
 - **트리거 (기본)**: systemd timer (하루 1회 권장, `wikihub.yaml.operations.lint_interval_hours`)
@@ -54,7 +54,7 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 ### Step 5. wiki/index.md 재구성 (자동)
 
-ADR-0005에 따라 `/wh:lint`가 index 재구성 책임 보유:
+ADR-0005에 따라 `/wh-lint`가 index 재구성 책임 보유:
 
 ```markdown
 # WikiHub
@@ -103,7 +103,7 @@ ADR-0005에 따라 `/wh:lint`가 index 재구성 책임 보유:
 - 폴더 위반 페이지 → 적절한 카테고리 이동 (단 vault prefix 필요한 sources는 메인테이너 명시 매핑)
 - 모순 클레임 본문 갱신
 
-**v0.1.0 정책 (확정)**: `--apply` 호출 시 **일괄 적용** (interactive per-item confirm 없음). 메인테이너는 `_lint/report.md` read → 의도 확인 → `<agent_invocation> "/wh:lint --apply"` 1회 호출로 모든 위험 작업 적용. interactive 세분화는 v0.2.x 후속 ADR 후보.
+**v0.1.0 정책 (확정)**: `--apply` 호출 시 **일괄 적용** (interactive per-item confirm 없음). 메인테이너는 `_lint/report.md` read → 의도 확인 → `<agent_invocation> "/wh-lint --apply"` 1회 호출로 모든 위험 작업 적용. interactive 세분화는 v0.2.x 후속 ADR 후보.
 
 ### Step 8. log 작성
 
@@ -140,16 +140,16 @@ ADR-0005에 따라 `/wh:lint`가 index 재구성 책임 보유:
 
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 
-### Step 9. /wh:graphify 자동 호출
+### Step 9. /wh-graphify 자동 호출
 
 lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참조: lint 후 자동 호출 = 하루 1회 자연 갱신).
 
 ```bash
-<agent_invocation> "/wh:graphify"
+<agent_invocation> "/wh-graphify"
 ```
 
 - 성공 → `wiki/_lint/report.md`에 추가: `graph rebuilt: N nodes, M edges`
-- 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh:query·/wh:lint 정확도 저하)
+- 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh-query·/wh-lint 정확도 저하)
 - 본 단계의 exit code는 lint의 exit code에 영향 안 줌 (graphify 실패가 lint 자체를 fail시키지 않음 — graph는 보조 자원)
 
 ## 출력 산출물
@@ -184,5 +184,5 @@ lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참�
 
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지 (Step 2 검증)
 - ADR-0005 wiki/index.md 갱신 책임 (Step 5)
-- ADR-0008 `/wh:lint` 권한 분류 (자동/`--apply`)
-- ADR-0009 `/wh:setup`이 lint.timer 주기를 wikihub.yaml에서 동기화
+- ADR-0008 `/wh-lint` 권한 분류 (자동/`--apply`)
+- ADR-0009 `/wh-setup`이 lint.timer 주기를 wikihub.yaml에서 동기화

@@ -135,3 +135,24 @@ git -C "$WIKIHUB_HOME" checkout
 
 - ADR-0031 §"Clone scope" (의 Related 명시) — yaml writer 책임 reassign 과 짝.
 - ADR-0030 §부정/제약 sparse-checkout 영속화 — update path + rollback 시 working tree 동작.
+
+## Note (2026-05-18, feature `hermes_adapter` F5) — §safety guard 확장
+
+본 ADR §safety guard 3개 (`WIKIHUB_HOME` 의 system path 차단, `.git` 존재 검증, origin URL 검증) 는 **wikihub repo 디렉토리 wipe** scope 한정. F5 의 `_step6_agent_skill` 가 **wikihub 외부 자산** (`~/.hermes/config.yaml`) 을 mutate — 본 ADR scope 확장 필요.
+
+### 외부 자산 mutate 의 추가 safety (ADR-0032 §sub-4)
+
+`_step6_agent_skill` 의 `~/.hermes/config.yaml` 패치 시:
+
+1. **flock advisory lock** (`~/.hermes/config.yaml.lock`, `LOCK_EX | LOCK_NB`, 5초 retry × 12회 = 총 60s). 동시 호출 (Hermes 동시 mutate 가정 X, install.sh 중복 호출만) 차단.
+2. **PRE_HASH sha256** 캡처 + **backup** 생성 (`~/.hermes/config.yaml.wikihub-bak.<utc_iso>`). 7일 retention 자동 cleanup.
+3. **atomic write** — ruamel.yaml round-trip + `os.replace` (ADR-0031 의 yaml writer 패턴).
+4. **POST_HASH sha256** 캡처 — install.log 에 변경 record (path + backup path + hash diff).
+5. **`WIKIHUB_NONINTERACTIVE=1`** 단일 toggle 이 외부 자산 동의 포함 (별도 flag 신설 안 함 — CR2-HIGH-2 해결).
+
+### 운영자 mental model
+
+- 본 ADR §보안 위협 매트릭스 의 "메인테이너 GitHub 계정 보안 + TLS + shasum" 의 3중 보안 모델은 wikihub repo 한정.
+- F5 의 외부 자산 mutate 는 **운영자 동의 surface 추가 layer**: 명시 prompt (interactive) 또는 NONINTERACTIVE=1 환경 변수 동의 record. wikihub 가 외부 자산을 silent mutate 하지 않음 보장.
+
+Status 변경 없음. safety guard scope 만 확장.

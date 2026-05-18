@@ -46,3 +46,18 @@ Hermes는 외부 컴포넌트로 이미 존재하며 인터페이스는 고정�
   - F4(systemd_orchestrator): timer + service 구조로 overlap 방지. `Type=oneshot` + `RemainAfterExit=no` 권장. 타임아웃 정책 결정
   - F5(hermes_adapter): sync→Hermes 트리거 프롬프트 표준화. 실패 시 재시도 정책. Hermes skill 정의(`/ingest`, `/lint`, `/query`, `/graphify`)
   - 운영 중 동시성 충돌이 빈발하면 `hermes cron`/`hermes webhook` 기반 재설계 검토 가능(supersede 트리거)
+
+## Note (2026-05-18, feature `hermes_adapter` F5)
+
+본 ADR 의 `hermes -z "<prompt>"` 채택 의미론 갱신 — F5 의 Hermes docs 실측 결과 **`-z` 는 LLM-text 전용** (skill dispatch 비보장). 실제 sync→ingest dispatch path 는:
+
+```bash
+hermes chat --skills wh-ingest --quiet --query "/wh-ingest --vault gdrive"
+```
+
+- **Decision §(α) 채택 의미 보존** — CLI subprocess 패러다임 (HTTP/IPC 미사용) 자체는 유지.
+- **invocation syntax 갱신** — `-z` → `chat --skills <name> --quiet --query`. ADR-0032 의 skill registration 정책 + ADR-0033 의 prefix `wh-` lock 정합.
+- **`oneshot_args` schema 갱신** — yaml.agent.oneshot_args 가 `["chat", "--skills", "{skill}", "--quiet", "--query"]` 형식. `{skill}` placeholder 는 per-unit substitution (ADR-0012 §Decision 갱신 참조).
+- **§Consequences 부정/제약 의 "프롬프트 포맷이 인터페이스 — F5(hermes_adapter)에서 확정"** 항목 closure — F5 가 본 ADR 의 sync→Hermes 호출 형식 정본 확정.
+
+Status 변경 없음 — 호출 패러다임 (CLI subprocess) 일관. 의미론 detail 만 갱신.

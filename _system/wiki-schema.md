@@ -17,7 +17,7 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 ├── _system/                          # 정본 룰 + 명령어 playbook (install.sh가 fetch·갱신)
 │   ├── VERSION                       #   설치 버전 (예: 0.1.0)
 │   ├── wiki-schema.md                #   본 문서 (지식 모델 정본)
-│   ├── commands/                     #   /wh:* 명령어 playbook
+│   ├── commands/                     #   /wh-* 명령어 playbook (ADR-0033 — wh- hyphen lock)
 │   │   ├── ingest.md
 │   │   ├── lint.md
 │   │   ├── query.md
@@ -28,7 +28,7 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 │       ├── lint.{service,timer}
 │       └── ops-alert.service
 ├── wiki/                             # LLM이 작성·관리하는 마크다운 + sync가 작성한 source 페이지
-│   ├── index.md                      #   전체 카탈로그 (단일, /wh:lint가 재구성)
+│   ├── index.md                      #   전체 카탈로그 (단일, /wh-lint가 재구성)
 │   ├── sources/                      #   원시 입력의 wiki 표현 (sync 작성)
 │   │   └── {vault_id}/               #   vault namespace 분리 (ADR-0001)
 │   │       ├── log.md                #     vault별 sync·ingest 이력 (append-only)
@@ -37,9 +37,9 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 │   │   └── <name>.md
 │   ├── concepts/                     #   개념·용어·방법론 hub (agent 작성)
 │   │   └── <name>.md
-│   ├── analyses/                     #   합성 분석 — /wh:query 자동 저장 (agent 작성)
+│   ├── analyses/                     #   합성 분석 — /wh-query 자동 저장 (agent 작성)
 │   │   └── <slug>.md
-│   ├── _lint/                        #   /wh:lint 진단 보고서
+│   ├── _lint/                        #   /wh-lint 진단 보고서
 │   │   └── report.md
 │   └── .archived/                    #   --apply로 archive된 페이지 (보존)
 │       └── {category}/{name}-{utc_iso}.md
@@ -75,12 +75,12 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 | 카테고리 | 내용 | 쓰기 주체 | vault namespace |
 |---|---|---|---|
 | `sources/` | 원시 입력 (vault 파일과 1:1) | sync (vault-fetch.py) | 적용 (`sources/{vault_id}/...`) |
-| `entities/` | 인물·조직·제품·프로젝트 hub | agent (/wh:ingest, /wh:lint) | 미적용 (vault 무관 통합) |
-| `concepts/` | 개념·용어·방법론 hub | agent (/wh:ingest, /wh:lint) | 미적용 |
-| `analyses/` | 합성 분석 (query 출력) | agent (/wh:query) | 미적용 |
-| `_lint/` | 진단 보고서 | agent (/wh:lint) | 미적용 |
-| `.archived/` | --apply로 archive된 페이지 | agent (/wh:lint --apply) | 미적용 |
-| `index.md` | 전체 카탈로그 | agent (/wh:lint) | 미적용 (단일, ADR-0005) |
+| `entities/` | 인물·조직·제품·프로젝트 hub | agent (/wh-ingest, /wh-lint) | 미적용 (vault 무관 통합) |
+| `concepts/` | 개념·용어·방법론 hub | agent (/wh-ingest, /wh-lint) | 미적용 |
+| `analyses/` | 합성 분석 (query 출력) | agent (/wh-query) | 미적용 |
+| `_lint/` | 진단 보고서 | agent (/wh-lint) | 미적용 |
+| `.archived/` | --apply로 archive된 페이지 | agent (/wh-lint --apply) | 미적용 |
+| `index.md` | 전체 카탈로그 | agent (/wh-lint) | 미적용 (단일, ADR-0005) |
 
 **근거**:
 - `sources/`만 namespace 분리 — 출처가 vault와 1:1 대응 (ADR-0001)
@@ -146,7 +146,7 @@ WikiCurate v0.2.6의 단일 vault·로컬 모델에서 **server-first + multi-va
 | Google Slide (`.gslides`) | `gws drive files export`, `mimeType=text/plain` | 동일 |
 | 텍스트 (`.md`·`.txt`) | (변환 없음, 그대로 사용) | n/a |
 
-**추출 실패 시 wiki 페이지 작성은 진행** (file_map 정합성 유지). frontmatter는 정상 + body는 실패 메시지. `/wh:lint`가 본 페이지를 봐서 retry 또는 archive 결정.
+**추출 실패 시 wiki 페이지 작성은 진행** (file_map 정합성 유지). frontmatter는 정상 + body는 실패 메시지. `/wh-lint`가 본 페이지를 봐서 retry 또는 archive 결정.
 
 ### `sources/{vault_id}/{path}.{ext}.md` (sync 작성)
 
@@ -165,7 +165,7 @@ source:                                       # 단수 (ADR-0001 α — 단일 v
     extracted_at: 2026-05-13T01:30:00+00:00
 created: 2026-05-13
 updated: 2026-05-13
-tags: []                                      # sync는 빈 배열로 시작. /wh:lint 또는 agent가 보강 가능
+tags: []                                      # sync는 빈 배열로 시작. /wh-lint 또는 agent가 보강 가능
 ---
 
 [sync가 binary에서 추출한 텍스트 본문 — .pptx 슬라이드, .docx 단락, .pdf 페이지 등]
@@ -183,7 +183,7 @@ title: 홍길동
 type: entity                                  # 'entity' | 'concept' | 'analysis'
 created: 2026-05-13
 updated: 2026-05-13
-referenced_by:                                # /wh:lint·/wh:graphify가 갱신 — 수동 편집 금지
+referenced_by:                                # /wh-lint·/wh-graphify가 갱신 — 수동 편집 금지
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/notes/promotion-plan
 tags: [team-lead]
@@ -198,20 +198,20 @@ tags: [team-lead]
 
 `concepts/<name>.md`는 동일 형식, `type: concept`.
 
-### `analyses/<slug>.md` (agent 작성, /wh:query 자동 저장)
+### `analyses/<slug>.md` (agent 작성, /wh-query 자동 저장)
 
 ```yaml
 ---
 title: 2026 H1 회의 결정 비교
 type: analysis
-created_by: /wh:query
+created_by: /wh-query
 query: "Q1과 Q2 회의 결정사항 차이점은?"
 created: 2026-05-13
 updated: 2026-05-13
 sources:
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/meetings/2026-Q2.pptx
-referenced_by: []                             # /wh:graphify가 갱신
+referenced_by: []                             # /wh-graphify가 갱신
 tags: []
 ---
 
@@ -227,17 +227,17 @@ Q1과 Q2 회의 결정사항 차이점은?
 
 slug 규칙: `<YYYY-MM-DD>-<영문 kebab summary>.md`. 충돌 시 `-2`, `-3` suffix.
 
-### `index.md` (agent 작성, /wh:lint 재구성)
+### `index.md` (agent 작성, /wh-lint 재구성)
 
-frontmatter 없음 — 사람 가시 진입점. /wh:lint Step 5 참조.
+frontmatter 없음 — 사람 가시 진입점. /wh-lint Step 5 참조.
 
 ### `log.md` (`wiki/sources/{vault_id}/log.md`, sync·agent append)
 
-frontmatter 없음 — append-only. 항목 형식은 /wh:ingest Step 5 참조.
+frontmatter 없음 — append-only. 항목 형식은 /wh-ingest Step 5 참조.
 
-### `_lint/report.md` (agent 작성, /wh:lint 갱신)
+### `_lint/report.md` (agent 작성, /wh-lint 갱신)
 
-frontmatter 없음 — overwrite (진단 성격). 형식은 /wh:lint Step 8 참조.
+frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참조.
 
 ---
 
@@ -252,7 +252,7 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh:lint Step 8 참�
 
 **규칙**:
 - 확장자는 wiki 파일의 `.md` 생략. **source는 원본 확장자 포함** (예: `.pptx`) — 단일 파일 모델에서 파일명이 `{path}.{ext}.md`이므로 트레일링 `.md`만 생략
-- sources의 vault-prefix는 **필수**. 단축형 `[[meetings/2026-Q1.pptx]]` 사용 금지 → /wh:lint Step 2가 위반 보고
+- sources의 vault-prefix는 **필수**. 단축형 `[[meetings/2026-Q1.pptx]]` 사용 금지 → /wh-lint Step 2가 위반 보고
 - entities/concepts/analyses의 단축형 (vault·카테고리 prefix 없음) 허용
 
 **entities/concepts 동명 충돌 정책** (현 v0.1.0):
@@ -266,19 +266,19 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh:lint Step 8 참�
 
 ## 책임 매트릭스
 
-| 자원 | sync (vault-fetch.py) | agent (/wh:* 명령) |
+| 자원 | sync (vault-fetch.py) | agent (/wh-* 명령) |
 |---|---|---|
 | `/opt/vault-{vault}/*` | 다운로드·갱신 | read-only |
 | `wiki/sources/{vault}/*.md` | 통째 작성 (frontmatter + body) | read-only |
 | `wiki/sources/{vault}/log.md` | append (sync 사이클 메타) + agent append (semantic phase 메타) | append (semantic 결과) |
 | `wiki/entities/`, `concepts/` | 미접근 | 생성·갱신 (`referenced_by` 추가, stub) |
-| `wiki/analyses/` | 미접근 | /wh:query가 자동 저장 |
-| `wiki/index.md` | 미접근 | /wh:lint Step 5가 재구성 |
-| `wiki/_lint/report.md` | 미접근 | /wh:lint Step 8이 overwrite |
-| `wiki/.archived/` | 미접근 | /wh:lint --apply만 이동 |
-| `_state/{vault}/*.json` | 통째 작성·갱신 (atomic) | `/wh:ingest`의 agent phase가 `pending_ingest.json` 작성·삭제 |
+| `wiki/analyses/` | 미접근 | /wh-query가 자동 저장 |
+| `wiki/index.md` | 미접근 | /wh-lint Step 5가 재구성 |
+| `wiki/_lint/report.md` | 미접근 | /wh-lint Step 8이 overwrite |
+| `wiki/.archived/` | 미접근 | /wh-lint --apply만 이동 |
+| `_state/{vault}/*.json` | 통째 작성·갱신 (atomic) | `/wh-ingest`의 agent phase가 `pending_ingest.json` 작성·삭제 |
 | `.credentials/*.pickle` | read + atomic refresh write (ADR-0003) | 미접근 |
-| `graphify-out/*` | 미접근 | /wh:graphify가 빌드 |
+| `graphify-out/*` | 미접근 | /wh-graphify가 빌드 |
 | `wikihub.yaml` | read-only | read-only |
 | `_system/*` | 미접근 | read-only |
 
@@ -308,7 +308,7 @@ vault에서 ingest되는 파일 콘텐츠는 **untrusted**. agent는 본문 내 
 | 입력 범위 | `root_folder_id` 명시로 신뢰 디렉토리만 처리 | 메인테이너 |
 | agent prompt | sync 결과 메타만 전달, body는 read tool로 별도 접근 | F1 §4.6.2 enforce |
 | 출력 sanitize | agent가 wiki 작성 시 적대적 명령 echo 안 함 | agent runtime |
-| 다운스트림 | /wh:query 응답에 source content inclusion 시 출처 명시 | /wh:query playbook |
+| 다운스트림 | /wh-query 응답에 source content inclusion 시 출처 명시 | /wh-query playbook |
 
 ---
 
@@ -316,35 +316,35 @@ vault에서 ingest되는 파일 콘텐츠는 **untrusted**. agent는 본문 내 
 
 | 명령 | 책임 | playbook |
 |---|---|---|
-| `/wh:ingest --vault X` | vault 변경을 wiki에 흡수 (mechanical script + semantic agent) | `commands/ingest.md` |
-| `/wh:lint` | wiki 일관성·구조 점검 + 비파괴 자동 정비 + index 재구성 + graphify | `commands/lint.md` |
-| `/wh:lint --apply` | 파괴 가능 작업까지 수행 (수동 호출) | 동일 |
-| `/wh:query <질문>` | 자연어 질의 + 합성 분석 (heuristic으로 analyses 자동 저장) | `commands/query.md` |
-| `/wh:graphify` | 지식 그래프 빌드 (수동 또는 /wh:lint 마지막 단계 자동) | `commands/graphify.md` |
-| `/wh:setup` | wikihub.yaml 검증 + systemd unit 동기화 + agent skill 메타 갱신 | `commands/setup.md` |
+| `/wh-ingest --vault X` | vault 변경을 wiki에 흡수 (mechanical script + semantic agent) | `commands/ingest.md` |
+| `/wh-lint` | wiki 일관성·구조 점검 + 비파괴 자동 정비 + index 재구성 + graphify | `commands/lint.md` |
+| `/wh-lint --apply` | 파괴 가능 작업까지 수행 (수동 호출) | 동일 |
+| `/wh-query <질문>` | 자연어 질의 + 합성 분석 (heuristic으로 analyses 자동 저장) | `commands/query.md` |
+| `/wh-graphify` | 지식 그래프 빌드 (수동 또는 /wh-lint 마지막 단계 자동) | `commands/graphify.md` |
+| `/wh-setup` | wikihub.yaml 검증 + systemd unit 동기화 + agent skill 메타 갱신 | `commands/setup.md` |
 
-**오케스트레이션** (ADR-0006): agent가 orchestrator. systemd timer가 `<agent_invocation> "/wh:ingest --vault <vault_id>"` 또는 `"/wh:lint"` 직접 호출.
+**오케스트레이션** (ADR-0006): agent가 orchestrator. systemd timer가 `<agent_invocation> "/wh-ingest --vault <vault_id>"` 또는 `"/wh-lint"` 직접 호출.
 
 **agent invocation 추상화** (ADR-0012): playbook·systemd unit의 호출 표기는 `<agent_invocation>` placeholder 사용. `<agent_invocation>` = `wikihub.yaml.agent.binary` + `wikihub.yaml.agent.oneshot_args` (공백 join).
 
 예 (Hermes):
-- 추상: `<agent_invocation> "/wh:ingest --vault gdrive"`
-- 실제: `/usr/local/bin/hermes -z "/wh:ingest --vault gdrive"`
+- 추상: `<agent_invocation> "/wh-ingest --vault gdrive"`
+- 실제: `/usr/local/bin/hermes -z "/wh-ingest --vault gdrive"`
 
 `wikihub.yaml.agent` 스키마 (ADR-0012):
 ```yaml
 agent:
-  type: hermes                  # 'hermes' | 'codex' | 'gemini' | 'copilot' | 'custom'
+  type: hermes                                                            # 'hermes' | 'codex' | 'gemini' | 'copilot' | 'custom'
   binary: /usr/local/bin/hermes
-  oneshot_args: ["-z"]          # one-shot 호출 시 binary 다음 args (prompt는 끝에 append)
-  skill_prefix: "wh:"           # ADR-0011
+  oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--query"]     # ADR-0032 — `{skill}` per-unit placeholder
+  skill_prefix: "wh-"                                                     # ADR-0033 (supersedes ADR-0011)
   timeout_sec: 600
   notify_on_fatal: true
 ```
 
-install.sh가 agent type prompt 후 default 매핑(`hermes → -z`, `codex → exec`, `gemini → -p` 등). v0.1.0은 hermes default만 검증됨.
+install.sh가 agent type prompt 후 default 매핑(`hermes → chat --skills {skill} --quiet --query`, codex/gemini 등은 v0.2.x 검증). v0.1.0은 hermes default만 검증됨.
 
-**skill prefix** (ADR-0011): `wh:` (default), `wh-` (fallback). 실제 사용 prefix는 `wikihub.yaml.agent.skill_prefix`에 기록.
+**skill prefix** (ADR-0033, supersedes ADR-0011): `wh-` (default — hyphen). operator override 가능하나 Hermes docs 미지원 colon 사용은 dispatch 실패 위험. 실제 사용 prefix는 `wikihub.yaml.agent.skill_prefix`에 기록.
 
 ---
 
@@ -356,7 +356,7 @@ install.sh가 agent type prompt 후 default 매핑(`hermes → -z`, `codex → e
 4. **sync ↔ agent 분리** (ADR-0006 unified orchestration): mechanical은 script subprocess, semantic은 agent. 단일 playbook에 통합
 5. **self-maintaining**: 비파괴 작업(stub 생성·cross-ref·index 재구성·analyses 저장)은 자동. 파괴 작업(archive·본문 갱신)은 메인테이너 `--apply` 명시 시에만
 6. **agent-agnostic**: spec은 특정 agent 비종속. Hermes·codex-cli·gemini-cli·copilot 모두 지원
-7. **wikihub.yaml = 단일 정본**: 운영 값의 single source of truth. install.sh가 example 복사, 메인테이너 수기 편집, /wh:setup이 systemd로 동기화
+7. **wikihub.yaml = 단일 정본**: 운영 값의 single source of truth. install.sh가 example 복사, 메인테이너 수기 편집, /wh-setup이 systemd로 동기화
 8. **결정의 정본은 ADR**: 모든 설계 결정은 `docs/adr/`에 영속 기록
 
 ---
@@ -365,8 +365,8 @@ install.sh가 agent type prompt 후 default 매핑(`hermes → -z`, `codex → e
 
 - 결정 기록: `docs/adr/` (ADR-0001 ~ 0013 + 후속)
 - **OAuth 1회 인증 절차** (메인테이너 외부 작업): F1 archive `analysis_and_design.md` §4.7 — `auth_gdrive.py` macOS dev box 실행 + scp 절차. 향후 `docs/runbooks/oauth-setup.md` (F4 산출물)로 명문화 예정
-- **신규 vault 추가 runbook**: F4 산출물 `docs/runbooks/add-vault.md` 예정. step 개요: ① wikihub.yaml 편집 → ② OAuth pickle 발급(macOS) + scp → ③ `/wh:setup` → ④ `systemctl --user enable --now <vault>-ingest.timer`
+- **신규 vault 추가 runbook**: F4 산출물 `docs/runbooks/add-vault.md` 예정. step 개요: ① wikihub.yaml 편집 → ② OAuth pickle 발급(macOS) + scp → ③ `/wh-setup` → ④ `systemctl --user enable --now <vault>-ingest.timer`
 - F1 archive (배경): `features/archive/20260513_v030_initial_architecture/analysis_and_design.md`
 - F2 (본 문서 출처): `features/20260513_wikihub_schema_v1/`
-- 운영 도구: install.sh (root), `/wh:setup`
+- 운영 도구: install.sh (root), `/wh-setup`
 - WikiCurate v0.2.6 reference: <https://github.com/im-dongseon/wikicurate>

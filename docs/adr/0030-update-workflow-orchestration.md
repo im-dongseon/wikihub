@@ -88,3 +88,20 @@ F4 backlog 의 결함 #C·#D + R16-L2 + design review 3 round (R1·R2·R3) 의 C
 
 - `--version` GNU 관례 충돌 인지. 운영자에게 명시 안내 — README 의 install snippet + `install.sh -h` 출력.
 - 본 ADR 의 4 sub-decision 분할 검토 (R3 Notes): "ref resolution chain (sub-4) 만 별도 ADR 로 분리 가능" 제안. v0.1.0 에서는 1 ADR 유지 (동일 관심사 — update workflow safety). v0.2.x release engineering 확장 시 (e.g. tag signature verification) **별도 ADR 신설 검토** (현 시점 ADR-0031 은 yaml template materialization 으로 이미 점유됨 — 2026-05-18, `install_scope_reduction` feature).
+
+## Note (2026-05-18, feature `hermes_adapter` F5) — §부정/제약 확장
+
+본 ADR 의 update path 의 rollback (trap → `git reset --hard $PRE_UPDATE_REF` + `_step8_systemd_render` 재호출) 와 F5 의 yaml schema 변경 (agent.oneshot_args `["-z"]` → `["chat", "--skills", "{skill}", "--quiet", "--query"]`, skill_prefix `"wh:"` → `"wh-"`) 간 cross-feature 영향 — CR2-HIGH-7 해결:
+
+### rollback 시 yaml schema 정합
+
+- F5 install 후 `wikihub.yaml` 운영본은 신 schema (`{skill}` placeholder + `wh-`).
+- update_mode 가 F5 이전 ref 로 rollback 시 `_step8_systemd_render` 재호출 → `render_systemd_units.py` 는 PRE_UPDATE_REF 의 코드 (F5 이전, placeholder 미지원). 운영자 yaml 의 `{skill}` 가 unresolved string 으로 substitution 들어가면 ExecStart 무효 → systemd start fail.
+- **해결책 1 (F5 코드 자체)**: `render_systemd_units.py` 의 `_per_skill_invocation` 가 `{skill}` placeholder 부재 시 fail-fast + stderr 안내 (CR2-HIGH-6).
+- **해결책 2 (운영자 mental model)**: F5 의 `_step6_agent_skill _migrate_agent_schema` 가 yaml schema lift 시 backup (`wikihub.yaml.wikihub-bak.<ts>`) 생성. rollback 시 운영자가 backup 수동 복원 가능 (자동 rollback 은 v0.2.x — ADR-0030 §재검토 트리거 항목으로 등재).
+
+### `_step8_wh_setup_skill_meta` 함수명 정합 (CR1-CRIT-3 해결)
+
+본 ADR §Decision sub-3 의 trap rollback 명세 (`_step8_systemd_render` 재호출) 는 함수명 정확 — F5 의 v1 오기 (`_step8_best_effort_wh_setup`) 는 v3 에서 정합.
+
+Status 변경 없음. 부정/제약 항목 확장.

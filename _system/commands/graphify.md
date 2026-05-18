@@ -1,15 +1,15 @@
-# /wh:graphify
+# /wh-graphify
 
-`graphify` CLI로 wiki 지식 그래프를 빌드한다. `graphify-out/graph.json` + `GRAPH_REPORT.md` 생성. `/wh:query`·`/wh:lint`의 1차 검색·진단 자원.
+`graphify` CLI로 wiki 지식 그래프를 빌드한다. `graphify-out/graph.json` + `GRAPH_REPORT.md` 생성. `/wh-query`·`/wh-lint`의 1차 검색·진단 자원.
 
 ## 호출
 
 ```
-<agent_invocation> "/wh:graphify"          # 증분 빌드 (graph.json 있으면 update, 없으면 최초 빌드)
-<agent_invocation> "/wh:graphify --rebuild" # 강제 전체 재빌드
+<agent_invocation> "/wh-graphify"          # 증분 빌드 (graph.json 있으면 update, 없으면 최초 빌드)
+<agent_invocation> "/wh-graphify --rebuild" # 강제 전체 재빌드
 ```
 
-- **트리거 (주, 자동)**: `/wh:lint` 종료 시 자동 호출 (lint playbook의 마지막 Step) — 하루 1회 자연 갱신
+- **트리거 (주, 자동)**: `/wh-lint` 종료 시 자동 호출 (lint playbook의 마지막 Step) — 하루 1회 자연 갱신
 - **트리거 (보조, 수동)**: 메인테이너가 graph 즉시 갱신 필요 시 직접 호출
 - **vault-agnostic**: wiki/ 전체를 입력으로 받음
 
@@ -55,7 +55,7 @@ command -v graphify >/dev/null
 - `graphify-out/GRAPH_REPORT.md` 존재 (없으면 graphify 버전 노후 경고)
 - 노드 수·엣지 수 stdout 출력
 
-### Step 4. (트리거가 /wh:lint인 경우) lint report에 통합
+### Step 4. (트리거가 /wh-lint인 경우) lint report에 통합
 
 - lint playbook이 본 명령을 호출한 경우, graphify 결과를 lint report에 추가 — lint.md Step 8 참조
 - 수동 호출 시 lint report 만지지 않음
@@ -87,10 +87,10 @@ command -v graphify >/dev/null
 ## 자동 호출 흐름 (lint와 통합)
 
 ```
-/wh:lint (timer, 하루 1회)
+/wh-lint (timer, 하루 1회)
    ├─ Step 1~7: wiki 점검·정비
    ├─ Step 8: lint report 작성
-   └─ Step 9 (추가): subprocess → /wh:graphify 자동 호출
+   └─ Step 9 (추가): subprocess → /wh-graphify 자동 호출
             ├─ 성공 → lint report에 "graph rebuilt: N nodes, M edges" 추가
             └─ 실패 → lint report에 "graph rebuild failed" + ops-alert
 ```

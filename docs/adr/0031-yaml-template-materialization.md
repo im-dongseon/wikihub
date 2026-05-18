@@ -249,3 +249,27 @@ design review (`design_review_1.md` SRE/Systems + `design_review_2.md` Spec/Arch
 | §Consequences "후속 영향" — ADR-0009·0010·0022·0030 supplement 명시 | CRIT-A1, MED-A3, HIGH-S1 |
 
 원본 review 파일 보존: `features/20260517_install_scope_reduction/design_review_1.md` + `design_review_2.md`.
+
+## Note (2026-05-18, feature `hermes_adapter` F5)
+
+본 ADR §Decision B catalog (derived 4필드 — `instance.root`, `vaults[*].local_path`, `vaults[*].rclone_remote_name`, `vaults[*].options.mount_path`) 의 **agent.* 미관여 정책 유지** — F5 의 schema lift 는 본 catalog 외부에 별도 책임:
+
+### F5 의 agent schema 1회성 lift — `_migrate_agent_schema()` 신규
+
+기존 운영자 wikihub.yaml 에 `agent.skill_prefix: "wh:"` 또는 `agent.oneshot_args: ["-z"]` 잔존 시:
+
+- ADR-0031 §Decision B catalog (drift fix 대상 4필드) 에 `agent.*` 미포함 → `/wh-setup` Step 0 의 drift fix 가 본 필드 미관여.
+- **F5 의 `_step6_agent_skill _migrate_agent_schema()` 가 1회성 schema lift 책임** — install.sh 진입 시 1회 detect + 명시 confirm (또는 NONINTERACTIVE 자동 동의) + backup + atomic patch.
+
+### 책임 분리
+
+| 책임 | source-of-truth | trigger |
+|---|---|---|
+| `/wh-setup` Step 0 | yaml writer (materialize + 4필드 drift fix) | 첫 호출 또는 매 호출 |
+| F5 `_migrate_agent_schema` | agent.* schema lift (1회성) | install.sh `_step6_agent_skill` 진입 |
+
+### idempotency
+
+`_migrate_agent_schema` 는 idempotent — 2번째 호출 시 이미 `wh-` + `{skill}` placeholder 형식이면 no-op. 운영자가 patch 후 yaml 을 다시 `wh:` 로 손편집한 경우는 marker comment (ADR-0032 §sub-3) 패턴 적용 — 운영자 의도 명시 보호.
+
+Status 변경 없음. §Decision B catalog 의 의도 (agent.* 미관여) 보존.

@@ -698,11 +698,312 @@ _step5_instance_dirs() {
 # Step 6. agent skill 초기 등록
 # ──────────────────────────────────────────────────────────────────────
 
+# ─── F5 ADR-0032·0033 — Hermes skill registration ────────────────────
+# WIKIHUB_SKILLS 정본 list. ADR-0032 §sub-2 (install-time materialized)
+WIKIHUB_SKILLS=(wh-ingest wh-lint wh-query wh-graphify wh-setup)
+
+# Hermes config path. operator override: $HERMES_CONFIG_HOME (테스트 용도)
+_hermes_config_path() {
+    echo "${HERMES_CONFIG_HOME:-$HOME/.hermes}/config.yaml"
+}
+
+# 1회성 schema lift — `wh:` / `["-z"]` 잔존 operational yaml 의 drift fix.
+# ADR-0033 + R3-CR3-1-HIGH-N1 (idempotent + marker 보호)
+_migrate_agent_schema() {
+    local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+    [[ -f "$yaml" ]] || return 0
+    local needs_migrate=0
+    local skill_prefix oneshot_args_str
+    skill_prefix="$("$VENV_PATH/bin/python3" -c \
+        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('skill_prefix',''))" \
+        "$yaml" 2>/dev/null || echo '')"
+    oneshot_args_str="$("$VENV_PATH/bin/python3" -c \
+        "import yaml,sys; print(','.join(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('oneshot_args',[])))" \
+        "$yaml" 2>/dev/null || echo '')"
+
+    if [[ "$skill_prefix" == "wh:" ]]; then
+        needs_migrate=1
+        info "operational yaml drift: agent.skill_prefix=\"wh:\" → \"wh-\" (ADR-0033)"
+    fi
+    if [[ ",$oneshot_args_str," != *"{skill}"* ]]; then
+        needs_migrate=1
+        info "operational yaml drift: agent.oneshot_args legacy form → F5 schema (ADR-0032)"
+    fi
+
+    [[ "$needs_migrate" == 0 ]] && return 0
+
+    if [[ -z "${WIKIHUB_NONINTERACTIVE:-}" ]]; then
+        echo "F5 migration: wikihub.yaml 의 agent.skill_prefix·oneshot_args 갱신 필요. 진행? [y/N]"
+        read -r reply
+        [[ "${reply,,}" == "y" || "${reply,,}" == "yes" ]] \
+            || { warn "schema migration 거부 — 운영자가 직접 갱신 후 install.sh 재호출 권장"; return 0; }
+    else
+        info "WIKIHUB_NONINTERACTIVE=1 → schema migration 자동 진행"
+    fi
+
+    # backup
+    local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$yaml" "$backup"
+    info "backup: $backup"
+
+    "$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
+import sys, ruamel.yaml
+path = sys.argv[1]
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+with open(path, encoding="utf-8") as f:
+    data = yaml.load(f)
+agent = data.setdefault("agent", {})
+if agent.get("skill_prefix") == "wh:":
+    agent["skill_prefix"] = "wh-"
+oneshot = agent.get("oneshot_args") or []
+if not any("{skill}" in str(a) for a in oneshot):
+    agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--query"]
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    yaml.dump(data, f)
+import os
+os.replace(tmp, path)
+PYEOF
+
+    ok "schema migration 완료 (backup: $backup)"
+}
+
+# `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
+# frontmatter source + _system/commands/<cmd>.md 본문 결합 (ADR-0032 §sub-2 β).
+_materialize_skills() {
+    local generated="$WIKIHUB_HOME/_system/skills/_generated"
+    mkdir -p "$generated"
+
+    # stale cleanup (R3-CR3-2 B-MED-5) — 5건 외 entries 제거
+    if [[ -d "$generated" ]]; then
+        for entry in "$generated"/*/; do
+            [[ -d "$entry" ]] || continue
+            local name="$(basename "$entry")"
+            local found=0
+            for skill in "${WIKIHUB_SKILLS[@]}"; do
+                [[ "$name" == "$skill" ]] && { found=1; break; }
+            done
+            if [[ "$found" == 0 ]]; then
+                info "stale skill 정리: $entry"
+                rm -rf "$entry"
+            fi
+        done
+    fi
+
+    local count=0
+    for skill in "${WIKIHUB_SKILLS[@]}"; do
+        local cmd="${skill#wh-}"   # wh-ingest → ingest
+        local frontmatter="$WIKIHUB_HOME/_system/skills/$skill.frontmatter.yaml"
+        local commands_md="$WIKIHUB_HOME/_system/commands/$cmd.md"
+        local target_dir="$generated/$skill"
+        local target="$target_dir/SKILL.md"
+
+        if [[ ! -f "$frontmatter" ]]; then
+            err "frontmatter source 부재: $frontmatter"
+            return 2
+        fi
+        if [[ ! -f "$commands_md" ]]; then
+            err "commands playbook 부재: $commands_md"
+            return 2
+        fi
+
+        mkdir -p "$target_dir"
+        {
+            echo "---"
+            cat "$frontmatter"
+            echo "---"
+            echo ""
+            cat "$commands_md"
+        } > "$target.tmp"
+        mv -f "$target.tmp" "$target"
+        count=$((count + 1))
+    done
+    ok "skill materialized: $count 건 → $generated/"
+}
+
+# Hermes ~/.hermes/config.yaml 의 skills.external_dirs 패치 (ADR-0032 §sub-3·4).
+# flock + backup + sha256 + realpath 비교 + marker comment.
+_patch_hermes_external_dirs() {
+    local hermes_config; hermes_config="$(_hermes_config_path)"
+    local hermes_dir; hermes_dir="$(dirname "$hermes_config")"
+    local lock_path="$hermes_config.lock"
+    local wikihub_skill_dir
+    wikihub_skill_dir="$("$VENV_PATH/bin/python3" -c \
+        "import os; print(os.path.realpath('$WIKIHUB_HOME/_system/skills/_generated'))")"
+
+    mkdir -p "$hermes_dir"
+
+    # flock advisory — 5초 retry × 12회 (총 60s)
+    exec 200>"$lock_path"
+    local retries=0
+    while ! flock -nx 200; do
+        retries=$((retries + 1))
+        if (( retries >= 12 )); then
+            err "Hermes config lock 획득 실패 (60s timeout) — 다른 Hermes/wikihub 인스턴스가 mutate 중"
+            exec 200>&-
+            return 2
+        fi
+        sleep 5
+    done
+
+    # PRE_HASH + backup
+    local pre_hash=""
+    local backup=""
+    if [[ -f "$hermes_config" ]]; then
+        pre_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+        backup="$hermes_config.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$hermes_config" "$backup"
+    fi
+
+    # ruamel atomic write + idempotent check (Python helper)
+    local result
+    result="$("$VENV_PATH/bin/python3" - "$hermes_config" "$wikihub_skill_dir" <<'PYEOF'
+import os, sys
+import ruamel.yaml
+from ruamel.yaml.comments import CommentedSeq
+
+path = sys.argv[1]
+wikihub_dir = sys.argv[2]
+MARKER = "managed by wikihub install.sh — remove to disable auto-discovery"
+
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as f:
+        data = yaml.load(f) or {}
+else:
+    data = {}
+
+skills = data.setdefault("skills", {})
+ext = skills.get("external_dirs")
+if ext is None:
+    ext = CommentedSeq()
+    skills["external_dirs"] = ext
+
+# realpath 정규화 비교
+existing_real = []
+for p in ext:
+    try:
+        existing_real.append(os.path.realpath(os.path.expanduser(str(p))))
+    except Exception:
+        existing_real.append(str(p))
+
+if wikihub_dir in existing_real:
+    print("noop", end="")
+    sys.exit(0)
+
+ext.append(wikihub_dir)
+# marker comment — ruamel 의 yaml_add_eol_comment (index = len(ext)-1)
+try:
+    ext.yaml_add_eol_comment(MARKER, len(ext) - 1, column=60)
+except Exception:
+    pass  # comment 부착 실패해도 entry 자체는 유지
+
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    yaml.dump(data, f)
+os.replace(tmp, path)
+print("patched", end="")
+PYEOF
+)"
+
+    # POST_HASH
+    local post_hash=""
+    [[ -f "$hermes_config" ]] && post_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+
+    flock -u 200
+    exec 200>&-
+
+    if [[ "$result" == "patched" ]]; then
+        info "Hermes config 패치 — $hermes_config (backup: ${backup:-신규생성})"
+        info "  pre_sha256:  ${pre_hash:-empty}"
+        info "  post_sha256: $post_hash"
+    elif [[ "$result" == "noop" ]]; then
+        info "Hermes config 이미 wikihub skill path 포함 — 변경 없음"
+        # backup 도 불필요 — cleanup
+        [[ -n "$backup" && -f "$backup" ]] && rm -f "$backup"
+    else
+        err "Hermes config 패치 결과 비예상: $result"
+        return 2
+    fi
+
+    # 7일 초과 backup cleanup
+    find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+}
+
+# 등록 후 검증 (ADR-0032 §sub-3 검증 단계)
+_verify_hermes_skill_registration() {
+    local agent_binary="$1"
+    info "Hermes skill 인식 검증 — $agent_binary skills list"
+    local list_output
+    if ! list_output="$("$agent_binary" skills list 2>&1)"; then
+        warn "hermes skills list 실패 — 검증 skip"
+        return 0
+    fi
+    local missing=()
+    for skill in "${WIKIHUB_SKILLS[@]}"; do
+        echo "$list_output" | grep -qE "(^|[[:space:]])$skill([[:space:]]|$)" \
+            || missing+=("$skill")
+    done
+    if (( ${#missing[@]} == 0 )); then
+        ok "Hermes skill 5건 인식 확인"
+        return 0
+    fi
+    info "미인식 skill: ${missing[*]} — \`hermes skills audit\` 1회 호출 후 재검증"
+    if "$agent_binary" skills audit >/dev/null 2>&1; then
+        list_output="$("$agent_binary" skills list 2>&1 || true)"
+        local still_missing=()
+        for skill in "${missing[@]}"; do
+            echo "$list_output" | grep -qE "(^|[[:space:]])$skill([[:space:]]|$)" \
+                || still_missing+=("$skill")
+        done
+        if (( ${#still_missing[@]} == 0 )); then
+            ok "audit 후 5건 인식 확인"
+            return 0
+        fi
+        warn "audit 후에도 미인식: ${still_missing[*]} — Hermes 재시작 또는 운영자 수동 검증 필요"
+    fi
+}
+
 _step6_agent_skill() {
-    # v0.1.0 minimal — Hermes / codex / gemini 별 메커니즘은 ADR-0012 + F5 에서 정본화.
-    # 본 Step 은 placeholder — 추후 agent 별 register helper 추가.
-    info "agent skill 초기 등록 — v0.1.0 stub (F5 에서 정본화)"
-    ok "Step 6 agent skill 메타 (placeholder)"
+    info "agent skill 등록 (ADR-0032·0033 F5)"
+
+    # 1. Hermes 존재 검사 (ADR-0032 §sub-1·sub-2 의 Hermes detect gate, CR2-CRIT-1)
+    local agent_binary="${HERMES_BIN:-}"
+    if [[ -z "$agent_binary" ]]; then
+        local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
+        if [[ -f "$yaml" ]]; then
+            agent_binary="$("$VENV_PATH/bin/python3" -c \
+                "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('binary',''))" \
+                "$yaml" 2>/dev/null || true)"
+        fi
+        [[ -z "$agent_binary" ]] && agent_binary="$(command -v hermes 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$agent_binary" || ! -x "$agent_binary" ]]; then
+        warn "Hermes binary 미설치 또는 미실행 — systemd render/enable skip"
+        warn "  Hermes 설치 후 install.sh 재호출 권장 (또는 wikihub.yaml.agent.binary 명시 후 재호출)"
+        SKIP_SYSTEMD_RENDER=1
+        export SKIP_SYSTEMD_RENDER
+        ok "Step 6 — Hermes 부재 detect, 후속 systemd 단계 skip"
+        return 0
+    fi
+
+    # 2. 운영자 yaml schema 1회성 lift (ADR-0033 — wh:/-z 잔존 detect + patch)
+    _migrate_agent_schema || return 2
+
+    # 3. SKILL.md materialize (ADR-0032 §sub-2 β)
+    _materialize_skills || return 2
+
+    # 4. ~/.hermes/config.yaml 의 external_dirs 패치 (ADR-0032 §sub-3·sub-4)
+    _patch_hermes_external_dirs || return 2
+
+    # 5. 등록 후 검증
+    _verify_hermes_skill_registration "$agent_binary"
+
+    ok "Step 6 agent skill 등록 완료 (5건 materialized + external_dirs 패치)"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1137,6 +1438,10 @@ _systemd_stop_before_update() {
 }
 
 _systemd_start_after_update() {
+    if [[ -n "${SKIP_SYSTEMD_RENDER:-}" ]]; then
+        info "SKIP_SYSTEMD_RENDER 세팅됨 (Hermes 부재) — systemd start skip"
+        return 0
+    fi
     local desired_vaults
     desired_vaults="$(_enabled_vaults_yaml)"
     if [[ -z "$desired_vaults" ]]; then
@@ -1181,6 +1486,10 @@ _wait_mount_ready() {
 
 # ─── Step 8 — install.sh 가 systemd render 직접 (C2 + #D) ────────────
 _step8_systemd_render() {
+    if [[ -n "${SKIP_SYSTEMD_RENDER:-}" ]]; then
+        info "SKIP_SYSTEMD_RENDER 세팅됨 (Hermes 부재) — systemd render skip"
+        return 0
+    fi
     local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
     if [[ ! -f "$yaml" ]]; then
         warn "wikihub.yaml 부재 — systemd render skip (yaml 편집 후 install.sh 재호출)"
@@ -1197,22 +1506,30 @@ _step8_systemd_render() {
     ok "Step 8 systemd render + daemon-reload 완료"
 }
 
-# best-effort hermes /wh:setup — F5 미완 fallback
+# best-effort hermes /wh-setup — F5 정합 (chat --skills --quiet --query) + update path 만
 _step8_wh_setup_skill_meta() {
+    if [[ -n "${SKIP_SYSTEMD_RENDER:-}" ]]; then
+        info "SKIP_SYSTEMD_RENDER 세팅됨 — /wh-setup skill 메타 갱신 skip"
+        return 0
+    fi
     [[ "$INSTALL_MODE" != "update" ]] && return 0
     local yaml="$WIKIHUB_INSTANCE_ROOT/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
-    local agent_binary
+    local agent_binary timeout_sec
     agent_binary="$("$VENV_PATH/bin/python3" -c \
         "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('binary',''))" \
         "$yaml" 2>/dev/null || true)"
+    timeout_sec="$("$VENV_PATH/bin/python3" -c \
+        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('timeout_sec',600))" \
+        "$yaml" 2>/dev/null || echo 600)"
     if [[ -z "$agent_binary" || ! -x "$agent_binary" ]]; then
-        info "agent.binary ($agent_binary) 미설치 — /wh:setup skill 메타 갱신 skip"
+        info "agent.binary ($agent_binary) 미설치 — /wh-setup skill 메타 갱신 skip"
         return 0
     fi
-    info "agent skill 메타 갱신 (best-effort) — $agent_binary -z \"/wh:setup\""
-    WIKIHUB_NONINTERACTIVE=1 timeout 300 "$agent_binary" -z "/wh:setup" \
-        || warn "/wh:setup 호출 실패 — F5 미완 또는 skill 미등록 (systemd render 는 install.sh 가 이미 수행)"
+    info "agent skill 메타 갱신 (best-effort) — $agent_binary chat --skills wh-setup --quiet --query \"/wh-setup\" (timeout=${timeout_sec}s)"
+    WIKIHUB_NONINTERACTIVE=1 timeout "$timeout_sec" "$agent_binary" \
+        chat --skills wh-setup --quiet --query "/wh-setup" \
+        || warn "/wh-setup 호출 실패 — Hermes skill 미인식 또는 LLM transient (systemd render 는 install.sh 가 이미 수행)"
 }
 
 # ─── Step 10 — verify ───────────────────────────────────────────────
@@ -1325,6 +1642,6 @@ main() {
 # 둘 다 BASH_SOURCE[0] == ${0} 정합 (curl-pipe 시 BASH_SOURCE 가 빈 문자열인 경우도
 # 같음 — 직접 process). source 패턴은 ${0} 가 호출 shell 의 이름 (bash, zsh) 이라
 # 정확히 mismatch → main 실행 안 함.
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ -z "${BASH_SOURCE[0]:-}" ]]; then
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]] || [[ -z "${BASH_SOURCE[0]:-}" ]]; then
     main "$@"
 fi

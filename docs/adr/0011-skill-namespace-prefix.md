@@ -1,10 +1,10 @@
 # ADR-0011: agent skill namespace prefix — `wh:`
 
-- **Status**: Accepted
+- **Status**: Superseded
 - **Date**: 2026-05-13
 - **Feature**: features/20260513_wikihub_schema_v1
 - **Supersedes**: 없음
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0033 (2026-05-18, F5 hermes_adapter — `wh-` hyphen lock)
 
 ## Context
 

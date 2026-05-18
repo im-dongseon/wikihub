@@ -1,15 +1,15 @@
-# /wh:setup
+# /wh-setup
 
 `wikihub.yaml`(운영 정본) **생성 + 검증**, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** 호출.
 
 ## 호출
 
 ```
-<agent_invocation> "/wh:setup"                # yaml materialize (첫 호출) 또는 drift sync + 검증 + unit 동기화
-<agent_invocation> "/wh:setup --enable"       # 추가로 systemctl --user enable --now까지 수행
+<agent_invocation> "/wh-setup"                # yaml materialize (첫 호출) 또는 drift sync + 검증 + unit 동기화
+<agent_invocation> "/wh-setup --enable"       # 추가로 systemctl --user enable --now까지 수행
 ```
 
-- **트리거**: 메인테이너 수동 (timer 아님 — `/wh:setup` 자체가 timer 설정 명령)
+- **트리거**: 메인테이너 수동 (timer 아님 — `/wh-setup` 자체가 timer 설정 명령)
 - **호출 시점**:
   - **install.sh 직후 (첫 호출)** — Step 0 가 `.example` 으로부터 `wikihub.yaml` 생성 (ADR-0031)
   - yaml maintainer field 편집 완료 후 (운영 시작)
@@ -29,8 +29,8 @@
 
 ### Step 0. wikihub.yaml materialization · schema version 검증 · drift fix (ADR-0031)
 
-본 Step 은 `/wh:setup` 의 **yaml writer 책임**의 정본 (ADR-0009 §4 + ADR-0031 §Decision A·B·C·E).
-yaml 의 시작·끝 책임은 `/wh:setup` 단독 — install.sh 는 yaml 미관여.
+본 Step 은 `/wh-setup` 의 **yaml writer 책임**의 정본 (ADR-0009 §4 + ADR-0031 §Decision A·B·C·E).
+yaml 의 시작·끝 책임은 `/wh-setup` 단독 — install.sh 는 yaml 미관여.
 
 #### Step 0.1. Schema version 검증 (ADR-0031 §Decision E)
 
@@ -65,7 +65,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
    ```
    wikihub.yaml 생성 완료 (.example → operational, 4 필드 patching 적용).
    다음 단계: maintainer field 편집 (vault id, root_folder_id, enabled, bootstrap_allowed,
-   fatal_webhook_url, instance_label 등) 후 /wh:setup --enable 재호출.
+   fatal_webhook_url, instance_label 등) 후 /wh-setup --enable 재호출.
    ```
 5. Step 1 진입.
 
@@ -120,11 +120,11 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 
 ### Step 2. systemd unit 동기화 (책임 이관 — 2026-05-17, ADR-0030)
 
-> **책임 이관 (update_mode feature, ADR-0030)**: v0.1.0 의 update_mode feature 부터 **systemd unit template 의 render·daemon-reload 책임은 install.sh 로 이관**. `/wh:setup` 은 본 Step 2 를 더 이상 수행하지 않음. 이유:
+> **책임 이관 (update_mode feature, ADR-0030)**: v0.1.0 의 update_mode feature 부터 **systemd unit template 의 render·daemon-reload 책임은 install.sh 로 이관**. `/wh-setup` 은 본 Step 2 를 더 이상 수행하지 않음. 이유:
 >
 > 1. install.sh 가 정본 변경 (`_system/systemd/*.template` 갱신) 직후 자동 render → unit 갱신 race window 차단.
 > 2. install.sh 가 hermes·F5 가용성과 독립적으로 동작 — F5 미완 상태에서도 update path full functional.
-> 3. `/wh:setup` 은 hermes skill 메타 갱신·yaml validate·first ingest prompt 책임으로 축소.
+> 3. `/wh-setup` 은 hermes skill 메타 갱신·yaml validate·first ingest prompt 책임으로 축소.
 >
 > install.sh 의 책임:
 > - `scripts/_helpers/render_systemd_units.py --render --out ~/.config/systemd/user/` 호출.
@@ -132,7 +132,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 > - render 후 `systemctl --user daemon-reload`.
 > - 대상 unit 목록 · 치환 변수 · substitution 순서의 정본 spec 은 [features/20260517_update_mode/analysis_and_design.md §6.1](../../features/20260517_update_mode/analysis_and_design.md#61-scripts_helpersrender_systemd_unitspy-contract) 의 helper Contract.
 >
-> 본 step 은 호환을 위해 placeholder 로 유지 — `/wh:setup` 이 호출됐을 때 운영자 안내만:
+> 본 step 은 호환을 위해 placeholder 로 유지 — `/wh-setup` 이 호출됐을 때 운영자 안내만:
 >
 > ```
 > Step 2: skip — install.sh 가 systemd unit render 책임 (ADR-0030).
@@ -145,7 +145,7 @@ agent CLI에 wikihub skill의 메타(vault 목록, 운영 모드 등) 알림. �
 - 신규/제거된 vault → skill description 갱신
 - skill_prefix가 fallback으로 변경된 경우 (install.sh가 yaml에 기록한 값을 agent에 전달)
 
-agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh:setup은 그 등록 상태를 재확인·갱신만.
+agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh-setup은 그 등록 상태를 재확인·갱신만.
 
 ### Step 4. systemd 반영 (v0.1.0 v5 — ADR-0022 흐름 역전 정합)
 
@@ -162,7 +162,7 @@ SETUP 결과 — 2026-05-13 15:30 KST
 ✓ vault gdrive: OAuth 토큰 유효 (Workspace Internal, refresh 가능)
 ✓ wiki/ 디렉토리: 생성 0, 기존 5
 ✓ _state/gdrive/: 생성 0, 기존 3
-✓ agent skill_prefix: wh:
+✓ agent skill_prefix: wh-
 
 systemd unit 갱신:
   gdrive-ingest.service (interval 600s)
@@ -312,9 +312,9 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 
 ## install.sh와의 관계
 
-ADR-0010 의 도구 split (install.sh = OS bootstrap / `/wh:setup` = wiki·yaml 정합) + ADR-0031 의 yaml writer 단일성 정합. install.sh 는 yaml 미관여.
+ADR-0010 의 도구 split (install.sh = OS bootstrap / `/wh-setup` = wiki·yaml 정합) + ADR-0031 의 yaml writer 단일성 정합. install.sh 는 yaml 미관여.
 
-| 항목 | install.sh (1회 bootstrap + 반복 update) | /wh:setup (첫 호출 + yaml 변경 시 반복) |
+| 항목 | install.sh (1회 bootstrap + 반복 update) | /wh-setup (첫 호출 + yaml 변경 시 반복) |
 |---|---|---|
 | OS deps (Python venv, libs) | ✓ | — |
 | 정본 파일 fetch (`_system/`, `scripts/`) — sparse-checkout (ADR-0023 §"Clone scope") | ✓ | — |
@@ -326,7 +326,7 @@ ADR-0010 의 도구 split (install.sh = OS bootstrap / `/wh:setup` = wiki·yaml 
 | credentials chmod 600 enforce | ✓ (`_step5_instance_dirs`) | — |
 | agent skill 초기 등록 | ✓ | — (메타 갱신만) |
 | wiki/·_state/ 디렉토리 | — | ✓ |
-| systemd unit 생성·갱신 (template + yaml 값 instance화) | ✓ (`_step8_systemd_render`, ADR-0030 update_mode 정본) | ✓ (재진입 호출 — `/wh:setup` 단독 호출 시) |
+| systemd unit 생성·갱신 (template + yaml 값 instance화) | ✓ (`_step8_systemd_render`, ADR-0030 update_mode 정본) | ✓ (재진입 호출 — `/wh-setup` 단독 호출 시) |
 | OAuth 토큰 검증 | — | ✓ |
 | daemon-reload·enable | — | ✓ |
 

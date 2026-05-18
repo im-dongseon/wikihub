@@ -140,3 +140,45 @@ ExecStart=/usr/local/bin/codex exec "/wh:ingest --vault gdrive"
 **install.sh 측 안내**:
 - 미검증 agent type 선택 시 install.sh가 명시적 경고 출력: `"<type> mapping은 미검증 — 실패 시 wikihub.yaml.agent.oneshot_args 수기 조정 + /wh:setup 재호출 필요"`
 - F4·F5가 매핑 검증 완료 시 install.sh의 경고 제거 + 본 ADR `Considered Options` 표 갱신
+
+## Note (2026-05-18, feature `hermes_adapter` F5) — §Decision 갱신
+
+본 ADR 의 §`wikihub.yaml.agent` 스키마 의 `oneshot_args` semantics 확장 — F5 의 CR1-HIGH-1 해결:
+
+### oneshot_args placeholder substitution (per-unit)
+
+기존 정의: 정적 args (prompt 가 마지막에 append).
+F5 갱신: **per-unit substitution placeholder `{skill}` 허용**. systemd unit template render 시 `render_systemd_units.py` 가 5건의 `wh-*` skill 별로 substitution.
+
+```yaml
+agent:
+  oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--query"]   # F5 schema
+```
+
+systemd unit ExecStart 합성:
+
+```
+# wikihub-vault@.service.template
+ExecStart={agent_invocation_for_wh_ingest} "/wh-ingest --vault %i"
+# 합성 결과:
+ExecStart=/usr/local/bin/hermes chat --skills wh-ingest --quiet --query "/wh-ingest --vault gdrive"
+```
+
+### §"신규 설치 시 사용자 prompt → 매핑" 갱신 (`hermes default`)
+
+F5 후 hermes default 매핑:
+```bash
+hermes)  BINARY="hermes"; ONESHOT_ARGS='["chat", "--skills", "{skill}", "--quiet", "--query"]' ;;
+```
+
+기존 `["-z"]` 매핑은 ADR-0002 Note 의 invocation 갱신과 정합 — supersede.
+
+### §"미검증 agent 의 user-facing 실패 모드" 갱신
+
+codex/gemini/copilot 의 placeholder convention 유지 가정 — v0.2.x 검증 시점에 확정. fail mode + 운영자 안내는 본 ADR 의 기존 명세 그대로.
+
+### ADR-0011 cross-reference
+
+본 ADR §"agent 호출 예 (codex, 가설)" 등의 표기는 ADR-0033 의 `wh-` lock 정합 — `/wh:` → `/wh-` 일괄.
+
+Status 변경 없음. content 갱신.

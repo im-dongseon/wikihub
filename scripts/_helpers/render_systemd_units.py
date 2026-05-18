@@ -133,6 +133,34 @@ def _instance_root(cfg: dict) -> Path:
     return Path(os.path.expanduser(raw)).resolve()
 
 
+# ── F5 (ADR-0032·0033): wikihub skill 5건 — per-skill substitution ────
+_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-graphify", "wh-setup")
+
+
+def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
+    """ADR-0032 §sub-2 / ADR-0033: per-unit `{skill}` placeholder substitution.
+
+    `oneshot_args` 에 `{skill}` placeholder 가 반드시 있어야 함 (fail-fast).
+    F5 schema: `oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--query"]`.
+    F5 이전 (e.g. update_mode rollback) 의 `oneshot_args: ["-z"]` 는 placeholder 부재 → fail.
+    """
+    agent = cfg.get("agent") or {}
+    binary = agent.get("binary", "")
+    oneshot_args = agent.get("oneshot_args") or []
+    has_placeholder = any("{skill}" in str(a) for a in oneshot_args)
+    if not has_placeholder:
+        print(
+            f"ERROR: agent.oneshot_args 에 '{{skill}}' placeholder 누락 — "
+            f"F5 schema (ADR-0032) 요구. 현재 oneshot_args={oneshot_args!r}. "
+            f"yaml 의 oneshot_args 를 `[\"chat\", \"--skills\", \"{{skill}}\", \"--quiet\", \"--query\"]` 로 갱신 필요 "
+            f"(또는 F5 이전 ref 로 rollback 시 `[\"-z\"]` 로 다운그레이드).",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_OPERATIONAL)
+    resolved = [str(a).format(skill=skill_name) for a in oneshot_args]
+    return " ".join([binary] + resolved).strip()
+
+
 def _instance_wide_subs(cfg: dict) -> dict[str, str]:
     """Pass 2 — instance-wide substitution keys."""
     instance_root = _instance_root(cfg)
@@ -144,14 +172,15 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
 
     agent_binary = agent.get("binary", "")
     oneshot_args = agent.get("oneshot_args") or []
-    # bash-safe quoted invocation string
+    # F4 호환 legacy invocation (agent_invocation 단일 key) — placeholder 미해석. F5 후
+    # systemd unit template 은 per-skill key (agent_invocation_for_wh_*) 사용.
     agent_invocation_parts = [agent_binary] + [str(a) for a in oneshot_args]
     agent_invocation = " ".join(agent_invocation_parts).strip()
 
     rclone_config_path = str(Path.home() / ".config" / "rclone" / "rclone.conf")
     rclone_bin = os.environ.get("RCLONE_BIN", "/usr/local/bin/rclone")
 
-    return {
+    subs: dict[str, str] = {
         "instance_root": str(instance_root),
         "venv_path": venv_path,
         "wikihub_home": str(wikihub_home),
@@ -160,8 +189,17 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
         "vfs_cache_max_size": str(ops.get("vfs_cache_max_size", "10G")),
         "lint_interval_hours": str(ops.get("lint_interval_hours", 24)),
         "agent_invocation": agent_invocation,
-        "skill_prefix": agent.get("skill_prefix", "wh:"),
+        "skill_prefix": agent.get("skill_prefix", "wh-"),
+        # F5 — yaml.agent.timeout_sec ↔ systemd TimeoutStartSec sync (R3-CR3-2 B-HIGH-2)
+        "timeout_start_sec": str(agent.get("timeout_sec", 600)),
     }
+
+    # F5 — per-skill agent_invocation_for_<skill> keys (ADR-0032·0033)
+    for skill in _WIKIHUB_SKILLS:
+        key = f"agent_invocation_for_{skill.replace('-', '_')}"
+        subs[key] = _per_skill_invocation(cfg, skill)
+
+    return subs
 
 
 def _cross_vault_subs(vault: dict) -> dict[str, str]:
@@ -372,7 +410,53 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
         f"removed_stale={removed} enabled_vaults={sorted(enabled_ids)}",
         file=sys.stderr,
     )
+
+    # F5 — systemd-analyze verify (CR2-HIGH-6 / R3-CR3-2 B-MED-4)
+    _systemd_analyze_verify(out_dir)
     return EXIT_OK
+
+
+def _systemd_analyze_verify(out_dir: Path) -> None:
+    """ADR-0032 §sub-4 / R3-CR3-2 B-MED-4: render 후 unit 문법 검증.
+
+    fail 시 EXIT_OPERATIONAL — install.sh trap (ADR-0030) 가 _rollback_if_failed 발동.
+    """
+    import shutil
+    import subprocess
+
+    sa = shutil.which("systemd-analyze")
+    if sa is None:
+        print(
+            "WARN: systemd-analyze 미설치 — unit 문법 검증 skip "
+            "(non-Linux 또는 minimal container 환경 추정)",
+            file=sys.stderr,
+        )
+        return
+
+    services = sorted(out_dir.glob("wikihub-*.service")) + sorted(out_dir.glob("wikihub-*.timer"))
+    if not services:
+        return
+    try:
+        result = subprocess.run(
+            [sa, "--user", "verify", *[str(p) for p in services]],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"WARN: systemd-analyze verify 실행 실패: {e}", file=sys.stderr)
+        return
+    if result.returncode != 0:
+        print(
+            f"ERROR: systemd-analyze verify 실패 — rendered unit 문법 결함. "
+            f"render_systemd_units.py 로직 또는 yaml schema 의심.\n"
+            f"stderr:\n{result.stderr}",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_OPERATIONAL)
+    if result.stderr.strip():
+        # warning level (returncode==0 with stderr) — surface only.
+        print(f"INFO: systemd-analyze verify stderr (warn only):\n{result.stderr}", file=sys.stderr)
 
 
 # ── mode dispatchers ──────────────────────────────────────────────────
