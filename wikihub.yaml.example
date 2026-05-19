@@ -50,7 +50,7 @@ operations:
   # ADR-0036 — graphify CLI (PyPI graphifyy):
   graphify_min_version: "0.8.0"       # install.sh `_install_graphify` 의 min (v0.1.0 documentation only — 실 enforce 는 v0.2.x)
   graphify_max_version: "0.99.99"     # ADR-0036 breaking change 방어
-  graphify_api_key_env_name: ANTHROPIC_API_KEY   # wh-lint Step 9 chain 의 graphify Pass 3 가 읽는 env var. ~/.config/wikihub/env 의 KEY 와 정합. OpenAI backend 시 OPENAI_API_KEY 로 override.
+  graphify_backend: ""                # graphify --backend 값. 빈 문자열="" = graphify auto-detect (claude → kimi → openai → gemini → claude-cli → ollama). 명시: claude | claude-cli | openai | gemini | kimi | deepseek | ollama | bedrock. ADR-0036 §Note (2026-05-20) — `ollama` backend = "OpenAI-compatible generic client" (OLLAMA_BASE_URL + OLLAMA_API_KEY + OLLAMA_MODEL) — OpenCode-go·OpenRouter·LM Studio 등 호환.
 
 # agent: Hermes (또는 codex/gemini) 는 install.sh 설치 범위 밖 — 메인테이너가 별도 설치 후 binary 경로 확인 필수.
 # 미설치 시 install.sh _step6_agent_skill 가 detect → systemd unit render/enable skip (ADR-0032). 운영자가 hermes 설치 후 install.sh 재호출.

@@ -138,3 +138,66 @@
 - **비교 / 분리**: ADR-0035 (rclone OAuth) — `~/.config/rclone/rclone.conf` 가 OAuth credentials, 본 ADR 의 `~/.config/wikihub/env` 가 LLM API key — 경로/책임 모두 별개.
 - **본 ADR 의 분석 정본**: [features/archive/20260519_graphify_integration/analysis_and_design.md](../../features/archive/20260519_graphify_integration/analysis_and_design.md)
 - **2026-05-19 검토 자료**: graphify.net / GitHub safishamsi/graphify (MIT) — pypi.org/project/graphifyy
+
+## Note (2026-05-20, feature `graphify_backend_flexibility`) — §D2 backend lock 해제
+
+### 발견
+
+§D2 가 default backend = Anthropic Claude (`ANTHROPIC_API_KEY`) 로 lock. OCI 운영자가 별도 Anthropic key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) 의 `deepseek-v4-pro` API key 가 이미 설정 — backend 선택 layer 보강 필요.
+
+graphify CLI source 검증 (`graphifyy 0.8.13/llm.py:64-71, 287`):
+- `ollama` backend 의 base_url 은 `os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")` — runtime env 로 override.
+- client init: `OpenAI(api_key=api_key, base_url=base_url, ...)` — 표준 OpenAI Python SDK.
+- 즉 `ollama` backend = **"OpenAI-compatible endpoint generic client"** (이름은 misleading).
+
+→ OpenCode-go / OpenRouter / LM Studio / Together / Fireworks / Anyscale 등 OpenAI-compatible 한 모든 endpoint 가 `--backend ollama` 로 사용 가능. `OLLAMA_BASE_URL` + `OLLAMA_API_KEY` + `OLLAMA_MODEL` 조합.
+
+### §D2 갱신
+
+**Before** (§D2 본문): API key 저장 — `~/.config/wikihub/env` (EnvironmentFile), default env var name `ANTHROPIC_API_KEY`, yaml `operations.graphify_api_key_env_name` 로 override.
+
+**After**:
+
+- yaml schema 변경: `graphify_api_key_env_name` 폐기 (backend 별 env 가 다양해 단일 필드 미적합). 신설: `operations.graphify_backend` (catalog: `""` auto-detect | `claude` | `claude-cli` | `openai` | `gemini` | `kimi` | `deepseek` | `ollama` | `bedrock`).
+- `~/.config/wikihub/env` 는 그대로 (systemd `EnvironmentFile=-` 패턴 유지). 내용은 backend 별 자유 — install.sh 가 template 으로 5종 예시 (Anthropic / OpenAI / OpenCode-go via ollama / Ollama local / claude-cli) 표기.
+- lint Step 9 의 graphify 호출이 yaml `graphify_backend` 읽어 `--backend $value` 명시 전달. 빈 값이면 flag 생략 → graphify auto-detect (claude → kimi → openai → gemini → claude-cli → ollama 순).
+
+### Hermes env_passthrough 정합 (operational)
+
+wh-lint Step 9 의 graphify 는 **hermes 의 terminal tool 로 spawn** — Hermes 의 tirith 가 default 로 secret env 를 subprocess 에서 strip. `~/.hermes/hermes-agent/tools/env_passthrough.py` 의 allowlist 메커니즘 정합:
+
+- skill frontmatter `required_environment_variables` 선언 → Hermes 자동 allowlist.
+- 또는 `~/.hermes/config.yaml` 의 `terminal.env_passthrough` 에 명시.
+
+본 ADR 은 후자 (operator-side Hermes config) 를 정본 — wikihub skill 의 frontmatter 는 path 상수 / API key 둘 다 비워 wh_skills_env_cleanup (2026-05-19) 의 정합 유지. wikihub setup.md Step 1 이 Hermes config 안내 1줄로 운영자에게 책임 위임.
+
+### OpenCode-go 사례 (operator 운영 예시)
+
+```yaml
+# wikihub.yaml
+operations:
+  graphify_backend: ollama
+```
+
+```
+# ~/.config/wikihub/env (또는 Hermes config 의 env)
+OLLAMA_BASE_URL=https://opencode.ai/zen/go/v1
+OLLAMA_API_KEY=<provider key>
+OLLAMA_MODEL=deepseek-v4-pro
+```
+
+```yaml
+# ~/.hermes/config.yaml
+terminal:
+  env_passthrough: [OLLAMA_BASE_URL, OLLAMA_API_KEY, OLLAMA_MODEL]
+```
+
+### 추가 보강 — lint Step 9 의 timeout wrapper
+
+graphify subprocess 가 hang (API key 부재 / endpoint 응답 없음 / etc.) 시 lint 전체가 TimeoutStartSec 으로 SIGINT 받음. lint.md Step 9 에 `timeout 300 graphify ...` wrapper 추가 — exit 124 시 report 에 `graph rebuild timeout` + lint 계속 (ADR-0036 §D6 정합 보강).
+
+### Cross-references 갱신
+
+- §D2 본문 ↔ 본 §Note 정합. 본문 미수정 — 역사적 맥락 보존, schema 정본은 본 §Note + 본 feature 의 analysis_and_design.md.
+- 본 feature 의 분석 정본: [features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md](../../features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md)
+- 2026-05-20 검토 자료: `graphifyy 0.8.13/llm.py` (BACKENDS dict, line 47-118; client init line 287).

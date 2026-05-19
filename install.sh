@@ -689,15 +689,33 @@ _step5_instance_dirs() {
     if [[ ! -f "$wh_env_file" ]]; then
         cat > "$wh_env_file" <<'EOF'
 # wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036).
-# graphify Pass 3 (Claude/OpenAI subagent semantic extraction) 의 LLM API key.
+# graphify Pass 3 (LLM subagent semantic extraction) 의 backend 자료.
 # 운영자가 수동으로 본 파일을 채워야 graphify chain (wh-lint Step 9) 이 정상 동작.
 # 미입력 상태에서도 systemd unit start 자체는 성공 — graphify subprocess 만 fail.
 #
-# 형식: KEY=VALUE (per line, 따옴표 미사용)
-# 예시:
-#   ANTHROPIC_API_KEY=sk-ant-...
-# 또는 OpenAI backend 사용 시:
-#   OPENAI_API_KEY=sk-...
+# Hermes terminal.env_passthrough 미설정 시 graphify subprocess (hermes 가 spawn) 에 secret env
+# 가 strip 될 수 있음 → ~/.hermes/config.yaml 의 terminal.env_passthrough 에 backend env 추가
+# 또는 본 파일 + Hermes 양쪽 동시 채움 (defensive).
+#
+# 형식: KEY=VALUE (per line, 따옴표 미사용). backend 별 예시 (yaml operations.graphify_backend 정합):
+#
+# 1. Anthropic Claude (`--backend claude`):
+#    ANTHROPIC_API_KEY=sk-ant-...
+#
+# 2. OpenAI (`--backend openai`):
+#    OPENAI_API_KEY=sk-...
+#
+# 3. OpenCode-go / OpenRouter / LM Studio 등 OpenAI-compatible (`--backend ollama`):
+#    OLLAMA_BASE_URL=https://opencode.ai/zen/go/v1
+#    OLLAMA_API_KEY=<provider key>
+#    OLLAMA_MODEL=deepseek-v4-pro
+#
+# 4. 진짜 Ollama 로컬 (`--backend ollama`, API 비용 0):
+#    OLLAMA_BASE_URL=http://localhost:11434/v1
+#    OLLAMA_MODEL=qwen2.5-coder:7b
+#
+# 5. Claude Code 구독 활용 (`--backend claude-cli`, API key 불필요):
+#    (env var 비움 — yaml operations.graphify_backend=claude-cli + Claude CLI binary PATH 만)
 EOF
     fi
     chmod 600 "$wh_env_file"

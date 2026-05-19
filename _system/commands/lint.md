@@ -152,6 +152,21 @@ lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참�
 - 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh-query·/wh-lint 정확도 저하)
 - 본 단계의 exit code는 lint의 exit code에 영향 안 줌 (graphify 실패가 lint 자체를 fail시키지 않음 — graph는 보조 자원)
 
+**graphify 호출 형태 (ADR-0036 §Note 2026-05-20 — backend flexibility)**:
+
+`/wh-graphify` playbook 이 yaml `operations.graphify_backend` 를 읽어 다음 형태로 graphify CLI subprocess 호출:
+
+```bash
+backend="$(yq '.operations.graphify_backend // ""' "$WIKIHUB_HOME/wikihub.yaml")"
+backend_flag=""
+[[ -n "$backend" ]] && backend_flag="--backend $backend"
+timeout 300 graphify "$WIKIHUB_HOME/wiki" --update $backend_flag
+```
+
+- `--backend $backend`: yaml override (빈 문자열이면 flag 생략 → graphify auto-detect).
+- `timeout 300`: graphify 가 어떤 사유로든 hang 하면 SIGTERM (exit 124). lint 본체 보호.
+- exit 124 시 report 에 `graph rebuild timeout (300s, backend=$backend)` 기록 + lint 계속 (ADR-0036 §D6 정합).
+
 **graphify 결과 self-check (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드)**:
 
 - graphify 호출 성공 (exit 0) 후 `graphify-out/graph.json` read → 노드 수 = `N`

@@ -77,4 +77,15 @@
 - **결론**: 2 곳 변경 (install.sh) + VERSION 0.1.3 → 0.1.4. pytest 57 pass 유지. v0.1.3 immutability 회복 — force-push 1회로 종료, 본 변경은 새 commit + v0.1.4 tag 로 정합.
 - **참조**: features/archive/20260519_install_robustness/
 
+---
+
+## [2026-05-20] graphify_backend_flexibility (v0.1.4 wave — 2번째 entry)
+
+- **목적**: ADR-0036 §D2 (2026-05-19) 의 default `ANTHROPIC_API_KEY` backend lock 이 OCI 운영자 비용 모델에 misaligned — 별도 Anthropic API key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) 의 `deepseek-v4-pro` API key 이미 설정. backend 선택 layer 보강 + lint Step 9 의 graphify hang 가드 추가.
+- **로직**: graphify CLI source 검증 (`graphifyy 0.8.13/llm.py:64-71, 287`) — `ollama` backend 가 실제로는 "OpenAI-compatible endpoint generic client" 임을 확인 (`OLLAMA_BASE_URL` 으로 base_url override + `OpenAI()` SDK 사용). yaml schema 변경: `graphify_api_key_env_name` 폐기 + `operations.graphify_backend` 신설 (catalog `""` auto-detect | claude | claude-cli | openai | gemini | kimi | deepseek | ollama | bedrock). install.sh `_step5_instance_dirs` 의 env template 에 backend 별 예시 5종 (Anthropic / OpenAI / OpenCode-go via ollama / Ollama local / claude-cli) 표기. lint.md Step 9 가 yaml graphify_backend 읽어 `--backend $value` 명시 전달 + `timeout 300 graphify ...` wrapper (exit 124 시 report 에 timeout 기록 + lint 본체 계속, ADR-0036 §D6 정합 보강). setup.md Step 1 의 env file 검증 단순화 (graphify_api_key_env_name 의존 제거) + Hermes `terminal.env_passthrough` 안내 1줄.
+- **생성 ADR**: 없음 (ADR-0036 §Note 추가 — §D2 본문 미수정, schema 정본은 §Note + 본 feature 의 analysis_and_design).
+- **트레이드오프**: yaml 1 field 교체 (`graphify_api_key_env_name` → `graphify_backend`) — v0.1.0 미배포 시점이라 마이그레이션 0 (단 OCI 가 v0.1.3 으로 1회 배포 후라 운영자 yaml 의 `graphify_api_key_env_name` 키 잔존 시 install.sh 무관심 — graphify 호출 흐름에 영향 없음, dead config 로 자연 무시). operator-side Hermes `terminal.env_passthrough` 설정 책임 추가 — wikihub spec 차원 자동화 안 함 (Hermes config 는 wikihub 외부 영역).
+- **결론**: yaml + install.sh template + 2 playbook + ADR §Note. v0.1.3 → v0.1.4 wave 2번째 entry (install_robustness 후속). pytest 57 pass 유지 (코드 변경은 yaml 읽는 부분 외 없음).
+- **참조**: features/archive/20260520_graphify_backend_flexibility/
+
 - **참조**: features/archive/20260519_graphify_integration/ + features/archive/20260519_graphify_usage_review/
