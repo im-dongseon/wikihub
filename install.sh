@@ -763,22 +763,17 @@ _migrate_agent_schema() {
 
     [[ "$needs_migrate" == 0 ]] && return 0
 
-    # ADR-0023 default invocation `curl | bash` 은 stdin=pipe → `read -r` 즉시 EOF → 무조건 N.
-    # tty 가 있을 때만 prompt, 아니면 자동 진행 (v0.1.4, 2026-05-19).
-    # WIKIHUB_NONINTERACTIVE env 도 보존 — 운영자 명시 override 경로.
-    if [[ -t 0 ]] && [[ -z "${WIKIHUB_NONINTERACTIVE:-}" ]]; then
-        echo "F5 migration: wikihub.yaml 의 agent.skill_prefix·oneshot_args 갱신 필요. 진행? [y/N]"
-        read -r reply
-        [[ "${reply,,}" == "y" || "${reply,,}" == "yes" ]] \
-            || { warn "schema migration 거부 — 운영자가 직접 갱신 후 install.sh 재호출 권장"; return 0; }
-    else
-        info "noninteractive (stdin 미-tty 또는 WIKIHUB_NONINTERACTIVE) → schema migration 자동 진행"
-    fi
+    # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY 환경에서
+    # 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 → v0.1.4 cycle 의
+    # root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety net — 운영자가 의도와
+    # 다르면 cp 1회로 즉시 복원. transformation 자체는 idempotent + scoped (skill_prefix +
+    # oneshot_args 만, 다른 yaml 필드 미터치). 외부 운영자 의도 override 시나리오는 v0.2.x 시점
+    # 재검토 트리거 (그때 WIKIHUB_SKIP_MIGRATION 같은 escape hatch 별도 feature 로 추출).
 
     # backup
     local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -p "$yaml" "$backup"
-    info "backup: $backup"
+    info "schema drift detected — auto migration (backup: $backup)"
 
     "$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
 import sys, ruamel.yaml

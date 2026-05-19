@@ -133,3 +133,28 @@ agent 의 oneshot 호출 cmdline 에 `--yolo` 인자를 표준 형태로 포함.
 `--yolo` 가 tirith 의 prompt 를 자동 승인 → noninteractive 운영 환경에선 효과 동일 (prompt 없으니 deny 만 발생했음). interactive 운영자 manual hermes 호출은 영향 받지 않음 (yaml override 또는 직접 cmdline 사용 시 trust 모델 본인 책임).
 
 본 변경의 분석 정본: [features/archive/20260519_hermes_yolo_flag/analysis_and_design.md](../../features/archive/20260519_hermes_yolo_flag/analysis_and_design.md)
+
+## Note (2026-05-20, feature `migration_prompt_simplify` v0.1.5) — `_migrate_agent_schema` prompt 분기 제거
+
+### 발견
+
+v0.1.4 의 `[[ -t 0 ]]` 기반 noninteractive 분기 (`install.sh:_migrate_agent_schema`) 가 Hermes OCI 환경에서 무력화. 원인 — Hermes 의 terminal tool 이 subprocess 에 PTY 할당 → stdin = pty slave = terminal-like → `[[ -t 0 ]]` true → prompt fire → 응답 hook 부재 → empty input → default N → migration 거부 → yaml `--yolo` 미반영 → systemd unit `--yolo` 누락 → Hermes 매번 수동 patch.
+
+v0.1.3 의 `--yolo` 누락 + v0.1.4 의 schema-drift 무력화와 **동일 패턴** — install.sh 의 noninteractive 검출 layer 가 "운영 환경의 실 호출 경로 = Hermes terminal subprocess" 모델링 못함.
+
+### 결정 (서브에이전트 2건 design review 후)
+
+`_migrate_agent_schema` 의 prompt 분기 자체 제거. backup (`.wikihub-bak.<utc_iso>`) 가 의도 override safety net — transformation 자체가 idempotent + scoped (skill_prefix + oneshot_args 만, 다른 yaml 필드 미터치).
+
+- 옵션 (1) 채택 — prompt 완전 제거 + 항상 auto-proceed.
+- 옵션 (2) [escape hatch `WIKIHUB_SKIP_MIGRATION` 도입] 은 외부 운영자 의도 override 시나리오 가설 — v0.2.x 시점 surface 시 별도 feature 로 추출 (재검토 트리거).
+- 옵션 (3)/(4) [default Y flip / read -t 5 timeout] 은 stdin-shape 휴리스틱 cycle 잔존으로 drop.
+
+### 효과
+
+- v0.1.3 → v0.1.4 → v0.1.5 의 동일 root cause cycle 종료.
+- Hermes / `curl|bash` / manual tty 3 환경 모두 동일 동작.
+- backup 자동 생성으로 운영자 사후 trace 보장.
+- 운영자 의도 override 의 매번 yaml 재편집 friction — v0.2.x 외부 운영자 사례 surface 후 escape hatch 도입.
+
+본 변경의 분석 정본: [features/archive/20260520_migration_prompt_review/](../../features/archive/20260520_migration_prompt_review/) (context.md + design_review_1.md + design_review_2.md + plan.md)

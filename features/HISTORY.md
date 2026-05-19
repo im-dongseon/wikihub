@@ -88,4 +88,16 @@
 - **결론**: yaml + install.sh template + 2 playbook + ADR §Note. v0.1.3 → v0.1.4 wave 2번째 entry (install_robustness 후속). pytest 57 pass 유지 (코드 변경은 yaml 읽는 부분 외 없음).
 - **참조**: features/archive/20260520_graphify_backend_flexibility/
 
+---
+
+## [2026-05-20] migration_prompt_simplify (v0.1.5)
+
+- **목적**: v0.1.3 → v0.1.4 의 동일 root cause cycle 종료 — `install.sh:_migrate_agent_schema` 의 `[[ -t 0 ]]` 기반 noninteractive 검출이 Hermes terminal tool 의 PTY 할당으로 거짓 양성 → prompt fire → empty input → default N → migration 거부 → yaml `--yolo` 미반영 → systemd unit `--yolo` 누락 → 운영자 매번 수동 patch.
+- **로직**: 서브에이전트 2건 design review (architectural/safety + operational/UX) 후 옵션 (1) 채택 — prompt 분기 자체 제거 + info log 1줄 (`schema drift detected — auto migration`). transformation 의 backup 자동 생성 (`.wikihub-bak.<utc_iso>`) 이 운영자 의도 override safety net 으로 유지. macOS dev box 는 `$WIKIHUB_HOME/wikihub.yaml` 부재 → 함수 즉시 return 0, 영향 없음.
+- **생성 ADR**: 없음 (ADR-0032 §Note 추가 — prompt 제거 결정 + 미래 재검토 트리거 기록).
+- **트레이드오프**: 외부 운영자가 의도적으로 `--yolo` 없는 yaml 운영하려 할 시 매 install.sh 가 덮어씌움 — 현 시점 운영자 base = Hermes 1대 + 메인테이너 1명, 이 시나리오 가설. v0.2.x 외부 운영자 사례 surface 시 escape hatch (예: `WIKIHUB_SKIP_MIGRATION=1` env) 별도 feature 로 추출 — 재검토 트리거 ADR-0032 §Note 명시.
+- **결론**: install.sh `_migrate_agent_schema` 의 prompt 블록 10줄 → info log 1줄. v0.1.4 → v0.1.5 patch bump. pytest 57 pass 유지.
+- **참조**: features/archive/20260520_migration_prompt_review/ (context + 2 design reviews + plan)
+
+
 - **참조**: features/archive/20260519_graphify_integration/ + features/archive/20260519_graphify_usage_review/
