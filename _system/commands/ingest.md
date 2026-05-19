@@ -19,6 +19,16 @@
 - 해당 vault의 OAuth credentials(ADR-0003) 유효
 - `wiki/sources/<vault_id>/`, `wiki/entities/`, `wiki/concepts/`, `wiki/analyses/` 디렉토리 존재 (없으면 생성)
 
+## 출력 언어 정책 (Step 4 semantic phase 의 LLM 호출 공통)
+
+본 playbook 의 Step 4 (entity·concept 추출 + frontmatter 1줄 요약 작성) 의 LLM 응답에서:
+
+- **출력 언어 = 한국어** (wiki 의 source 본문이 한국어 위주, ADR-0001 vault-prefix link 도 한국어 entity/concept 명 정합).
+- **한자 (漢字) 감지 시 한글로 변환** — deepseek-v4-pro / minimax 등 일부 모델이 동음이의 한국어를 한자 표기로 출력하는 결함 (Hermes OCI 실증, 2026-05-20, lint.md 와 동일). 예: "기획(企劃)" → "기획"; "권한(權限)" → "권한". 고유명사 (인명·지명·조직명 중 한국 외 출처) 는 예외 허용.
+- **영어 약어** (OKR, PM, CRM, API 등) 는 그대로 유지.
+
+본 정책은 lint.md 의 "출력 언어 정책" 와 동일 — 운영 model (yaml `agent.models.wh-ingest`) 의 한자 출력 결함 대비.
+
 ## 절차
 
 ### Step 1. pending_ingest.json 확인 (부분 실패 복구)

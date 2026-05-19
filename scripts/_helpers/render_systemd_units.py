@@ -150,7 +150,7 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
     """
     agent = cfg.get("agent") or {}
     binary = agent.get("binary", "")
-    oneshot_args = agent.get("oneshot_args") or []
+    oneshot_args = list(agent.get("oneshot_args") or [])
     has_placeholder = any("{skill}" in str(a) for a in oneshot_args)
     if not has_placeholder:
         print(
@@ -161,6 +161,24 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
             file=sys.stderr,
         )
         sys.exit(EXIT_OPERATIONAL)
+
+    # ADR-0032 §Note (v0.1.5, 2026-05-20) — per-skill model override.
+    # yaml.agent.models[<skill>] 명시 시 oneshot_args 에 `--model <id>` inject (--query 앞에).
+    # 빈 dict / 미명시 skill → hermes config.yaml.model.default 사용 (backward-compat).
+    models = agent.get("models") or {}
+    skill_model = models.get(skill_name)
+    if skill_model:
+        new_args: list = []
+        inserted = False
+        for arg in oneshot_args:
+            if str(arg) == "--query" and not inserted:
+                new_args.extend(["--model", str(skill_model)])
+                inserted = True
+            new_args.append(arg)
+        if not inserted:
+            new_args.extend(["--model", str(skill_model)])
+        oneshot_args = new_args
+
     resolved = [str(a).format(skill=skill_name) for a in oneshot_args]
     return " ".join([binary] + resolved).strip()
 

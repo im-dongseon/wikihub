@@ -81,7 +81,7 @@
 
 ## [2026-05-20] graphify_backend_flexibility (v0.1.4 wave — 2번째 entry)
 
-- **목적**: ADR-0036 §D2 (2026-05-19) 의 default `ANTHROPIC_API_KEY` backend lock 이 OCI 운영자 비용 모델에 misaligned — 별도 Anthropic API key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) 의 `deepseek-v4-pro` API key 이미 설정. backend 선택 layer 보강 + lint Step 9 의 graphify hang 가드 추가.
+- **목적**: ADR-0036 §D2 (2026-05-19) 의 default `ANTHROPIC_API_KEY` backend lock 이 OCI 운영자 비용 모델에 misaligned — 별도 Anthropic API key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) API key 이미 설정 (운영 모델 = `minimax-m2.5`, 초기 `deepseek-v4-pro` 였으나 reasoning hang 결함으로 변경, 2026-05-20). backend 선택 layer 보강 + lint Step 9 의 graphify hang 가드 추가.
 - **로직**: graphify CLI source 검증 (`graphifyy 0.8.13/llm.py:64-71, 287`) — `ollama` backend 가 실제로는 "OpenAI-compatible endpoint generic client" 임을 확인 (`OLLAMA_BASE_URL` 으로 base_url override + `OpenAI()` SDK 사용). yaml schema 변경: `graphify_api_key_env_name` 폐기 + `operations.graphify_backend` 신설 (catalog `""` auto-detect | claude | claude-cli | openai | gemini | kimi | deepseek | ollama | bedrock). install.sh `_step5_instance_dirs` 의 env template 에 backend 별 예시 5종 (Anthropic / OpenAI / OpenCode-go via ollama / Ollama local / claude-cli) 표기. lint.md Step 9 가 yaml graphify_backend 읽어 `--backend $value` 명시 전달 + `timeout 300 graphify ...` wrapper (exit 124 시 report 에 timeout 기록 + lint 본체 계속, ADR-0036 §D6 정합 보강). setup.md Step 1 의 env file 검증 단순화 (graphify_api_key_env_name 의존 제거) + Hermes `terminal.env_passthrough` 안내 1줄.
 - **생성 ADR**: 없음 (ADR-0036 §Note 추가 — §D2 본문 미수정, schema 정본은 §Note + 본 feature 의 analysis_and_design).
 - **트레이드오프**: yaml 1 field 교체 (`graphify_api_key_env_name` → `graphify_backend`) — v0.1.0 미배포 시점이라 마이그레이션 0 (단 OCI 가 v0.1.3 으로 1회 배포 후라 운영자 yaml 의 `graphify_api_key_env_name` 키 잔존 시 install.sh 무관심 — graphify 호출 흐름에 영향 없음, dead config 로 자연 무시). operator-side Hermes `terminal.env_passthrough` 설정 책임 추가 — wikihub spec 차원 자동화 안 함 (Hermes config 는 wikihub 외부 영역).
@@ -109,6 +109,20 @@
 - **트레이드오프**: `graphify_enabled: false` 시 lint Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작 — graph.json 갱신만 stale (다음 cycle 까지). `lint_contradiction_check: false` 시 wiki 의 모순·stale 정보 자동 detect 안 됨 — 메인테이너 수동 `--apply` 호출 시 1회 점검 보완 권장.
 - **결론**: yaml 3 field 변경 + lint.md 2 분기 + setup.md catalog + ADR-0036 §Note. v0.1.5 wave 2번째 commit (migration_prompt_simplify `152d751` 와 함께 push 예정). graphify 별도 systemd unit 분리는 v0.1.6 별도 feature.
 - **참조**: features/archive/20260520_lint_fallback_toggles/
+
+---
+
+## [2026-05-20] agent_model_per_skill (v0.1.5 amend — 같은 release window)
+
+- **목적**: Hermes OCI 진단 — (1) reasoning 모델 (deepseek-v4-pro/flash) 이 작은 max_tokens 에서 content="" → agent hang, (2) MiniMax M2.5 등 일부 모델이 한국어 응답에 한자 섞어 출력. wh-lint 만 model 분리 + 출력 언어 정책 lift.
+- **로직**: yaml `agent.models` map 신설 (default 빈 dict; per-skill model override). `scripts/_helpers/render_systemd_units.py:_per_skill_invocation` 갱신 — `--model <id>` 명시 inject (--query 앞에, hermes_yolo_flag 의 `--yolo` 패턴 동일). yaml.example 예시 `wh-lint: minimax-m2.5`. `_system/commands/lint.md` 상단에 "출력 언어 정책" section — 한자 → 한글 변환, 고유명사 예외, 영어 약어 그대로. 적용 범위: Step 3·4·5·6 의 LLM 호출 공통. ADR-0032 §Note 추가 (per-skill model + 출력 언어 정책 결정 정본).
+- **생성 ADR**: 없음 (ADR-0032 §Note 추가).
+- **트레이드오프**: per-skill override 사용 시 운영자가 yaml 의 `agent.models` map 을 명시 관리 필요. 빈 dict default 라 backward-compat. 출력 언어 정책은 lint 만 적용 — 다른 wh-* skill (ingest/query/graphify) 의 동일 결함 surface 시 점진 lift 권장.
+- **결론**: yaml 1 map + render helper 14줄 + lint.md 1 section + ADR §Note + setup.md catalog 1줄. v0.1.5 amend (force-push 4번째). render dry-run 검증 — lint.service 만 `--model minimax-m2.5` inject, 다른 wh-* unit 미영향 확인. pytest 57 pass.
+  - **wh-ingest 추가** (2026-05-20 후속): `agent.models` 에 `wh-ingest: deepseek-v4-pro` 추가 — per-source LLM 호출 (entity/concept 추출) 의 reasoning 정확도 활용. 운영자 판단 — max_tokens hang risk 인지 (Hermes 실증) 후 운영 모델 선택. surface 시 `qwen3.6-plus` 로 fallback 권장 (non-reasoning + 한국어 안정).
+  - **ingest.md 출력 언어 정책 추가** (2026-05-20 후속): `_system/commands/ingest.md` 상단에 lint.md 와 동일 패턴 "출력 언어 정책" section — Step 4 (entity/concept 추출) 의 LLM 응답에서 한자 → 한글 변환 지시. deepseek-v4-pro / minimax 등 모델의 동음이의 한자 출력 결함 대비.
+- **참조**: features/archive/20260520_agent_model_per_skill/
+
 
 
 

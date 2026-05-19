@@ -158,3 +158,39 @@ v0.1.3 의 `--yolo` 누락 + v0.1.4 의 schema-drift 무력화와 **동일 패�
 - 운영자 의도 override 의 매번 yaml 재편집 friction — v0.2.x 외부 운영자 사례 surface 후 escape hatch 도입.
 
 본 변경의 분석 정본: [features/archive/20260520_migration_prompt_review/](../../features/archive/20260520_migration_prompt_review/) (context.md + design_review_1.md + design_review_2.md + plan.md)
+
+## Note (2026-05-20, feature `agent_model_per_skill` v0.1.5) — per-skill model override + 출력 언어 정책
+
+### 발견 (Hermes OCI 진단)
+
+1. **reasoning 모델 hang**: `deepseek-v4-pro` / `deepseek-v4-flash` 가 hermes agent 의 default `max_tokens` (작은 값) 에서 thinking 토큰 다 소모 → content="" → agent hang. `lock.acquire()` 5분 대기 + 운영자 수동 SIGINT.
+2. **출력 언어 한자 섞임**: MiniMax M2.5 등 일부 모델이 한국어 응답에 한자(漢字) 표기를 섞어 출력 — "기획(企劃)" 같은 패턴. wiki 의 entity·concept 페이지 명명 일관성 훼손.
+
+### 결정 — per-skill model override
+
+`agent.oneshot_args` 는 instance-wide (모든 wh-* skill 공통). hermes config.yaml.model.default 는 platform-wide (Telegram, CLI 등 모두). lint 만 다른 모델 쓰려면 systemd unit 의 ExecStart 차원에서 `--model <id>` 명시 필요.
+
+yaml schema 신설:
+```yaml
+agent:
+  models:                         # per-skill model override (default 빈 dict — hermes config default 사용)
+    wh-lint: minimax-m2.5         # non-reasoning fast-response, 다른 wh-* skill 미명시 → hermes default
+```
+
+`scripts/_helpers/render_systemd_units.py:_per_skill_invocation` 가 `agent.models[<skill>]` 검사 → 명시되면 `oneshot_args` 의 `--query` 앞에 `--model <id>` inject (hermes_yolo_flag 의 `--yolo` 패턴과 동일 mechanism).
+
+### 결정 — 출력 언어 정책 (한자 → 한글 변환)
+
+`_system/commands/lint.md` 의 LLM 호출 step (Step 3 stub 생성 / Step 4 cross-ref / Step 5 index 재구성 / Step 6 모순 점검) 공통 적용:
+- 출력 언어 = 한국어 (wiki source 본문 정합)
+- 한자 감지 시 한글 변환. 고유명사 (한국 외 출처) 만 예외
+- 영어 약어 (OKR, PM, API 등) 그대로 유지
+
+본 정책은 wiki-schema.md 의 신뢰 경계 출력 sanitize layer 와 정합. 다른 wh-* skill (ingest, query, graphify) 의 LLM 응답도 같은 결함 surface 시 동일 정책 lift 권장 — v0.1.5 시점 **lint + ingest 적용** (Hermes 실증). query/graphify 는 후속 surface 시 추가. ingest 의 fallback model = `qwen3.6-plus` (non-reasoning + 한국어 안정) — `deepseek-v4-pro` (reasoning) 의 max_tokens hang risk 대안.
+
+### Cross-references
+
+- ADR-0036 §Note (2026-05-20 graphify_backend_flexibility) — backend 선택 layer. 본 §Note 는 backend 가 정해진 상태에서 skill 별 model 분리.
+- backlog 260520-backlog.md (deepseek-v4-pro 로 lint 분리 시도 → reasoning hang surface 진단). 본 §Note 가 backlog §C-1 의 옵션 1 (systemd unit `--model` 추가) 을 yaml-driven 으로 격상.
+
+본 변경의 분석 정본: features/archive/20260520_agent_model_per_skill/ (예정)

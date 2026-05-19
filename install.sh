@@ -708,7 +708,7 @@ _step5_instance_dirs() {
 # 3. OpenCode-go / OpenRouter / LM Studio 등 OpenAI-compatible (`--backend ollama`):
 #    OLLAMA_BASE_URL=https://opencode.ai/zen/go/v1
 #    OLLAMA_API_KEY=<provider key>
-#    OLLAMA_MODEL=deepseek-v4-pro
+#    OLLAMA_MODEL=minimax-m2.5
 #
 # 4. 진짜 Ollama 로컬 (`--backend ollama`, API 비용 0):
 #    OLLAMA_BASE_URL=http://localhost:11434/v1

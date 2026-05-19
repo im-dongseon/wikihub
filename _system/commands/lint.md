@@ -19,6 +19,16 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 - wiki/ 디렉토리 + 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` 존재 (없으면 생성 — 본 명령이 자동)
 - (선택) `graphify-out/graph.json` — 있으면 그래프 기반 점검, 없으면 wiki 순회
 
+## 출력 언어 정책 (LLM 호출 step 들 공통)
+
+본 playbook 의 Step 3 (entity·concept stub 생성), Step 4 (cross-ref), Step 5 (index 재구성), Step 6 (모순·갱신 점검) 의 모든 LLM 응답 / wiki 본문 작성에서:
+
+- **출력 언어 = 한국어** (wiki 의 source 본문이 한국어 위주, ADR-0001 vault-prefix link 도 한국어 entity/concept 명 정합).
+- **한자 (漢字) 감지 시 한글로 변환** — MiniMax M2.5 등 일부 모델이 동음이의 한국어를 한자 표기로 출력하는 결함 발견 (Hermes OCI 실증, 2026-05-20). 예: "기획(企劃)" → "기획"; "권한(權限)" → "권한". 고유명사 (인명·지명·조직명 중 한국 외 출처) 는 예외 허용.
+- **영어 약어** (OKR, PM, CRM, API 등) 는 그대로 유지 — 한국어 source 의 관용.
+
+본 정책은 wiki-schema.md 의 신뢰 경계 출력 sanitize layer 와 정합.
+
 ## 절차
 
 ### Step 1. 디렉토리 구조 검증 (자동)

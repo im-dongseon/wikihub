@@ -18,7 +18,7 @@
 - `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, 2 y; ADR-0036)
 - `wiki/` 디렉토리 존재 (페이지 0개여도 OK — 빈 그래프 생성)
 - `instance.root`/`graphify-out/` 쓰기 권한
-- `~/.config/wikihub/env` 의 LLM API key 채워짐 — Pass 3 (Claude/OpenAI subagent semantic extraction) 가 호출 (ADR-0036). default env var: `ANTHROPIC_API_KEY` (yaml `operations.graphify_api_key_env_name` 으로 override)
+- `~/.config/wikihub/env` 의 backend env 채워짐 — Pass 3 (LLM subagent semantic extraction) 가 호출 (ADR-0036 + §Note 2026-05-20). backend 별 env var 는 yaml `operations.graphify_backend` 정합 — 예: `claude` → `ANTHROPIC_API_KEY`; `openai` → `OPENAI_API_KEY`; `ollama` (OpenAI-compatible generic, OpenCode-go 등) → `OLLAMA_BASE_URL` + `OLLAMA_API_KEY` + `OLLAMA_MODEL`; `claude-cli` (Claude Code subscription) → env 불필요. Hermes terminal tool 의 tirith 가 secret env 를 subprocess 에서 strip — `~/.hermes/config.yaml` 의 `terminal.env_passthrough` allowlist 정합 (operator-side 책임).
 
 ## 절차
 

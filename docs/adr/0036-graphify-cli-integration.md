@@ -143,7 +143,7 @@
 
 ### 발견
 
-§D2 가 default backend = Anthropic Claude (`ANTHROPIC_API_KEY`) 로 lock. OCI 운영자가 별도 Anthropic key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) 의 `deepseek-v4-pro` API key 가 이미 설정 — backend 선택 layer 보강 필요.
+§D2 가 default backend = Anthropic Claude (`ANTHROPIC_API_KEY`) 로 lock. OCI 운영자가 별도 Anthropic key 발급 의사 없음 + Hermes 측에 OpenCode-go (`https://opencode.ai/zen/go/v1`) API key 가 이미 설정 — backend 선택 layer 보강 필요. (운영 모델 = `minimax-m2.5` — reasoning 모델 아닌 fast-response 모델 채택, 2026-05-20 갱신. 초기 검토 시점 `deepseek-v4-pro` 였으나 reasoning lock.acquire() hang 결함으로 변경.)
 
 graphify CLI source 검증 (`graphifyy 0.8.13/llm.py:64-71, 287`):
 - `ollama` backend 의 base_url 은 `os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")` — runtime env 로 override.
@@ -183,7 +183,7 @@ operations:
 # ~/.config/wikihub/env (또는 Hermes config 의 env)
 OLLAMA_BASE_URL=https://opencode.ai/zen/go/v1
 OLLAMA_API_KEY=<provider key>
-OLLAMA_MODEL=deepseek-v4-pro
+OLLAMA_MODEL=minimax-m2.5
 ```
 
 ```yaml
