@@ -1,10 +1,40 @@
 # ADR-0026: vfs refresh 정책 — 사이클 시작 시 recursive 1회 (K1)
 
-- **Status**: Accepted
-- **Date**: 2026-05-15
-- **Feature**: features/20260514_install_runtime (v9)
+- **Status**: Accepted (본문은 정책 자체 유지. cycle 순서는 2026-05-19 ADR-0035 cascade 로 minor 갱신 — 아래 §Note 참조)
+- **Date**: 2026-05-15 / 2026-05-19 (Note minor)
+- **Feature**: features/20260514_install_runtime (v9) / features/20260519_oauth_unify_rclone_only (Note)
 - **Supersedes**: 없음
 - **Superseded by**: 없음
+
+## Note (2026-05-19, ADR-0035 cascade — cycle 순서·race window 재정의)
+
+ADR-0035 가 gws CLI 폐기 + cursor 모델 폐기 + lsjson full snapshot diff 채택. 본 ADR-0026 의 K1 정책 (사이클 시작 시 `vfs/refresh recursive=true` 1회) 자체는 정합 유지 — race window 차단 책임 동일. 단 §"vault-fetch.py 사이클 순서" 본문이 cascade 후 다음과 같이 변경됨:
+
+```
+Before (v9):
+  1. assert_mount_alive
+  2. vfs_refresh(recursive=true)              ← K1
+  3. gws drive changes list (cursor 기반)      ← ADR-0035 로 폐기
+  4. 각 변경 file 별: _read_from_mount
+  5. cursor 저장 + last_sync 갱신              ← cursor 폐기
+
+After (ADR-0035):
+  1. assert_mount_alive
+  2. vfs_refresh(recursive=true)              ← K1 그대로
+  3. rclone lsjson <remote>: --recursive       ← gws 자리 (메타데이터)
+  4. mount_diff.compute_diff(listing, file_map)
+  5. per-entry: _read_from_mount (mount FS 그대로)
+  6. file_map 갱신 + last_sync 저장 (cursor 미사용)
+```
+
+§"race window" 정의도 lsjson context 로 재서술:
+
+- **Before**: gws changes 가 알린 변경분이 mount read 시점에 stale 상태일 위험 → vfs_refresh 가 mount listing 을 최신화.
+- **After**: lsjson 이 반환한 metadata (Path/ModTime/Size) 가 mount read 시점에 stale 상태일 위험 → vfs_refresh 가 mount listing + vfs cache 를 최신화. timing 은 동일하게 **lsjson 호출 직전** (assert_mount_alive 후, lsjson 호출 전). lsjson 자체는 rclone backend 직접 호출이라 vfs cache 무관 — 그러나 후속 `_read_from_mount` 가 vfs cache 경유이므로 vfs_refresh 의 race window 차단 책임 유지.
+
+본 ADR 의 K1·K2·K3 옵션 비교 (§Considered Options) + K1 채택의 정합성 본문은 모두 그대로 유효. supersede 대상 아님 — minor 갱신만.
+
+§Cross-references 의 ADR-0027 인용은 ADR-0035 cascade 후 historical (ADR-0027 자체가 Superseded by ADR-0035).
 
 ## Context
 

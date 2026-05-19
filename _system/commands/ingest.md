@@ -43,20 +43,21 @@
 python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
 ```
 
-**script의 책임**:
-- vault type별 구현(F3 gdrive_api / F6 directory)
-- `gws drive changes list` subprocess (vault type=gdrive_api, ADR-0014). vault-fetch.py가 내부에서 `gws` CLI 호출 + JSON parse + state 영속화. 메인테이너 `google-api-python-client` 직접 호출 없음
-- 변경된 파일 다운로드 → `/opt/vault-<vault_id>/`
+**script의 책임** (ADR-0035 정본):
+- vault type별 구현 (F3 gdrive_api / F6 directory)
+- `rclone lsjson <remote>: --recursive` subprocess (vault type=gdrive_api, ADR-0035). vault-fetch.py 가 내부에서 rclone backend (Drive API files.list) 를 호출하여 ID·MimeType·ModTime·Path 포함 JSON listing 획득
+- `mount_diff.compute_diff(listing, file_map)` — file_map(source_id 키) 과 diff. 분류: created · modified · renamed · deleted
+- false-deleted 가드 — listing 0건 또는 삭제 비율 > `false_delete_threshold` 시 Retryable 발화
+- 변경된 파일 read → rclone mount FS `open()` (ADR-0025 Path C+ 유지)
 - Binary 파일(`.pptx`/`.docx`/`.xlsx`/`.pdf`): 텍스트 추출 (wiki-schema.md §extraction tool 매핑 참조)
-- 텍스트 파일 그대로 / Google 네이티브(`.gdoc`·`.gsheet`·`.gslides`): API export → 텍스트
+- 텍스트 파일 그대로 / Google 네이티브(`.gdoc`·`.gsheet`·`.gslides`): rclone mount export-formats 경유 binary → extraction dispatch
 - `wiki/sources/<vault_id>/<path>.<ext>.md` 작성 (frontmatter + body, 단일 파일 모델)
-- `_state/<vault_id>/cursor.json`·`file_map.json`·`last_sync.json` atomic 갱신 (ADR-0007 all JSON)
-- 결과를 **stdout에 JSON으로 출력** (정본 schema 아래 참조)
+- `_state/<vault_id>/file_map.json`·`last_sync.json` atomic 갱신 (ADR-0007 all JSON, ADR-0035: cursor.json 폐기)
+- 결과를 **stdout 에 JSON 으로 출력** (정본 schema 아래 참조)
 
-**Bootstrap 가드 (F1 §4.4.6 lift, O3)**:
-- `cursor.json` 부재 시 (첫 sync 또는 `_state/` 소실):
-  - `wikihub.yaml.vaults[*].options.bootstrap_allowed` = `false` (default) → script exit 2 (Fatal) — remediation: "bootstrap_allowed: true + --bootstrap 플래그로 1회성 실행 후 false 환원"
-  - `bootstrap_allowed: true` + script `--bootstrap` CLI 플래그 둘 다 있어야 전체 스캔 허용 (의도하지 않은 부트스트랩 차단)
+**Bootstrap 가드 폐기 (ADR-0035)**:
+- cursor 모델 자체 폐기 — lsjson full snapshot 가 매 사이클의 진리. `_state/<vault_id>/file_map.json` 이 비어있으면 모든 listing 항목이 `created` 로 자연 분류 → first-run = bootstrap.
+- `--bootstrap` 플래그 + `bootstrap_allowed` yaml key 모두 폐기.
 
 **script stdout JSON schema (정본 — B1)**:
 
@@ -68,7 +69,7 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
     {
       "source_relpath": "<string, 필수, vault 내 POSIX 상대경로 (예: 'meetings/2026-Q1.pptx')>",
       "wiki_path": "<string, 필수, instance.root 기준 상대 (예: 'wiki/sources/gdrive/meetings/2026-Q1.pptx.md')>",
-      "operation": "<enum 'created'|'modified', 필수>",
+      "operation": "<enum 'created'|'modified'|'renamed', 필수 — ADR-0035: renamed 추가>",
       "source_id": "<string|null, 필수, gdrive_api는 Drive file ID, directory는 null>",
       "source_mtime": "<string, 필수, UTC ISO 8601 'YYYY-MM-DDTHH:MM:SS+00:00'>",
       "bytes_written": "<int, 필수, 다운로드 바이트 수 — 메트릭용>"
@@ -88,19 +89,19 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
 - `75` (EX_TEMPFAIL) = VaultSyncRetryable — 다음 사이클에서 재시도. agent는 `pending_ingest.json` 미작성 후 exit 0
 - `2` = VaultSyncFatal — agent도 즉시 exit 2 (notify + ops-alert)
 
-**script 에러 분류 정책 (F1 §4.7.5 정본 lift — A6)**:
+**script 에러 분류 정책 (ADR-0035 정본 — rclone stderr 매핑)**:
 
-| HTTP/조건 | reason 필드 | exit code |
+| 조건 | reason 패턴 | exit code |
 |---|---|---|
-| 403 | `userRateLimitExceeded` / `rateLimitExceeded` / `quotaExceeded` | 75 (Retryable) |
-| 403 | `insufficientPermissions` / `forbidden` | 2 (Fatal, scope 회수) |
-| 401 | — | 2 (Fatal, token 무효 또는 client_secret rotation) |
-| 5xx | — | 75 (Retryable) |
-| 네트워크 timeout | — | 75 (Retryable) |
-| `cursor.json` 부재 + bootstrap_allowed=false | — | 2 (Fatal — 위 Bootstrap 가드) |
-| JSON token load 예외 (credentials 파손, ADR-0014) | — | 2 (Fatal) |
+| OAuth 만료/무효 | `oauth2: token expired` / `invalid_grant` / `401 Unauthorized` | 2 (Fatal, vault scope) |
+| quota / rate limit | `userRateLimitExceeded` / `rateLimitExceeded` / `quotaExceeded` | 75 (Retryable) |
+| network / timeout | `connection refused` / `no such host` / `i/o timeout` | 75 (Retryable) |
+| listing 0건 + file_map 비어있지 않음 | mount/auth 부분 장애 가드 | 75 (Retryable, retry_after=300s) |
+| 삭제 비율 > `false_delete_threshold` | listing partial 의심 가드 | 75 (Retryable, retry_after=300s) |
+| rclone.conf 부재 / 권한 위반 / remote 미등록 | credentials.assert_rclone_config | 2 (Fatal) |
+| rclone binary 부재 | install.sh 미수행 | 2 (Fatal) |
 
-자세한 cascading scenarios는 F1 archive §4.7.5 참조.
+상세 매핑은 `scripts/lib/rclone.py:classify_rclone_error` 참조.
 
 ### Step 3. has_changes 분기
 
@@ -157,7 +158,7 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
 ## YYYY-MM-DD HH:MM:SS KST
 
 - **Trigger**: systemd timer | manual
-- **Cursor**: `<token-prev>` → `<token-new>`
+- **Listing**: <file_map_count_before> → <listing_count> (ADR-0035: cursor 라인 폐기 — lsjson full snapshot)
 - **Changed**: N files
   - `meetings/2026-Q1.pptx` (modified) → [[gdrive/meetings/2026-Q1.pptx]]
 - **Deleted**: M files
@@ -185,7 +186,7 @@ Step 5까지 무에러 완료 시:
 |---|---|---|
 | `/opt/vault-<vault_id>/...` | script | 변경된 원본 파일 다운로드 |
 | `wiki/sources/<vault_id>/...` | script | 변경된 source 페이지 (단일 파일 모델) |
-| `_state/<vault_id>/cursor.json`·`file_map.json`·`last_sync.json` | script | 갱신 |
+| `_state/<vault_id>/file_map.json`·`last_sync.json` | script | 갱신 (ADR-0035: cursor.json 폐기) |
 | `_state/<vault_id>/pending_ingest.json` | agent | 작성 (Step 3) → 삭제 (Step 6) |
 | `wiki/entities/<name>.md`, `wiki/concepts/<name>.md` | agent | 생성·갱신 |
 | `wiki/sources/<vault_id>/log.md` | agent | append |
@@ -206,7 +207,7 @@ Step 5까지 무에러 완료 시:
 
 - 동일 source 파일에 대한 entity 참조는 set semantics (중복 제거)
 - pending 재처리 시 같은 source를 다시 읽어도 entity referenced_by에 중복 추가 안 됨
-- script가 cursor를 영속화하므로 script 재실행 시 같은 변경을 다시 다운로드해도 vault 파일 덮어쓰기 = idempotent
+- script 가 file_map (source_id 키) 을 영속화 — 동일 ModTime 의 entry 는 unchanged 로 skip 되어 idempotent (ADR-0035)
 
 ## 동시성
 

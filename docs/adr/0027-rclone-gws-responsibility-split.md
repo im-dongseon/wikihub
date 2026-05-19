@@ -1,10 +1,14 @@
 # ADR-0027: rclone vs gws 책임 분리 — Path C+ 정본화
 
-- **Status**: Accepted
-- **Date**: 2026-05-15
+- **Status**: Superseded
+- **Date**: 2026-05-15 (Accepted) / 2026-05-19 (Superseded by ADR-0035)
 - **Feature**: features/20260514_install_runtime (v9)
 - **Supersedes**: 없음
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0035 (gws 폐기 + rclone 단독화 — 책임 분리 자체 폐기, rclone 이 mount + lsjson 변경 감지 둘 다 담당)
+
+## Note (2026-05-19, ADR-0035 supersede)
+
+본 ADR §Considered Options 의 (L1) rclone 단독 기각 사유 4개 (삭제·권한·catch-up·cursor 정확성) 를 ADR-0035 §재평가 표에서 해체. lsjson 의 `ID` 노출 + file_map(source_id 키) diff + false-delete 가드 조합으로 L1 의 모든 기각 사유가 등가 대체 또는 무력화됨을 2026-05-19 OCI 실증으로 확인. 본문은 v9 설계의 역사적 맥락 보존을 위해 유지.
 
 ## Context
 

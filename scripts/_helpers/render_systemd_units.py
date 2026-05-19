@@ -229,13 +229,9 @@ def _cross_vault_subs(vault: dict) -> dict[str, str]:
 def _current_vault_subs(vault: dict) -> dict[str, str]:
     """Current-vault scalar keys (suffix 없음) — 본 vault 의 render 결과에만 적용.
 
-    template 에 `{credentials_path}` · `{sync_interval_sec}` 형태로 등장 — vault 마다 다른
-    값. per-vault render 마다 별도 dict 산출 후 instance-wide subs 와 merge.
+    ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
     """
-    opts = vault.get("options") or {}
-    expanded_creds = os.path.expanduser(str(opts.get("credentials_path", "")))
     return {
-        "credentials_path": expanded_creds,
         "sync_interval_sec": str(vault.get("sync_interval_sec", 600)),
     }
 
@@ -366,7 +362,7 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
             return EXIT_OPERATIONAL
         if per_vault:
             for v in enabled:
-                # per-vault render: base + current vault scalar keys (credentials_path 등)
+                # per-vault render: base + current vault scalar keys (sync_interval_sec 등)
                 current_subs = _current_vault_subs(v)
                 # current_subs 의 key 가 base_subs 와 충돌하면 안 됨
                 conflict = set(current_subs) & set(base_subs)

@@ -1,10 +1,14 @@
 # ADR-0017: gws stderr → wikihub exit code 매핑 표
 
-- **Status**: Proposed
-- **Date**: 2026-05-14
+- **Status**: Superseded
+- **Date**: 2026-05-14 (Proposed) / 2026-05-19 (Superseded by ADR-0035 — Accepted 도달 전 무효화)
 - **Feature**: features/20260514_install_runtime
 - **Supersedes**: 없음
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0035 (gws CLI 폐기로 stderr 매핑 자체 불필요)
+
+## Note (2026-05-19, ADR-0035 supersede)
+
+본 ADR 은 V4 verification 통과로 Accepted 도달 예정이었으나, ADR-0035 로 gws CLI 자체가 폐기되어 stderr 매핑 표가 불필요해짐. `scripts/lib/errors.py` 삭제. 본문은 역사적 맥락 보존을 위해 유지.
 
 ## Context
 

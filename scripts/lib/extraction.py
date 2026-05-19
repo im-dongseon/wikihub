@@ -2,7 +2,7 @@
 
 각 형식의 dispatch:
 - binary (.pptx/.docx/.xlsx/.pdf): Python 라이브러리로 텍스트 추출
-- Google native (.gdoc/.gsheet/.gslides): gws drive files export — body 는 sync.py 가 호출
+- Google native (.gdoc/.gsheet/.gslides): rclone mount `--drive-export-formats` 가 mount FS 에 binary 로 자동 변환 — extract dispatch 가 처리 (ADR-0035)
 - 텍스트 (.md/.txt): passthrough
 
 추출 실패 시 wiki 페이지는 작성 (file_map 정합성) — body 만 ``[extraction failed: <reason>]``.
@@ -215,7 +215,7 @@ GWS_EXPORT_MIME: dict[str, str] = {
 def extract(path: Path, mime_type: str) -> ExtractionResult:
     """Local 파일 + MIME → ExtractionResult.
 
-    Google native 는 본 함수가 처리 안 함 (sync.py 가 gws export 후 ``extract_text`` 호출).
+    Google native 는 rclone mount export-formats 가 docx/xlsx/pptx 로 변환 — extract dispatch 가 처리 (ADR-0035).
     매핑 없는 MIME 은 failed 반환.
     """
     handler = LOCAL_EXTRACTION_DISPATCH.get(mime_type)

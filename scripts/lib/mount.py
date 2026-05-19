@@ -1,14 +1,14 @@
-"""rclone mount lifecycle helpers (ADR-0024 v9 · 0025 · 0026 · 0027 정본).
+"""rclone mount lifecycle helpers (ADR-0024 · 0025 · 0026 · 0035 정본).
 
 본 모듈은 vault-fetch.py 사이클 시작 시 mount liveness check + vfs cache invalidation
-을 수행. mount permanently failed / OAuth revoke 등 fatal case 는 ADR-0024 v9 의
+을 수행. mount permanently failed / OAuth revoke 등 fatal case 는 ADR-0024 의
 last_failure (scope="mount") writer 책임을 직접 수행.
 
-사이클 흐름 (vault-fetch.py 에서 호출, R15-L2 module prefix 정리):
+사이클 흐름 (vault-fetch.py 에서 호출):
 
     assert_mount_alive(vault_id, mount_path, state_dir)
     vfs_refresh(vault_id, rc_addr, state_dir, recursive=True)
-    # ... gws drive changes list → _resolve_mount_path → _read_from_mount → ...
+    # ... rclone lsjson → mount_diff.compute_diff → _read_from_mount → ... (ADR-0035)
 
 실패 분류:
 - `VaultSyncRetryable` (exit 75) — 호출자가 사이클 abort. mount.service Restart=always 가 daemon 자체 복구.
@@ -27,29 +27,19 @@ from .exceptions import VaultSyncFatal, VaultSyncRetryable
 from .state import read_last_failure, save_last_failure, utc_now_iso
 
 
-# v9 R13-CRIT-1 — rclone OAuth/SA error 패턴. V18 (2026-05-17) 후 SA 패턴 추가.
+# ADR-0035 — rclone OAuth error 패턴. SA 패턴 폐기 (gws·SA 자체 폐기).
 #
-# OAuth 시대 (ADR-0003, Superseded):
-#   - "Token expired" — access token 만료 (refresh token revoke 케이스 분리 불가지만 동일 fatal)
+# OAuth 시대 (rclone.conf 단일 인증, ADR-0035):
+#   - "Token expired" — access token 만료
 #   - "invalid_grant" — refresh token 거부 (revoke / 회전 / 만료)
 #   - "401 Unauthorized" — generic 401
 #   - "oauth2.*invalid" / "unauthorized_client" / "access_denied" — OAuth flow 다양한 fail
-#
-# SA 시대 (ADR-0029, V18 결함 #6 fix):
-#   - "private key should be a PEM" — SA JSON 의 private_key 가 PEM 형식 위반 / corrupt
-#   - "asn1: structure error" — private_key DER decode fail
-#   - "service account.*disabled" / "key.*disabled" — Cloud Console SA 또는 key disable
-#   - "invalid_credentials" — credentials 일반
-#   - "no such file or directory.*\.credentials/sa_" — credentials_path 파일 사라짐 (R15-M5
-#     V<N> R15 리뷰 — 이전 `sa_` literal 은 Drive 폴더의 정상 파일명 `sa_report.docx` 에도
-#     매칭하는 false positive 위험. `.credentials/sa_` 으로 narrow)
+#   - "invalid_credentials" — rclone.conf 의 token 항목 무효 / corrupt
 _RCLONE_AUTH_PATTERNS = re.compile(
     r"("
     r"Token expired|invalid_grant|401 Unauthorized|oauth2.*invalid|"
     r"unauthorized_client|access_denied|"
-    r"private key should be|asn1: structure error|"
-    r"service account.*disabled|key.*disabled|"
-    r"invalid_credentials|no such file or directory.*\.credentials/sa_"
+    r"invalid_credentials"
     r")",
     re.IGNORECASE,
 )
@@ -176,7 +166,7 @@ def vfs_refresh(
 ) -> None:
     """rclone rc vfs/refresh — 사이클 시작 시 1회 호출 (ADR-0026 K1).
 
-    race window 차단 — gws changes 알린 변경분이 mount read 시점에 fresh content 보장.
+    race window 차단 — rclone lsjson 으로 감지한 변경분이 mount read 시점에 fresh content 보장 (ADR-0035).
 
     v9 R13-CRIT-1 (Q6 alert 체인 정합):
     - rclone stderr 에 OAuth error 패턴 매칭 시 VaultSyncFatal (scope="mount") + last_failure writer.
@@ -251,10 +241,11 @@ def vfs_refresh(
                 "exit_code": 2,
                 "severity": "fatal",
                 "scope": "mount",
-                "reason": f"rclone OAuth/SA revoked/corrupt: {error_snippet[:200]!r}",
+                "reason": f"rclone OAuth revoked/corrupt: {error_snippet[:200]!r}",
                 "remediation": (
-                    f"SA JSON 갱신 (~/.credentials/wikihub/sa_{vault_id}.json) "
-                    f"+ chmod 0600 + systemctl --user restart wikihub-mount@{vault_id}.service"
+                    "setup.md §Step 5.5 — `rclone config` 재발급 (OAuth token) "
+                    f"+ chmod 0600 ~/.config/rclone/rclone.conf "
+                    f"+ systemctl --user restart wikihub-mount@{vault_id}.service"
                 ),
                 "source_id": None,
                 "first_failed_at": now,
@@ -264,9 +255,12 @@ def vfs_refresh(
             })
         raise VaultSyncFatal(
             vault_id=vault_id,
-            reason=f"rclone OAuth/SA error (pattern matched): {error_snippet[:200]!r}",
-            remediation=f"SA JSON 갱신 + systemctl --user restart wikihub-mount@{vault_id}.service",
-            scope="mount",   # V<N> Phase 2 결함 #7 fix — scope 정합
+            reason=f"rclone OAuth error (pattern matched): {error_snippet[:200]!r}",
+            remediation=(
+                f"rclone config 재발급 (setup.md §Step 5.5, ADR-0035) "
+                f"+ systemctl --user restart wikihub-mount@{vault_id}.service"
+            ),
+            scope="mount",
         )
 
     # 그 외 → Retryable (race window 차단 실패, 사이클 abort)

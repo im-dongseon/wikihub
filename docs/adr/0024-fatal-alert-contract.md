@@ -108,7 +108,7 @@ F4 가 `scripts/lib/notify.py` 신규 — `notify_via_hermes()` stub (v0.1.0 은
 
 ### Context (v9)
 
-Path C+ (rclone mount + gws 책임 분리, ADR-0025·0026·0027 참조) 도입으로 mount lifecycle 의 fatal case 가 추가됨:
+rclone mount + 변경 감지 도입 (ADR-0025·0026 참조 — ADR-0027 의 책임 분리는 ADR-0035 로 supersede 후 rclone 단독화, 본 §의 mount scope writer 책임 자체는 정합 유지) 으로 mount lifecycle 의 fatal case 가 추가됨:
 
 1. **mount permanently failed (Retryable 누적)** — `assert_mount_alive` 가 매 사이클 Retryable raise. 6회 (1시간) 연속 누적 시 → 운영자 통지 필요
 2. **rclone OAuth revoke** — `vfs_refresh` 가 rclone stderr 에 인증 관련 패턴 출현 시 → fatal escalate

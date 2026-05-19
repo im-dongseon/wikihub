@@ -93,4 +93,25 @@ V3 (--force-fresh confirm), V4 (vault@ mid-sync grace), V5a/b (downgrade), V6 (l
 | `lint_authoring` (F2 잔여) | wiki 의 정합성 검증 자동화 (lint.service) | F2 spec |
 | `wiki_query` (F6) | 메인테이너/사용자가 wiki 검색 / 그래프 탐색 (`wh-query`) | F5 (hermes_adapter) |
 
-v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅) + F5 (✅) + dir_layout_refactor (✅, 2026-05-19). **달성**. v0.2.x 는 lint_authoring·wiki_query·multi-vault·#G (mount@ root_folder_id 전파)·dir_layout_refactor 의 잔존 R3 surface 항목·yaml.example credentials_path 절대경로 명시 등.
+v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅) + F5 (✅) + dir_layout_refactor (✅, 2026-05-19). **달성**. v0.2.x 는 lint_authoring·wiki_query·multi-vault·#G (mount@ root_folder_id 전파)·dir_layout_refactor 의 잔존 R3 surface 항목 등.
+
+---
+
+## oauth_unify_rclone_only 산출 (2026-05-19 종료)
+
+### v0.1.0 진입 직전 OCI 결함 surface (closed by ADR-0035)
+
+| ID | 영역 | 항목 |
+|---|---|---|
+| §D | drive auth | SA write 시 `403 storageQuotaExceeded` (Personal Drive SA quota 미할당). ADR-0029 §Decision L50 (Editor 공유) + §부정/제약 L79 ("polling/mount 시나리오는 OK") 가정 깨짐. w2a 등 쓰기 흐름 surface 시점에 모델 자체 무효 |
+| §I | changes feed | w2a → rclone mount(OAuth) 업로드가 vault-fetch (SA gws `changes.list`) 사이클 2회 후에도 `Status: skipped` (0건 감지). 인증 주체 비대칭으로 user-scoped changes feed 단절 |
+
+두 항목 모두 `features/20260519_oauth_unify_rclone_only` (ADR-0035) 로 closed — rclone OAuth 단일 인증 + gws 폐기 + lsjson full snapshot diff. 상세 운영 진단은 사용자 노트 backlog (`Google Drive/wikihub/backlog/260518-backlog.md`) §D·§I·§E·§F 참조.
+
+### v0.2.x 검토 트리거 (ADR-0035 §Consequences)
+
+- rclone 기본 OAuth client 의 GCP Console publishing status 가 Testing 회귀 시
+- rclone 이 `rclone backend changes` 명령 추가 시 (cursor 모델 회귀 가능성)
+- vault 규모 N >> 10k 도달 — lsjson 응답 latency p95 > sync_interval_sec/3
+- Google native 파일이 vault 에 추가 — mtime 안정성 측정 verification 필요
+- rclone v2.x major upgrade 시 lsjson schema breaking change

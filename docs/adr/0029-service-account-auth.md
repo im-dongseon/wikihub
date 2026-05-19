@@ -1,10 +1,14 @@
 # ADR-0029: Service Account 기반 Drive 인증 — OAuth 대체
 
-- **Status**: Accepted (2026-05-17, V<N> Phase 2 acceptance gate 11건 모두 통과)
-- **Date**: 2026-05-17 (Proposed) → 2026-05-17 (Accepted)
+- **Status**: Superseded
+- **Date**: 2026-05-17 (Proposed) → 2026-05-17 (Accepted) → 2026-05-19 (Superseded by ADR-0035)
 - **Feature**: features/20260514_install_runtime (V<N> Phase 2 진입 시점)
 - **Supersedes**: ADR-0003
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0035 (Personal Drive 에서 SA write 불가 실증 + 인증 비대칭으로 changes feed 단절 — OAuth 로 통일)
+
+## Note (2026-05-19, ADR-0035 supersede)
+
+§Decision L50 ("SA 이메일을 vault 폴더에 Editor 공유 (rclone mount 의 write 가정 위한)") + §부정/제약 L79 ("v0.1.0 의 vault polling/mount 시나리오는 OK") 의 가정이 2026-05-19 OCI 실증에서 깨짐 — Personal Drive 에서 SA 는 storage quota 미할당, 모든 write 가 `403 storageQuotaExceeded` (백로그 §D 근본 원인). 이는 ADR-0029 작성 시점에 polling/read 만 가정한 결정 오류로, w2a 등 쓰기 흐름 surface 시점에 모델 자체가 깨짐. ADR-0035 가 rclone.conf OAuth 단독 인증으로 전환하여 해소. 본문은 역사적 맥락 보존을 위해 유지.
 
 ## Context
 
@@ -92,6 +96,8 @@ V8 acceptance gate (2026-05-17) 통과 후 V<N> Phase 2 진입 시점에 ADR-000
 - 재검토 트리거: SA 키 노출 사고 발생 시 (D2) secret manager 검토 또는 (K2) Workload Identity Federation 으로 keyless 전환.
 
 ## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 본문 변경 (ADR-0034)
+
+> **ADR-0035 supersede 후 본 §Note 의 credentials_path default 갱신은 의미 부재** — ADR-0035 가 credentials_path 키 자체를 폐기 (rclone.conf 단일). 본문은 역사적 맥락 보존을 위해 유지.
 
 ADR-0034 data-first layout refactor 의 §sub-1 정합:
 

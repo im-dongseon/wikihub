@@ -1,10 +1,14 @@
 # ADR-0014: Drive 접근 메커니즘 재검토 — `gws` CLI 채택
 
-- **Status**: Accepted
+- **Status**: Superseded
 - **Date**: 2026-05-13
 - **Feature**: features/20260513_wikihub_schema_v1 (F2 종료 후 F3 시작 직전 reversal)
 - **Supersedes**: ADR-0004
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0035 (2026-05-19 — gws CLI 폐기 + rclone 단독화)
+
+## Note (2026-05-19, ADR-0035 supersede)
+
+gws alpha 의존성·stderr 매핑 부담·인증 비대칭 위험이 v0.1.0 운영 진입 직전 누적 surface. ADR-0035 가 rclone `lsjson` (Drive API files.list backend 호출) 의 `ID`·`MimeType` 노출을 입증하여 gws `drive changes list` 정보를 등가 대체 — 본 ADR 의 §부정/제약 (alpha 의존성·stderr 매핑) 부담이 cascade 자체 해소로 의미 없어짐. 본문은 역사적 맥락 보존을 위해 유지.
 
 ## Context
 

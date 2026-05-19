@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vault sync 진입점 (F2 ingest.md §Step 2 mechanical phase).
+"""vault sync 진입점 (ADR-0035 rclone 단독 + OAuth 단일 인증).
 
 호출: agent (Hermes·codex·gemini 등) 가 systemd unit ExecStart 의 subprocess 로 실행.
 
@@ -18,15 +18,15 @@ import os
 import sys
 from pathlib import Path
 
-# scripts/ 디렉토리를 sys.path 에 추가 (F3 §2.2 module structure)
+# scripts/ 디렉토리를 sys.path 에 추가
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from lib.config import load_wikihub_yaml  # noqa: E402
-from lib.credentials import assert_credentials, assert_rclone_config  # noqa: E402
+from lib.credentials import assert_rclone_config  # noqa: E402
 from lib.exceptions import VaultSyncFatal, VaultSyncRetryable  # noqa: E402
-from lib.mount import assert_mount_alive, vfs_refresh  # noqa: E402  # v9 (ADR-0025·0026)
+from lib.mount import assert_mount_alive, vfs_refresh  # noqa: E402  # ADR-0025·0026
 from lib.notify import notify_via_hermes  # noqa: E402
 from lib.state import clear_last_failure, save_last_failure, utc_now_iso  # noqa: E402
 from lib.sync import result_to_stdout_json, sync  # noqa: E402
@@ -58,14 +58,9 @@ def _emit_noop_stdout(vault_id: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(
-        description="WikiHub vault sync (gws CLI 기반, ADR-0014)",
+        description="WikiHub vault sync (rclone lsjson + mount_diff, ADR-0035)",
     )
     parser.add_argument("--vault", required=True, help="wikihub.yaml.vaults[*].id")
-    parser.add_argument(
-        "--bootstrap",
-        action="store_true",
-        help="cursor 부재 시 전체 스캔 (bootstrap_allowed: true 와 같이 사용)",
-    )
     args = parser.parse_args(argv)
 
     # ADR-0024 writer 책임 — state_dir 생성 후의 fatal 만 last_failure.json 영속화
@@ -87,25 +82,14 @@ def main(argv: list[str] | None = None) -> int:
             _emit_noop_stdout(args.vault)
             return 0
 
-        # MED-R4-6 fix 부분 반영 — Path("") 가 "." 으로 평가되는 함정 차단
-        credentials_path_raw = vault_cfg.options.get("credentials_path", "")
-        if not credentials_path_raw:
-            raise VaultSyncFatal(
-                vault_id=args.vault,
-                reason=f"vaults[{args.vault}].options.credentials_path 누락",
-                remediation="wikihub.yaml 보강 후 /wh:setup 재호출.",
-            )
-        credentials_path = Path(credentials_path_raw).expanduser()
-        assert_credentials(args.vault, credentials_path)
-
-        # v9 (ADR-0025) — rclone.conf 존재/권한/remote_name 등록 검증
+        # ADR-0035: rclone.conf 단일 인증 자료. credentials_path 검증 폐기.
         rclone_remote_name = vault_cfg.options.get("rclone_remote_name", args.vault)
         assert_rclone_config(args.vault, rclone_remote_name)
 
         state_dir = cfg.instance_root / "_state" / args.vault
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        # v9 (ADR-0025·0026) — mount liveness check + race window 차단
+        # ADR-0025·0026 — mount liveness check + vfs refresh
         # mount_path 는 yaml.vaults[*].options.mount_path 가 정본. 폴백으로 vault_cfg.local_path.
         mount_path_raw = vault_cfg.options.get("mount_path") or str(vault_cfg.local_path)
         mount_path = Path(mount_path_raw).expanduser()
@@ -124,8 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             vfs_refresh(args.vault, rc_addr, state_dir=state_dir, recursive=True)
         # vfs_refresh_mode=none — refresh skip (운영자가 명시적으로 off, 위험 인지)
 
-        # HIGH-R4-2: 동시 invocation 방지 — state_dir/.lock 에 LOCK_EX|LOCK_NB.
-        # systemd timer · 운영자 수동 실행이 겹쳤을 때 file_map race 차단.
+        # 동시 invocation 방지 — state_dir/.lock 에 LOCK_EX|LOCK_NB.
         lock_path = state_dir / ".lock"
         with open(lock_path, "w") as lock_fd:
             try:
@@ -141,8 +124,6 @@ def main(argv: list[str] | None = None) -> int:
                 vault_cfg=vault_cfg,
                 instance_root=cfg.instance_root,
                 state_dir=state_dir,
-                credentials_path=credentials_path,
-                bootstrap_flag=args.bootstrap,
             )
             sys.stdout.write(result_to_stdout_json(result) + "\n")
             sys.stdout.flush()
@@ -159,11 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         return 75
     except VaultSyncFatal as e:
         log.error("fatal: %s", e)
-        # ADR-0024 writer — state_dir 생성된 후의 fatal 만 영속화 + Hermes notify (stub)
         if state_dir is not None:
-            # spec (analysis_and_design.md §4.7): notify_via_hermes 가 save_last_failure 직전 호출 순서.
-            # v0.1.0 은 stub 이라 무영향, F5 활성화 시 Hermes 통지가 직전 last_failure 가 아닌
-            # 현재 fatal 정보로 발화하도록 보장.
             if notify_on_fatal:
                 notify_via_hermes(e.vault_id, e.reason)
             now = utc_now_iso()
@@ -171,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
                 "vault_id": e.vault_id,
                 "exit_code": 2,
                 "severity": "fatal",
-                "scope": getattr(e, "scope", "vault"),  # V<N> Phase 2 결함 #7 fix — mount-origin fatal 의 scope 보존
+                "scope": getattr(e, "scope", "vault"),
                 "reason": e.reason,
                 "remediation": e.remediation,
                 "source_id": None,

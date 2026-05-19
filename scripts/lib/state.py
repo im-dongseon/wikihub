@@ -1,11 +1,13 @@
-"""atomic JSON I/O for 5 state files (ADR-0007 all JSON).
+"""atomic JSON I/O for 4 state files (ADR-0007 all JSON, ADR-0035 cursor 폐기).
 
-state 파일 종류 (F2 setup.md §Step 1 + F3 §2.5 B3 종합표):
-- cursor.json
-- file_map.json
+state 파일 종류:
+- file_map.json (ADR-0035: primary key 가 source_id, Drive fileId)
 - last_sync.json
 - retry.json
+- last_failure.json (ADR-0024)
 - pending_ingest.json (F3 미작성 — F5/agent 책임)
+
+ADR-0035: cursor.json 폐기. lsjson full snapshot diff 모델에서 cursor 의미 부재.
 
 모든 쓰기는 tmpfile + os.replace 패턴 (atomic).
 """
@@ -57,45 +59,7 @@ def utc_now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
-# cursor.json
-# ---------------------------------------------------------------------------
-
-def initial_cursor(vault_id: str, vault_type: str) -> dict[str, Any]:
-    """F2 setup.md §Step 1 정합 초기 stub."""
-    return {
-        "vault_id": vault_id,
-        "vault_type": vault_type,
-        "cursor": "",
-        "cursor_updated_at": None,
-    }
-
-
-def load_cursor(state_dir: Path) -> dict[str, Any]:
-    path = state_dir / "cursor.json"
-    if not path.exists():
-        return {"vault_id": "", "vault_type": "", "cursor": "", "cursor_updated_at": None}
-    return _read_json(path)
-
-
-def save_cursor(state_dir: Path, cursor_value: str, *, vault_id: str, vault_type: str) -> None:
-    _atomic_write_json(
-        state_dir / "cursor.json",
-        {
-            "vault_id": vault_id,
-            "vault_type": vault_type,
-            "cursor": cursor_value,
-            "cursor_updated_at": utc_now_iso(),
-        },
-    )
-
-
-def has_cursor(cursor_obj: dict[str, Any]) -> bool:
-    """F3 §2.5 B2 정합 — empty stub vs absent 동등 취급."""
-    return bool(str(cursor_obj.get("cursor", "")).strip())
-
-
-# ---------------------------------------------------------------------------
-# file_map.json
+# file_map.json (ADR-0035: primary key 가 source_id, Drive fileId)
 # ---------------------------------------------------------------------------
 
 def initial_file_map(vault_id: str) -> dict[str, Any]:

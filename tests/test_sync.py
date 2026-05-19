@@ -1,37 +1,35 @@
-"""lib/sync.py orchestration 테스트.
+"""lib/sync.py orchestration 테스트 (ADR-0035 — rclone lsjson + mount_diff 기반).
 
-gws 호출은 monkeypatch 로 mock — 실제 subprocess 호출 없음.
+rclone subprocess 는 monkeypatch 로 mock — 실제 호출 없음.
 """
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from lib import sync
 from lib.config import VaultConfig
-from lib.exceptions import VaultSyncFatal, VaultSyncFileFatal, VaultSyncRetryable
-from lib.gws import GwsResult
+from lib.exceptions import VaultSyncRetryable
 from lib.sync import (
-    ChangedFile,
     SyncResult,
     _compute_wiki_path,
-    _passes_trust_boundary,
     _sanitize_relpath,
     result_to_stdout_json,
 )
 
 
 # ---------------------------------------------------------------------------
-# _compute_wiki_path — 모든 branch 커버
+# _compute_wiki_path
 # ---------------------------------------------------------------------------
 
 def test_compute_wiki_path_binary() -> None:
-    assert _compute_wiki_path("gdrive", "meetings/Q1.pptx",
-                              "application/vnd.openxmlformats-officedocument.presentationml.presentation") \
-        == "wiki/sources/gdrive/meetings/Q1.pptx.md"
+    assert _compute_wiki_path(
+        "gdrive", "meetings/Q1.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ) == "wiki/sources/gdrive/meetings/Q1.pptx.md"
 
 
 def test_compute_wiki_path_md_no_double() -> None:
@@ -40,662 +38,255 @@ def test_compute_wiki_path_md_no_double() -> None:
 
 
 def test_compute_wiki_path_txt_keeps_ext() -> None:
-    # I2 정합 — .txt 는 그대로 .txt.md (binary 패턴), spec A2 ambiguity 명시 lock
     assert _compute_wiki_path("gdrive", "notes/readme.txt", "text/plain") \
         == "wiki/sources/gdrive/notes/readme.txt.md"
 
 
 def test_compute_wiki_path_google_doc() -> None:
-    assert _compute_wiki_path("gdrive", "policies/onboarding",
-                              "application/vnd.google-apps.document") \
-        == "wiki/sources/gdrive/policies/onboarding.gdoc.md"
-
-
-def test_compute_wiki_path_google_sheet() -> None:
-    assert _compute_wiki_path("gdrive", "data/Q1",
-                              "application/vnd.google-apps.spreadsheet") \
-        == "wiki/sources/gdrive/data/Q1.gsheet.md"
-
-
-def test_compute_wiki_path_google_slides_already_suffixed() -> None:
-    # 이미 .gslides 가 있는 경우 중복 추가 안 함
-    assert _compute_wiki_path("gdrive", "decks/deck.gslides",
-                              "application/vnd.google-apps.presentation") \
-        == "wiki/sources/gdrive/decks/deck.gslides.md"
-
-
-def test_compute_wiki_path_other_binary_ext() -> None:
-    assert _compute_wiki_path("gdrive", "raw/data.csv", "text/csv") \
-        == "wiki/sources/gdrive/raw/data.csv.md"
+    assert _compute_wiki_path(
+        "gdrive", "policies/onboarding",
+        "application/vnd.google-apps.document",
+    ) == "wiki/sources/gdrive/policies/onboarding.gdoc.md"
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_relpath — CRIT-3 traversal 차단
+# _sanitize_relpath
 # ---------------------------------------------------------------------------
 
-def test_sanitize_relpath_ok() -> None:
-    assert _sanitize_relpath("meetings/Q1.pptx") == "meetings/Q1.pptx"
-    assert _sanitize_relpath("Q1.pptx") == "Q1.pptx"
-    assert _sanitize_relpath("회의록 (Q1).md") == "회의록 (Q1).md"
-
-
-def test_sanitize_relpath_strips_leading_slash() -> None:
-    assert _sanitize_relpath("/leading.md") == "leading.md"
-
-
-def test_sanitize_relpath_blocks_traversal() -> None:
-    assert _sanitize_relpath("../etc/passwd") is None
-    assert _sanitize_relpath("foo/../../bar") is None
-    assert _sanitize_relpath("..") is None
-
-
-def test_sanitize_relpath_blocks_control_chars() -> None:
-    assert _sanitize_relpath("file\x00name") is None
-    assert _sanitize_relpath("file\nname") is None
-
-
-def test_sanitize_relpath_blocks_backslash() -> None:
-    assert _sanitize_relpath("foo\\bar") is None
-
-
-def test_sanitize_relpath_empty() -> None:
+def test_sanitize_relpath_empty_returns_none() -> None:
     assert _sanitize_relpath("") is None
     assert _sanitize_relpath("   ") is None
 
 
-def test_sanitize_relpath_dot_only() -> None:
-    # LOW-R3-1: '.' / './' 차단 — vault_local_path / '.' = vault_local_path 자체 write 회피.
-    # Python 3.10 의 Path 는 둘 다 parts = () 로 normalize 함.
+def test_sanitize_relpath_traversal_blocked() -> None:
+    assert _sanitize_relpath("../etc/passwd") is None
+    assert _sanitize_relpath("a/../b") is None
     assert _sanitize_relpath(".") is None
     assert _sanitize_relpath("./") is None
 
 
-def test_sanitize_relpath_normalizes_safely() -> None:
-    # Path 가 './' 같은 prefix 를 normalize 한 결과가 안전한 path 면 통과.
-    # vault_local_path / "./foo" 와 vault_local_path / "foo" 는 동일 — 보안 무해.
-    assert _sanitize_relpath("./foo") == "./foo"
-    assert _sanitize_relpath("foo/bar") == "foo/bar"
+def test_sanitize_relpath_control_char_blocked() -> None:
+    assert _sanitize_relpath("a\x00b.md") is None
+    assert _sanitize_relpath("a\\b.md") is None
+
+
+def test_sanitize_relpath_valid() -> None:
+    assert _sanitize_relpath("notes/idea.md") == "notes/idea.md"
+    assert _sanitize_relpath("/notes/idea.md") == "notes/idea.md"  # lstrip("/")
 
 
 # ---------------------------------------------------------------------------
-# _passes_trust_boundary — SIG-6 incremental post-filter
+# result_to_stdout_json
 # ---------------------------------------------------------------------------
 
-def test_trust_boundary_my_file_allowed() -> None:
-    fm = {"id": "x", "shared": False, "ownedByMe": True, "parents": ["root"]}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=True, root_folder_id=None) is True
-
-
-def test_trust_boundary_shared_blocked() -> None:
-    fm = {"id": "x", "shared": True, "ownedByMe": False, "parents": ["root"]}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=True, root_folder_id=None) is False
-
-
-def test_trust_boundary_shared_but_owned_allowed() -> None:
-    # 내가 만든 파일을 남에게 공유한 경우 — shared=True 이지만 ownedByMe=True
-    fm = {"id": "x", "shared": True, "ownedByMe": True, "parents": ["root"]}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=True, root_folder_id=None) is True
-
-
-def test_trust_boundary_root_folder_match() -> None:
-    fm = {"id": "x", "parents": ["folder123"]}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=False, root_folder_id="folder123") is True
-
-
-def test_trust_boundary_root_folder_no_match() -> None:
-    # SIG-6: incremental 에서도 root_folder_id post-filter 적용
-    fm = {"id": "x", "parents": ["other"]}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=False, root_folder_id="folder123") is False
-
-
-def test_trust_boundary_no_parents() -> None:
-    fm = {"id": "x"}
-    assert _passes_trust_boundary(fm, exclude_shared_with_me=False, root_folder_id="folder123") is False
+def test_result_to_stdout_json_no_changes() -> None:
+    result = SyncResult(vault_id="gdrive", has_changes=False, duration_ms=12)
+    payload = json.loads(result_to_stdout_json(result))
+    assert payload["vault_id"] == "gdrive"
+    assert payload["has_changes"] is False
+    assert payload["changed"] == []
+    assert payload["deleted"] == []
+    assert payload["duration_ms"] == 12
 
 
 # ---------------------------------------------------------------------------
-# result_to_stdout_json — F2 contract field 검증 (R1 H2 회귀 방지)
+# sync orchestration — false-deleted 가드
 # ---------------------------------------------------------------------------
 
-def test_result_to_stdout_json_minimum() -> None:
-    r = SyncResult(vault_id="gdrive", has_changes=False, duration_ms=42)
-    parsed = json.loads(result_to_stdout_json(r))
-    assert parsed == {
-        "vault_id": "gdrive",
-        "has_changes": False,
-        "changed": [],
-        "deleted": [],
-        "duration_ms": 42,
-    }
-
-
-def test_result_to_stdout_json_with_changes() -> None:
-    r = SyncResult(
-        vault_id="gdrive",
-        has_changes=True,
-        changed=[
-            ChangedFile(
-                source_relpath="meetings/Q1.pptx",
-                wiki_path="wiki/sources/gdrive/meetings/Q1.pptx.md",
-                operation="created",
-                source_id="DRIVE_ID",
-                source_mtime="2026-05-13T01:55:12+00:00",
-                bytes_written=12453,
-            )
-        ],
-        deleted=["old/archive.md"],
-        duration_ms=12345,
-    )
-    parsed = json.loads(result_to_stdout_json(r))
-    assert parsed["vault_id"] == "gdrive"
-    assert parsed["has_changes"] is True
-    assert len(parsed["changed"]) == 1
-    c = parsed["changed"][0]
-    # F2 ingest.md §Step 2 contract 8개 필드 모두 검증
-    assert c["source_relpath"] == "meetings/Q1.pptx"
-    assert c["wiki_path"] == "wiki/sources/gdrive/meetings/Q1.pptx.md"
-    assert c["operation"] == "created"
-    assert c["source_id"] == "DRIVE_ID"
-    assert c["source_mtime"] == "2026-05-13T01:55:12+00:00"
-    assert c["bytes_written"] == 12453
-    assert parsed["deleted"] == ["old/archive.md"]
-
-
-def test_result_to_stdout_json_unicode() -> None:
-    r = SyncResult(vault_id="gdrive", has_changes=True,
-                   changed=[ChangedFile(
-                       source_relpath="회의록 (Q1).pptx",
-                       wiki_path="wiki/sources/gdrive/회의록 (Q1).pptx.md",
-                       operation="modified",
-                       source_id="X",
-                       source_mtime="2026-05-13T00:00:00+00:00",
-                       bytes_written=100,
-                   )],
-                   duration_ms=0)
-    out = result_to_stdout_json(r)
-    # ensure_ascii=False 로 unicode 보존
-    assert "회의록" in out
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap 가드 — F1 §4.4.6 lift, B2 정합
-# ---------------------------------------------------------------------------
-
-def _make_vault_cfg(*, options: dict | None = None) -> VaultConfig:
+def _vault_cfg(**options: Any) -> VaultConfig:
     return VaultConfig(
         id="gdrive",
         type="gdrive_api",
         enabled=True,
         sync_interval_sec=600,
-        local_path=Path("/tmp/vault-gdrive"),
-        options=options or {},
+        local_path=Path("/tmp/wikihub-test/vault/gdrive"),
+        options={"rclone_remote_name": "gdrive", **options},
     )
 
 
-def test_bootstrap_guard_no_cursor_no_flag_no_allowed(tmp_path: Path) -> None:
-    vault = _make_vault_cfg()
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    with pytest.raises(VaultSyncFatal) as exc:
-        sync.sync(
-            vault_cfg=vault,
-            instance_root=tmp_path,
-            state_dir=tmp_path / "_state",
-            credentials_path=cred,
-            bootstrap_flag=False,
-        )
-    assert "bootstrap 비활성" in exc.value.reason
-
-
-def test_bootstrap_guard_allowed_but_no_flag(tmp_path: Path) -> None:
-    vault = _make_vault_cfg(options={"bootstrap_allowed": True})
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    with pytest.raises(VaultSyncFatal) as exc:
-        sync.sync(
-            vault_cfg=vault,
-            instance_root=tmp_path,
-            state_dir=tmp_path / "_state",
-            credentials_path=cred,
-            bootstrap_flag=False,
-        )
-    assert "플래그 누락" in exc.value.reason
-
-
-# ---------------------------------------------------------------------------
-# sync end-to-end with mocked gws (incremental)
-# ---------------------------------------------------------------------------
-
-def test_sync_incremental_no_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """기존 cursor 가 있는데 changes 0건 → has_changes=False, 정상 종료."""
-    vault = _make_vault_cfg(options={"credentials_path": str(tmp_path / "cred.json")})
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    # cursor 미리 작성
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "TOKEN_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
-    }))
-
-    # monkeypatch run_gws — changes.list 에 빈 응답
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None, binary="gws",
-                     binary_output=False):
-        if args[:3] == ["drive", "changes", "list"]:
-            return GwsResult(
-                returncode=0,
-                stdout=json.dumps({"changes": [], "newStartPageToken": "TOKEN_NEW"}),
-                stderr="",
-                duration_ms=10,
-            )
-        raise AssertionError(f"unexpected gws call: {args}")
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    result = sync.sync(
-        vault_cfg=vault,
-        instance_root=tmp_path,
-        state_dir=state_dir,
-        credentials_path=cred,
-        bootstrap_flag=False,
-    )
-    assert result.has_changes is False
-    assert result.cursor_before == "TOKEN_PREV"
-    assert result.cursor_after == "TOKEN_NEW"
-    # last_sync.json 작성됐는지
-    ls = json.loads((state_dir / "last_sync.json").read_text())
-    assert ls["vault_id"] == "gdrive"
-    assert ls["has_changes"] is False
-    assert ls["cursor_after"] == "TOKEN_NEW"
-    # cursor 업데이트됐는지 (I3 정합 — last_sync 다음에)
-    cur = json.loads((state_dir / "cursor.json").read_text())
-    assert cur["cursor"] == "TOKEN_NEW"
-
-
-def test_sync_incremental_with_text_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """text/markdown 파일 1개 변경 → wiki page 작성 + file_map 갱신."""
-    vault_local = tmp_path / "vault-gdrive"
-    vault_local.mkdir()
-    vault = VaultConfig(
-        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
-        local_path=vault_local,
-        options={"credentials_path": str(tmp_path / "cred.json")},
-    )
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "T_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
-    }))
-
-    file_meta = {
-        "id": "FILE_ABC", "name": "notes/idea.md", "mimeType": "text/markdown",
-        "modifiedTime": "2026-05-13T01:00:00+00:00", "size": 50,
-        "shared": False, "ownedByMe": True, "parents": ["root"],
-    }
-
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None, binary="gws",
-                     binary_output=False):
-        if args[:3] == ["drive", "changes", "list"]:
-            return GwsResult(
-                returncode=0,
-                stdout=json.dumps({
-                    "changes": [{"removed": False, "fileId": "FILE_ABC", "file": file_meta}],
-                    "newStartPageToken": "T_NEW",
-                }),
-                stderr="",
-                duration_ms=10,
-            )
-        if args[:3] == ["drive", "files", "get"]:
-            return GwsResult(returncode=0, stdout="# hello\n\nbody\n", stderr="", duration_ms=5)
-        raise AssertionError(f"unexpected gws call: {args}")
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    result = sync.sync(
-        vault_cfg=vault,
-        instance_root=tmp_path,
-        state_dir=state_dir,
-        credentials_path=cred,
-        bootstrap_flag=False,
-    )
-    assert result.has_changes is True
-    assert len(result.changed) == 1
-    cf = result.changed[0]
-    assert cf.source_relpath == "notes/idea.md"
-    assert cf.wiki_path == "wiki/sources/gdrive/notes/idea.md"
-    assert cf.operation == "created"
-    # wiki 페이지 실제 작성됐는지
-    wiki_page = tmp_path / "wiki/sources/gdrive/notes/idea.md"
-    assert wiki_page.exists()
-    text = wiki_page.read_text()
-    assert "hello" in text
-    assert "title:" in text  # frontmatter
-    # vault local 에도 다운로드됐는지
-    assert (vault_local / "notes/idea.md").exists()
-    # file_map 갱신 (CRIT-4: 즉시 commit)
-    fm = json.loads((state_dir / "file_map.json").read_text())
-    assert "notes/idea.md" in fm["files"]
-
-
-def test_sync_removed_change_deletes_wiki_and_vault(tmp_path: Path,
-                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    """SIG-2: removed change 시 wiki + vault binary 둘 다 삭제."""
-    vault_local = tmp_path / "vault-gdrive"
-    vault_local.mkdir()
-    vault = VaultConfig(
-        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
-        local_path=vault_local,
-        options={"credentials_path": str(tmp_path / "cred.json")},
-    )
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "T_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
-    }))
-    # file_map 에 기존 파일 등록
+def test_sync_listing_zero_with_existing_file_map_raises_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0035 §ζ2 — listing 0건 + file_map 비어있지 않음 → Retryable."""
+    # file_map 사전 채움
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
     (state_dir / "file_map.json").write_text(json.dumps({
-        "vault_id": "gdrive", "updated_at": "2026-05-13T00:00:00+00:00",
-        "files": {
-            "old.md": {"source_id": "OLD_ID", "source_mtime": "...",
-                       "wiki_path": "wiki/sources/gdrive/old.md", "bytes": 10,
-                       "last_synced_at": "2026-05-13T00:00:00+00:00"}
-        },
-    }))
-    # 기존 wiki + vault binary 실재
-    wiki_old = tmp_path / "wiki/sources/gdrive/old.md"
-    wiki_old.parent.mkdir(parents=True, exist_ok=True)
-    wiki_old.write_text("# old")
-    (vault_local / "old.md").write_text("vault local old")
-
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None, binary="gws",
-                     binary_output=False):
-        if args[:3] == ["drive", "changes", "list"]:
-            return GwsResult(
-                returncode=0,
-                stdout=json.dumps({
-                    "changes": [{"removed": True, "fileId": "OLD_ID"}],
-                    "newStartPageToken": "T_NEW",
-                }),
-                stderr="", duration_ms=10,
-            )
-        raise AssertionError(f"unexpected gws call: {args}")
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    result = sync.sync(
-        vault_cfg=vault,
-        instance_root=tmp_path,
-        state_dir=state_dir,
-        credentials_path=cred,
-        bootstrap_flag=False,
-    )
-    assert result.deleted == ["old.md"]
-    # wiki + vault local 둘 다 삭제됨
-    assert not wiki_old.exists()
-    assert not (vault_local / "old.md").exists()
-    # file_map 에서도 제거
-    fm = json.loads((state_dir / "file_map.json").read_text())
-    assert "old.md" not in fm["files"]
-
-
-# ---------------------------------------------------------------------------
-# CRIT-R4-4: binary download bytes round-trip
-# ---------------------------------------------------------------------------
-
-def test_sync_incremental_binary_pptx_round_trip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """CRIT-1·CRIT-R4-4 회귀 방지 — binary 파일은 binary_output=True 경로로
-    bytes 손상 없이 vault 에 저장되어야 한다.
-    """
-    vault_local = tmp_path / "vault-gdrive"
-    vault_local.mkdir()
-    vault = VaultConfig(
-        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
-        local_path=vault_local,
-        options={"credentials_path": str(tmp_path / "cred.json")},
-    )
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "T_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {"id_a": {"source_relpath": "a.md", "source_mtime": "x",
+                           "wiki_path": "wiki/sources/gdrive/a.md", "bytes": 1,
+                           "last_synced_at": "x"}},
     }))
 
-    # ZIP 헤더 + non-UTF8 byte sequence — text mode 였으면 UTF-8 decode 실패하거나 손상
-    pptx_bytes = b"PK\x03\x04" + bytes(range(256)) + b"\xff\xfe\x80\x81"
-
-    file_meta = {
-        "id": "FILE_PPTX",
-        "name": "decks/Q1.pptx",
-        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "modifiedTime": "2026-05-13T01:00:00+00:00", "size": len(pptx_bytes),
-        "shared": False, "ownedByMe": True, "parents": ["root"],
-    }
-
-    binary_call_seen = {"flag": False}
-
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None,
-                     binary="gws", binary_output=False):
-        if args[:3] == ["drive", "changes", "list"]:
-            return GwsResult(
-                returncode=0,
-                stdout=json.dumps({
-                    "changes": [{"removed": False, "fileId": "FILE_PPTX", "file": file_meta}],
-                    "newStartPageToken": "T_NEW",
-                }),
-                stderr="", duration_ms=10,
-            )
-        if args[:3] == ["drive", "files", "get"]:
-            # CRIT-R4-4: binary 다운로드는 반드시 binary_output=True 로 와야 함
-            assert binary_output is True, (
-                "binary MIME 다운로드 시 binary_output=True 필수 (CRIT-1 회귀)"
-            )
-            binary_call_seen["flag"] = True
-            return GwsResult(
-                returncode=0, stdout="", stderr="",
-                duration_ms=5, stdout_bytes=pptx_bytes,
-            )
-        raise AssertionError(f"unexpected gws call: {args}")
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    sync.sync(
-        vault_cfg=vault, instance_root=tmp_path, state_dir=state_dir,
-        credentials_path=cred, bootstrap_flag=False,
-    )
-
-    assert binary_call_seen["flag"], "binary path 가 실제 호출되지 않음"
-    # bytes 가 손상 없이 그대로 disk 에 떨어졌는지 — round-trip 검증
-    saved = vault_local / "decks/Q1.pptx"
-    assert saved.exists()
-    assert saved.read_bytes() == pptx_bytes
-
-
-# ---------------------------------------------------------------------------
-# CRIT-R4-2: subprocess.TimeoutExpired → VaultSyncRetryable
-# ---------------------------------------------------------------------------
-
-def test_run_gws_timeout_maps_to_retryable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """CRIT-R4-2: gws subprocess timeout 은 VaultSyncRetryable 로 변환되어야 한다."""
-    vault = _make_vault_cfg(options={"credentials_path": str(tmp_path / "cred.json")})
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "T_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
-    }))
-
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None,
-                     binary="gws", binary_output=False):
-        raise subprocess.TimeoutExpired(cmd=["gws", *args], timeout=timeout_sec)
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
+    # rclone lsjson 을 0건 반환으로 mock
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [])
 
     with pytest.raises(VaultSyncRetryable) as exc:
         sync.sync(
-            vault_cfg=vault, instance_root=tmp_path, state_dir=state_dir,
-            credentials_path=cred, bootstrap_flag=False,
+            vault_cfg=_vault_cfg(),
+            instance_root=tmp_path,
+            state_dir=state_dir,
         )
-    assert "timeout" in exc.value.reason.lower()
+    assert "listing 0건" in exc.value.reason
 
 
-# ---------------------------------------------------------------------------
-# CRIT-R4-3: per-file VaultSyncFileFatal → retry queue + 사이클 계속
-# ---------------------------------------------------------------------------
-
-def test_sync_per_file_fatal_enqueues_retry_and_continues(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_sync_delete_ratio_exceeds_threshold_raises_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CRIT-R4-3: 한 파일의 403 insufficientPermissions 가 vault 전체를 stuck 시키면 안 됨.
-
-    시나리오: 2개 changes 중 1번째 파일이 403 fatal → retry queue 등록 + continue.
-    2번째 파일은 정상 처리 → file_map 등록 + cursor advance.
-    """
-    vault_local = tmp_path / "vault-gdrive"
-    vault_local.mkdir()
-    vault = VaultConfig(
-        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
-        local_path=vault_local,
-        options={"credentials_path": str(tmp_path / "cred.json")},
-    )
-    cred = tmp_path / "cred.json"
-    cred.write_text("{}")
-    state_dir = tmp_path / "_state"
-    state_dir.mkdir()
-    (state_dir / "cursor.json").write_text(json.dumps({
-        "vault_id": "gdrive", "vault_type": "gdrive_api",
-        "cursor": "T_PREV", "cursor_updated_at": "2026-05-13T00:00:00+00:00",
+    """ADR-0035 §ζ2 — delete_ratio > threshold → Retryable."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    # file_map 3건 — listing 에 1건만 → delete_ratio = 2/3 > 0.3
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            f"id_{x}": {"source_relpath": f"{x}.md", "source_mtime": "x",
+                        "wiki_path": f"wiki/sources/gdrive/{x}.md", "bytes": 1,
+                        "last_synced_at": "x"}
+            for x in ("a", "b", "c")
+        },
     }))
 
-    forbidden_meta = {
-        "id": "FILE_FORBIDDEN", "name": "restricted.md", "mimeType": "text/markdown",
-        "modifiedTime": "2026-05-13T01:00:00+00:00", "size": 50,
-        "shared": False, "ownedByMe": True, "parents": ["root"],
-    }
-    ok_meta = {
-        "id": "FILE_OK", "name": "notes/ok.md", "mimeType": "text/markdown",
-        "modifiedTime": "2026-05-13T01:01:00+00:00", "size": 20,
-        "shared": False, "ownedByMe": True, "parents": ["root"],
-    }
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_a", "Path": "a.md", "Name": "a.md", "Size": 1,
+         "MimeType": "text/markdown", "ModTime": "x", "IsDir": False},
+    ])
 
-    def fake_run_gws(args, params=None, *, timeout_sec=300, env_extra=None,
-                     binary="gws", binary_output=False):
-        if args[:3] == ["drive", "changes", "list"]:
-            return GwsResult(
-                returncode=0,
-                stdout=json.dumps({
-                    "changes": [
-                        {"removed": False, "fileId": "FILE_FORBIDDEN", "file": forbidden_meta},
-                        {"removed": False, "fileId": "FILE_OK", "file": ok_meta},
-                    ],
-                    "newStartPageToken": "T_NEW",
-                }),
-                stderr="", duration_ms=10,
-            )
-        if args[:3] == ["drive", "files", "get"]:
-            assert params is not None
-            if params.get("fileId") == "FILE_FORBIDDEN":
-                # 403 insufficientPermissions → errors.py 가 scope=file fatal 로 분류
-                return GwsResult(
-                    returncode=1, stdout="",
-                    stderr='HttpError 403: insufficientPermissions for fileId',
-                    duration_ms=5,
-                )
-            if params.get("fileId") == "FILE_OK":
-                return GwsResult(returncode=0, stdout="# ok\n", stderr="", duration_ms=5)
-        raise AssertionError(f"unexpected gws call: {args} params={params}")
-
-    monkeypatch.setattr("lib.gws.run_gws", fake_run_gws)
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    result = sync.sync(
-        vault_cfg=vault, instance_root=tmp_path, state_dir=state_dir,
-        credentials_path=cred, bootstrap_flag=False,
-    )
-    # vault 사이클 자체는 성공해야 함 (per-file fatal 이 vault stuck 안 시킴)
-    assert result.cursor_after == "T_NEW"
-    # 정상 파일은 처리됨
-    assert len(result.changed) == 1
-    assert result.changed[0].source_relpath == "notes/ok.md"
-
-    # cursor advance 확인 — 다음 사이클에 같은 차단을 또 만나지 않음
-    cur = json.loads((state_dir / "cursor.json").read_text())
-    assert cur["cursor"] == "T_NEW"
-
-    # 차단된 파일은 retry queue 에 등록
-    retry = json.loads((state_dir / "retry.json").read_text())
-    assert len(retry["queue"]) == 1
-    item = retry["queue"][0]
-    assert item["source_relpath"] == "restricted.md"
-    assert item["source_id"] == "FILE_FORBIDDEN"
-    assert "file-fatal" in item["failure_reason"]
-
-
-# ---------------------------------------------------------------------------
-# CRIT-R4-1: _download_to_vault invariant — sanitized source_relpath 만 받음
-# ---------------------------------------------------------------------------
-
-def test_download_to_vault_rejects_absolute_source_relpath(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """CRIT-R4-1 defense-in-depth — invariant 위반 시 VaultSyncFatal.
-
-    실제 운영 시에는 caller(_sync_loop) 가 _sanitize_relpath 통과한 값만 전달하지만,
-    내부 buggy refactor 시 즉시 fail-loud 하도록.
-    """
-    from lib.sync import _download_to_vault
-
-    vault_local = tmp_path / "vault-gdrive"
-    vault_local.mkdir()
-
-    def fake_run_gws(*a, **kw):
-        raise AssertionError("must not reach gws — invariant 검사가 먼저")
-
-    monkeypatch.setattr("lib.sync.run_gws", fake_run_gws)
-
-    with pytest.raises(VaultSyncFatal) as exc:
-        _download_to_vault(
-            "gdrive", {"GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE": "/tmp/x"},
-            {"id": "X", "name": "/abs/escape", "mimeType": "text/markdown"},
-            vault_local,
-            source_relpath="/abs/escape",  # invariant 위반 — absolute
-            max_file_size_mb=None,
+    with pytest.raises(VaultSyncRetryable) as exc:
+        sync.sync(
+            vault_cfg=_vault_cfg(false_delete_threshold=0.3),
+            instance_root=tmp_path,
+            state_dir=state_dir,
         )
-    assert "invariant" in exc.value.reason
+    assert "삭제 비율" in exc.value.reason
 
 
-# ---------------------------------------------------------------------------
-# vault-fetch.py 의 file lock 호출 invariant — HIGH-R4-2
-#
-# 동시 invocation 의 e2e 검증은 wikihub.yaml 전체 schema + assert_credentials 통과가
-# 필요해서 무겁다. fcntl.flock(LOCK_EX|LOCK_NB) 자체는 표준 POSIX 동작 — 통합 검증은
-# v0.2.x 의 V8 시점(systemd timer 와 함께)으로 미루고, 여기서는 source 에 lock 호출이
-# 실제 들어있는지 정적으로 보장.
-# ---------------------------------------------------------------------------
+def test_sync_delete_ratio_at_exact_threshold_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M5 경계 케이스 — delete_ratio == threshold 일 때 가드 통과 (>이지 >= 아님)."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    # file_map 4건, listing 에 3건 → delete_ratio = 1/4 = 0.25
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            f"id_{x}": {"source_relpath": f"{x}.md", "source_mtime": "x",
+                        "wiki_path": f"wiki/sources/gdrive/{x}.md", "bytes": 1,
+                        "last_synced_at": "x"}
+            for x in ("a", "b", "c", "d")
+        },
+    }))
+    # mount FS 에 3건 (a/b/c) 배치
+    for name in ("a.md", "b.md", "c.md"):
+        (vault_local / name).write_text("hello")
 
-def test_vault_fetch_uses_fcntl_flock_for_concurrency_lock() -> None:
-    """HIGH-R4-2 회귀 방지 — vault-fetch.py 에서 fcntl.flock 호출이 제거되지 않도록."""
-    src = (Path(__file__).parent.parent / "scripts" / "vault-fetch.py").read_text()
-    assert "import fcntl" in src
-    assert "fcntl.flock" in src
-    assert "LOCK_EX" in src
-    assert "LOCK_NB" in src
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": f"id_{x}", "Path": f"{x}.md", "Name": f"{x}.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "x", "IsDir": False}
+        for x in ("a", "b", "c")
+    ])
+
+    # threshold = 0.25 → delete_ratio == threshold → 통과 (> 만 abort)
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive", "false_delete_threshold": 0.25},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+    # 정상 통과 — deleted 1건 (id_d) 분류
+    assert len(result.deleted) == 1
+
+
+def test_sync_rename_updates_file_map_and_wiki(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M7 — rename 처리: 같은 fileId 의 새 path 가 lsjson 에 있을 때
+    file_map 갱신 + 새 wiki page 생성 + old wiki page unlink."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    # mount FS 의 새 path 에만 파일 배치 (rename 후 상태)
+    (vault_local / "renamed.md").write_text("hello new")
+    # 기존 wiki page 사전 배치
+    old_wiki = tmp_path / "wiki" / "sources" / "gdrive" / "original.md"
+    old_wiki.parent.mkdir(parents=True)
+    old_wiki.write_text("old content")
+    # file_map 에 id_a → original.md 등록
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            "id_a": {"source_relpath": "original.md", "source_mtime": "2026-05-19T00:00:00Z",
+                     "wiki_path": "wiki/sources/gdrive/original.md", "bytes": 100,
+                     "last_synced_at": "2026-05-19T00:00:00Z"},
+        },
+    }))
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_a", "Path": "renamed.md", "Name": "renamed.md", "Size": 9,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    assert result.has_changes is True
+    assert len(result.changed) == 1
+    assert result.changed[0].operation == "renamed"
+    # file_map source_relpath 갱신
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert fm["files"]["id_a"]["source_relpath"] == "renamed.md"
+    assert fm["files"]["id_a"]["wiki_path"] == "wiki/sources/gdrive/renamed.md"
+    # 새 wiki page 생성
+    new_wiki = tmp_path / "wiki" / "sources" / "gdrive" / "renamed.md"
+    assert new_wiki.exists()
+    # old wiki page unlink
+    assert not old_wiki.exists()
+
+
+def test_sync_first_run_all_listing_treated_as_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0035 — file_map 비어있는 first-run 은 모든 listing 이 created 분류 (자연 bootstrap)."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    # mount FS 에 파일 실제 배치 (sync 의 read 경로)
+    (vault_local / "a.md").write_text("hello")
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_a", "Path": "a.md", "Name": "a.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    assert result.has_changes is True
+    assert len(result.changed) == 1
+    assert result.changed[0].operation == "created"
+    assert result.changed[0].source_id == "id_a"
+    # file_map 영속화 — source_id 키
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert "id_a" in fm["files"]

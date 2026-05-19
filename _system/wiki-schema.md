@@ -28,9 +28,8 @@ ${WIKIHUB_HOME}/                      ★ 운영 자산 (default ~/wikihub, ADR-
 │   ├── analyses/<slug>.md            #   합성 분석 — /wh-query 자동 저장 (agent 작성)
 │   ├── _lint/report.md               #   /wh-lint 진단 보고서
 │   └── .archived/                    #   --apply로 archive된 페이지 (보존)
-├── _state/{vault_id}/                # vault별 sync 영속 상태 (all JSON, ADR-0007)
-│   ├── cursor.json
-│   ├── file_map.json
+├── _state/{vault_id}/                # vault별 sync 영속 상태 (all JSON, ADR-0007 + ADR-0035 cursor 폐기)
+│   ├── file_map.json                 #   primary key 는 source_id (Drive fileId, ADR-0035)
 │   ├── last_sync.json
 │   ├── pending_ingest.json           #   부분 실패 복구 (있을 때만)
 │   ├── retry.json
@@ -66,11 +65,9 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 └── .venv_path                        # venv path sidecar (ADR-0020)
 
 ~/.local/share/wikihub/venv/          # Python venv (ADR-0020 — WIKIHUB_SRC 와 동일 XDG root)
-~/.credentials/wikihub/               # SA credentials 외부 격리 (ADR-0029 §Decision 갱신)
-│   └── sa_{vault_id}.json            #   chmod 0600
 ~/.config/systemd/user/               # systemd user units (install.sh _step8 render)
 ~/.hermes/                            # Hermes config (외부 도구, ADR-0032 external_dirs 참조)
-~/.config/rclone/rclone.conf          # rclone config (chmod 0600)
+~/.config/rclone/rclone.conf          # rclone OAuth token — 단일 인증 자료 (ADR-0035, chmod 0600)
 ```
 
 **상세 디렉토리 책임**은 F1 archive `analysis_and_design.md` §4.1.1 + 본 문서 §책임 매트릭스 참조.
@@ -128,7 +125,7 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 |---|---|---|
 | binary (`.pptx`·`.docx`·`.xlsx`·`.pdf`) | 추출 텍스트 | `<relpath>.<ext>.md` (예: `meetings/2026-Q1.pptx.md`) |
 | 텍스트 (`.md`·`.txt`) | 본문 그대로 | `<relpath>.md` (`.md` 중복 회피 — `notes/idea.md`는 그대로) |
-| Google native (`.gdoc`·`.gsheet`·`.gslides`) | `gws drive files export` (ADR-0014) | `<relpath>.<virtual_ext>.md` (예: `policies/onboarding.gdoc.md` — `.gdoc`는 Drive 가상 ext 보존) |
+| Google native (`.gdoc`·`.gsheet`·`.gslides`) | rclone mount `--drive-export-formats docx,xlsx,pptx,md` (ADR-0025·0035) | `<relpath>.<virtual_ext>.md` (예: `policies/onboarding.gdoc.md` — `.gdoc`는 Drive 가상 ext 보존) |
 | 기타 (`.csv`·`.json`·...) | 본문 그대로 또는 표 렌더 | `<relpath>.<ext>.md` |
 
 **`[[link]]` 형식 (재확인)** — 트레일링 `.md`만 생략:
@@ -148,9 +145,9 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 | `.docx` | python-docx | 동일 |
 | `.xlsx` | openpyxl | 동일 |
 | `.pdf` | pdfminer.six | `[extraction failed: <reason>]` (encrypted PDF: `[extraction failed: encrypted PDF]`) |
-| Google Doc (`.gdoc`) | `gws drive files export`, `mimeType=text/markdown` (ADR-0014) | `[export failed: <reason>]` |
-| Google Sheet (`.gsheet`) | `gws drive files export`, `mimeType=text/csv` | 동일 |
-| Google Slide (`.gslides`) | `gws drive files export`, `mimeType=text/plain` | 동일 |
+| Google Doc (`.gdoc`) | rclone mount export → `.docx` → python-docx (ADR-0025·0035) | `[export failed: <reason>]` |
+| Google Sheet (`.gsheet`) | rclone mount export → `.xlsx` → openpyxl | 동일 |
+| Google Slide (`.gslides`) | rclone mount export → `.pptx` → python-pptx | 동일 |
 | 텍스트 (`.md`·`.txt`) | (변환 없음, 그대로 사용) | n/a |
 
 **추출 실패 시 wiki 페이지 작성은 진행** (file_map 정합성 유지). frontmatter는 정상 + body는 실패 메시지. `/wh-lint`가 본 페이지를 봐서 retry 또는 archive 결정.
@@ -284,7 +281,7 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참�
 | `wiki/_lint/report.md` | 미접근 | /wh-lint Step 8이 overwrite |
 | `wiki/.archived/` | 미접근 | /wh-lint --apply만 이동 |
 | `_state/{vault}/*.json` | 통째 작성·갱신 (atomic) | `/wh-ingest`의 agent phase가 `pending_ingest.json` 작성·삭제 |
-| `.credentials/*.pickle` | read + atomic refresh write (ADR-0003) | 미접근 |
+| `~/.config/rclone/rclone.conf` | read-only (rclone subprocess 가 자체 refresh) | 미접근 |
 | `graphify-out/*` | 미접근 | /wh-graphify가 빌드 |
 | `wikihub.yaml` | read-only | read-only |
 | `_system/*` | 미접근 | read-only |
@@ -372,7 +369,7 @@ install.sh가 agent type prompt 후 default 매핑(`hermes → chat --skills {sk
 
 - 결정 기록: `docs/adr/` (ADR-0001 ~ 0013 + 후속)
 - **OAuth 1회 인증 절차** (메인테이너 외부 작업): F1 archive `analysis_and_design.md` §4.7 — `auth_gdrive.py` macOS dev box 실행 + scp 절차. 향후 `docs/runbooks/oauth-setup.md` (F4 산출물)로 명문화 예정
-- **신규 vault 추가 runbook**: F4 산출물 `docs/runbooks/add-vault.md` 예정. step 개요: ① wikihub.yaml 편집 → ② OAuth pickle 발급(macOS) + scp → ③ `/wh-setup` → ④ `systemctl --user enable --now <vault>-ingest.timer`
+- **신규 vault 추가 runbook**: step 개요: ① wikihub.yaml 편집 → ② rclone OAuth 발급 (ADR-0035 — `rclone config` Step 5.5) → ③ `/wh-setup` → ④ `systemctl --user enable --now <vault>-ingest.timer`
 - F1 archive (배경): `features/archive/20260513_v030_initial_architecture/analysis_and_design.md`
 - F2 (본 문서 출처): `features/20260513_wikihub_schema_v1/`
 - 운영 도구: install.sh (root), `/wh-setup`

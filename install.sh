@@ -6,7 +6,9 @@
 #     https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
 #
 # 또는 로컬 호출 (개발/사전 inspection 후):
-#   ./install.sh [--gws-version <ver>] [--skip-confirm] [--branch <ref>] [--version <tag>] [--force-fresh]
+#   ./install.sh [--skip-confirm] [--branch <ref>] [--version <tag>] [--force-fresh]
+#
+# ADR-0035 (2026-05-19): gws CLI 폐기 — rclone 단독화. --gws-version 옵션 제거.
 #
 # detect signal: $WIKIHUB_SRC/_system/VERSION + $WIKIHUB_SRC/.git 둘 다 존재 → update mode
 #   (ADR-0010 + ADR-0030). 둘 다 없으면 fresh install. 한쪽만 있으면 partial state fatal.
@@ -23,7 +25,7 @@ if [ -t 1 ]; then
 else
     C_INFO=''; C_OK=''; C_WARN=''; C_ERR=''; C_RST=''
 fi
-# R10 NIT-1: timestamp prefix — gws 다운로드 등 분 단위 step 의 hang vs 정상 구분
+# R10 NIT-1: timestamp prefix — rclone 다운로드 등 분 단위 step 의 hang vs 정상 구분
 _ts() { date +%H:%M:%S; }
 info()  { echo "${C_INFO}INFO${C_RST}  [$(_ts)] $*"; }
 ok()    { echo "${C_OK}OK${C_RST}    [$(_ts)] $*"; }
@@ -45,13 +47,13 @@ EXPLICIT_VERSION_FLAG="${EXPLICIT_VERSION_FLAG:-}"
 FORCE_FRESH="${FORCE_FRESH:-}"             # --force-fresh 명시 시 set
 INSTALL_MODE=""                            # update | fresh — _detect_mode 가 set
 PRE_UPDATE_REF=""                          # _step2_update 가 capture
-GWS_VERSION="${GWS_VERSION:-0.22.5}"   # V8 통과 시점 pinned (ADR-0015 Accepted). `latest` env override 시 GitHub API 호출 분기 유지
+# ADR-0035: gws CLI 폐기. GWS_VERSION 변수 제거. GWS_BIN_DIR → LOCAL_BIN_DIR (uv binary 위치만 유지).
 SKIP_CONFIRM="${SKIP_CONFIRM:-${WIKIHUB_NONINTERACTIVE:-}}"
 VENV_PATH="${VENV_PATH:-$HOME/.local/share/wikihub/venv}"
-GWS_BIN_DIR="${GWS_BIN_DIR:-$HOME/.local/bin}"
+LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
 ALLOW_NON_UBUNTU="${ALLOW_NON_UBUNTU:-}"      # R10 MED-4: 메인테이너 macOS dev box 실수 호출 차단
 # ADR-0028: uv 기반 Python runtime 관리
-UV_VERSION="${UV_VERSION:-0.11.14}"           # uv binary pinned (GitHub Releases + SHA256, gws·rclone 패턴 일관)
+UV_VERSION="${UV_VERSION:-0.11.14}"           # uv binary pinned (GitHub Releases + SHA256, rclone 패턴 일관)
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"      # uv 가 자체 install (apt python3 의존 없음)
 
 # R9 MED-1 + R10 MED-5: 절대경로 normalize — 상대경로(./wikihub) + quoted tilde literal
@@ -136,7 +138,6 @@ ORIGINAL_ARGS=("$@")
 # ─── CLI 파싱 ─────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
     case "$1" in
-        --gws-version) GWS_VERSION="$2"; shift 2 ;;
         --skip-confirm) SKIP_CONFIRM=1; shift ;;
         --branch) BRANCH="$2"; shift 2 ;;
         # ADR-0030 / HIGH-N3: --version 인자 강제 소비. no-arg 분기 없음.
@@ -380,7 +381,7 @@ _step2_clone() {
 # Step 3. venv 생성 (idempotent, ADR-0028 — uv 기반 Python runtime)
 # ──────────────────────────────────────────────────────────────────────
 
-# uv binary install — GitHub Releases binary + SHA256 verify (gws·rclone 패턴 일관, ADR-0028)
+# uv binary install — GitHub Releases binary + SHA256 verify (rclone 패턴 일관, ADR-0028)
 _install_uv() {
     if command -v uv >/dev/null 2>&1 && uv --version 2>/dev/null | grep -q "$UV_VERSION"; then
         ok "uv $UV_VERSION 기존 설치 사용"
@@ -414,19 +415,19 @@ _install_uv() {
         find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" -printf '  %P\n' >&2
         exit 2
     fi
-    mkdir -p "$GWS_BIN_DIR"
-    install -m 0755 "$uv_bin" "$GWS_BIN_DIR/uv"
+    mkdir -p "$LOCAL_BIN_DIR"
+    install -m 0755 "$uv_bin" "$LOCAL_BIN_DIR/uv"
     rm -rf "$tmpdir"
     trap - RETURN
     # PATH — 현 셸 + .profile 양쪽 (V8 결함 #4b 회귀 방지: self-replace 후에도 즉시 가용)
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$GWS_BIN_DIR"; then
-        if ! grep -q "$GWS_BIN_DIR" "$HOME/.profile" 2>/dev/null; then
-            echo "export PATH=\"$GWS_BIN_DIR:\$PATH\"" >> "$HOME/.profile"
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$LOCAL_BIN_DIR"; then
+        if ! grep -q "$LOCAL_BIN_DIR" "$HOME/.profile" 2>/dev/null; then
+            echo "export PATH=\"$LOCAL_BIN_DIR:\$PATH\"" >> "$HOME/.profile"
             info "$HOME/.profile 에 PATH 추가 — 새 shell 부터 적용"
         fi
-        export PATH="$GWS_BIN_DIR:$PATH"
+        export PATH="$LOCAL_BIN_DIR:$PATH"
     fi
-    ok "uv $UV_VERSION 설치 완료 ($GWS_BIN_DIR/uv)"
+    ok "uv $UV_VERSION 설치 완료 ($LOCAL_BIN_DIR/uv)"
 }
 
 _step3_venv() {
@@ -470,87 +471,11 @@ _step3_venv() {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-# Step 4. gws 설치 (ADR-0015 — GitHub Releases binary + shasum)
+# Step 4. (폐기, ADR-0035) — gws CLI 설치 단계 제거. 변경 감지는 rclone lsjson 으로 일원화.
 # ──────────────────────────────────────────────────────────────────────
 
-_step4_gws() {
-    # 버전 결정
-    if [ "$GWS_VERSION" = "latest" ]; then
-        info "GitHub Releases 의 latest tag 조회"
-        # R9 CRIT-1 fix: set -euo pipefail + 파이프 체인 — grep 미발견 / API rate limit 시 pipefail
-        # 로 스크립트 즉시 종료 방지. 빈 결과는 아래 check 에서 명시적 안내.
-        GWS_VERSION="$(curl -fsSL --proto '=https' --tlsv1.2 \
-            https://api.github.com/repos/googleworkspace/cli/releases/latest \
-            | grep '"tag_name"' | head -1 | sed -E 's/.*"v?([^"]+)".*/\1/' || true)"
-        if [ -z "$GWS_VERSION" ]; then
-            err "gws latest 버전 조회 실패 (API rate limit / 네트워크 결함 의심) — --gws-version <ver> 명시 후 재시도"
-            exit 2
-        fi
-    fi
-    info "gws version: $GWS_VERSION"
-
-    # 이미 설치된 버전이면 skip
-    if command -v gws >/dev/null 2>&1 && gws --version 2>/dev/null | grep -q "$GWS_VERSION"; then
-        ok "gws $GWS_VERSION 기존 설치 사용"
-        return 0
-    fi
-
-    # 다운로드 + verify + 배치
-    # V8 hand-check (2026-05-17) lock — Rust target triple 명명 (ADR-0015 Accepted)
-    local triple asset url tmpdir
-    case "$(uname -m)" in
-        aarch64|arm64) triple="aarch64-unknown-linux-gnu" ;;
-        x86_64|amd64)  triple="x86_64-unknown-linux-gnu" ;;
-        *) err "지원하지 않는 arch: $(uname -m)"; exit 2 ;;
-    esac
-    asset="google-workspace-cli-${triple}.tar.gz"
-    url="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${asset}"
-
-    tmpdir="$(mktemp -d)"
-    # CR2-CRIT-1: RETURN (function-scoped) — EXIT 는 rollback trap 과 충돌.
-    # sibling helper (`_install_uv` _install_rclone) 와 동일 패턴.
-    trap 'rm -rf "$tmpdir"' RETURN
-    info "gws binary 다운로드: $url"
-    if ! curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmpdir/$asset"; then
-        err "gws binary 다운로드 실패: $url"
-        exit 2
-    fi
-    # sha256 검증 — R10 MED-2: sha256sum (coreutils 표준) 사용. Ubuntu minimal image 의 perl
-    # 미포함 시 shasum 부재 위험 회피.
-    # R16-M2 (V<N> R16 SRE 리뷰): TLS-only fallback 제거 — sidecar 부재 시 fatal exit.
-    # googleworkspace/cli 의 v0.22.5 release 가 SHA256 sidecar 제공 (ADR-0015 정합).
-    if ! curl -fsSL --proto '=https' --tlsv1.2 "${url}.sha256" -o "$tmpdir/${asset}.sha256" 2>/dev/null; then
-        err "gws sha256 sidecar 부재 — ADR-0015 spec 위반. release 형식 변경 의심: ${url}.sha256"
-        exit 2
-    fi
-    ( cd "$tmpdir" && sha256sum -c "${asset}.sha256" )
-    tar -C "$tmpdir" -xzf "$tmpdir/$asset"
-    mkdir -p "$GWS_BIN_DIR"
-    # R9 MED-3: tar 구조 가설(`gws` 가 최상위 binary) 어긋날 시 진단 정보 출력 후 fatal
-    if [ ! -f "$tmpdir/gws" ]; then
-        err "gws binary 가 tar 최상위에 없음 — V8 hand-check 필요 (asset 구조 가설 실패)"
-        err "tar 내용물:"
-        find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" -printf '  %P\n' 2>/dev/null \
-            || ls -laR "$tmpdir" >&2
-        exit 2
-    fi
-    install -m 0755 "$tmpdir/gws" "$GWS_BIN_DIR/gws"
-    rm -rf "$tmpdir"
-    trap - RETURN
-
-    # PATH 확인
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$GWS_BIN_DIR"; then
-        if ! grep -q "$GWS_BIN_DIR" "$HOME/.profile" 2>/dev/null; then
-            echo "export PATH=\"$GWS_BIN_DIR:\$PATH\"" >> "$HOME/.profile"
-            info "$HOME/.profile 에 PATH 추가 — 새 shell 부터 적용"
-        fi
-    fi
-
-    ok "Step 4 gws $GWS_VERSION 설치 완료 ($GWS_BIN_DIR/gws)"
-}
-
 # ──────────────────────────────────────────────────────────────────────
-# Step 4.5. rclone 설치 + chmod 0600 + rc port pre-check (v9, ADR-0025·0026·0027)
+# Step 4.5. rclone 설치 + chmod 0600 + rc port pre-check (v9, ADR-0025·0026·0035)
 # ──────────────────────────────────────────────────────────────────────
 
 # v9 R14-HIGH-1: GitHub Releases 가용성 회귀 대응 — 3회 retry @ 5min interval.
@@ -655,8 +580,8 @@ _enforce_rclone_conf_perms() {
 }
 
 # ADR-0031 §Decision B (MED-S2 design review): install-time version fact 를 sidecar 에 기록.
-# `/wh:setup` Step 0 가 read → operations.gws_min_version 등 derived 필드 patching.
-# stdout 파싱 brittleness 회피 (gws --version 형식 변경 시 fallback 으로만 사용).
+# ADR-0035: gws 키 제거. `/wh:setup` Step 0 의 gws_min_version 비교도 폐기.
+# stdout 파싱 brittleness 회피 (rclone --version 형식 변경 시 fallback 으로만 사용).
 #
 # atomic write (CR1-HIGH-3 review 반영): tmpfile + sync + mv. same-directory + PID suffix +
 # cleanup trap (errexit 또는 중단 시 orphan tmp 회수) + stale tmp 5분 이상 자동 정리.
@@ -677,7 +602,6 @@ _write_installed_versions_sidecar() {
     cat > "$tmp" <<EOF
 {
   "schema_version": 1,
-  "gws": "${GWS_VERSION}",
   "rclone": "${rclone_v:-}",
   "uv": "${UV_VERSION}",
   "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
@@ -713,38 +637,18 @@ _step45_rclone() {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-# Step 5. instance dir 보장 + credentials 권한 enforce (ADR-0031 이후 — yaml 미관여)
+# Step 5. instance dir 보장 (ADR-0031 이후 — yaml 미관여, ADR-0035 — credentials dir 폐기)
 # ──────────────────────────────────────────────────────────────────────
 # 본 함수는 yaml 한 글자도 안 만짐 (ADR-0031 §Decision A 정합).
 # wikihub.yaml 의 시작·끝 책임은 `/wh:setup` Step 0 단독.
 # 메인테이너가 install.sh 직후 `/wh:setup` 호출 시 .example → operational yaml materialize.
+#
+# ADR-0035: ~/.credentials/wikihub/ 폐기 — rclone.conf 단일 인증 자료.
+# rclone.conf 권한 검증은 _step45_rclone 의 _enforce_rclone_conf_perms 가 책임.
 
 _step5_instance_dirs() {
     mkdir -p "$WIKIHUB_HOME"
-    # ADR-0029 §Decision 갱신 (ADR-0034 정합): credentials 외부 격리 — ~/.credentials/wikihub/
-    # 운영 자산 dir 내부 비밀 미배치 (data-first + secret separation)
-    local creds_dir="$HOME/.credentials/wikihub"
-    mkdir -p "$creds_dir"
-    chmod 700 "$creds_dir"
-
-    # R10 HIGH-5 fix: credentials 파일 chmod 600 enforce — 이미 배치된 파일 검증.
-    # install.sh 가 credentials 자체를 만들지 않지만, 메인테이너 scp 후 권한 미설정 케이스 회피.
-    local cred_count=0
-    local bad_perm_count=0
-    for cred in "$creds_dir"/*.json; do
-        [ -f "$cred" ] || continue
-        cred_count=$((cred_count + 1))
-        local mode
-        mode=$(stat -c '%a' "$cred" 2>/dev/null || stat -f '%Lp' "$cred" 2>/dev/null)
-        if [ "$mode" != "600" ]; then
-            warn "credentials 권한 위반: $cred (mode=$mode, 요구=600) — chmod 600 적용"
-            chmod 600 "$cred"
-            bad_perm_count=$((bad_perm_count + 1))
-        fi
-    done
-    if [ "$cred_count" -gt 0 ]; then
-        ok "Step 5 credentials 검증 ($cred_count 건 at $creds_dir, $bad_perm_count 건 권한 fix)"
-    fi
+    ok "Step 5 instance dir 확인 ($WIKIHUB_HOME)"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1125,13 +1029,12 @@ ${C_OK}=== WikiHub 설치 완료 ===${C_RST}
 [경로 구조]
   $WIKIHUB_HOME/                          # ★ 운영 자산 (ADR-0034 — data-first, 메인테이너 편집 대상)
       ├── wikihub.yaml                    # 운영 정본 — **/wh-setup 첫 호출이 .example 으로부터 생성 (ADR-0031)**
-      ├── _state/<vault_id>/              # cursor·file_map·retry·last_sync (자동)
+      ├── _state/<vault_id>/              # file_map·retry·last_sync·last_failure (자동, ADR-0035: cursor 폐기)
       ├── vault/<vault_id>/               # vault local mirror — rclone mount (자동)
       └── wiki/                           # 통합 wiki (자동)
   $WIKIHUB_SRC/                           # 시스템 코드 (XDG, install.sh 가 git clone — sparse, ADR-0023·ADR-0034)
-  ~/.credentials/wikihub/                 # SA credentials 외부 격리 (ADR-0029 §Decision 갱신 + ADR-0034)
+  ~/.config/rclone/                       # rclone.conf — OAuth token 단일 인증 자료 (ADR-0035)
   $VENV_PATH/                             # Python venv (install.sh 관리, 메인테이너 미관여)
-  $GWS_BIN_DIR/gws                        # gws binary (install.sh 관리)
   ~/.config/systemd/user/                 # systemd unit (install.sh _step8_systemd_render 관리)
 
 ${C_WARN}⚠ wikihub.yaml 은 아직 부재합니다 (ADR-0031 §Decision A — install.sh 는 yaml 미관여).${C_RST}
@@ -1141,9 +1044,9 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   1. /wh:setup 호출 — .example 으로부터 wikihub.yaml 자동 생성 (ADR-0031 Step 0):
        <agent_invocation> "/wh:setup"
      생성된 yaml 의 maintainer field (vault id, root_folder_id, fatal_webhook_url 등) 편집.
-  2. credentials 배치 — dev box (macOS) 에서 scripts/auth_gdrive.py 실행 후 scp (ADR-0029):
-       scp ~/wikihub-credentials/sa_gdrive.json user@$(hostname):~/.credentials/wikihub/
-       ssh user@$(hostname) 'chmod 600 ~/.credentials/wikihub/sa_*.json'
+  2. rclone OAuth 발급 (ADR-0035 — gws SA 폐기, rclone.conf 단일 인증 자료):
+       rclone config              # remote name 은 wikihub.yaml.vaults[*].options.rclone_remote_name 정합
+       chmod 0600 ~/.config/rclone/rclone.conf
   3. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
        <agent_invocation> "/wh:setup --enable"
 
@@ -1666,7 +1569,7 @@ main() {
     fi
 
     _step3_venv
-    _step4_gws
+    # ADR-0035: _step4_gws 폐기 (gws CLI 단독 폐기)
     _step45_rclone
     _step5_instance_dirs    # ADR-0031: yaml 미관여 (이름 변경 + cp 삭제)
     _step6_agent_skill

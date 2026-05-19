@@ -69,9 +69,9 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0011](0011-skill-namespace-prefix.md) | Agent skill namespace prefix (wh:) — **Superseded by ADR-0033** | Superseded | 2026-05-13 | `20260513_wikihub_schema_v1` |
 | [ADR-0012](0012-agent-invocation-abstraction.md) | Agent invocation 추상화 (yaml.agent.invocation + install.sh 매핑) | Accepted | 2026-05-13 | `20260513_wikihub_schema_v1` |
 | [ADR-0013](0013-entity-concept-extraction-policy.md) | entity·concept 추출 정책 (분류·임계·신뢰 경계) | Accepted | 2026-05-13 | `20260513_wikihub_schema_v1` |
-| [ADR-0014](0014-drive-access-mechanism-revisited.md) | Drive 접근 — gws CLI 채택 (ADR-0004 supersede) | Accepted | 2026-05-13 | `20260513_wikihub_schema_v1` |
-| [ADR-0015](0015-gws-pinned-version-and-install-channel.md) | gws pinned version + 설치 채널 — `0.22.5` lock, Rust target triple asset 이름, GitHub Releases binary + SHA256 (V8 결함 #3·#4a fix) | Accepted | 2026-05-14 / 2026-05-17 (V8 hand-check) | `20260514_install_runtime` |
-| [ADR-0017](0017-gws-stderr-error-mapping.md) | gws stderr → wikihub exit code 매핑 (scope 컬럼 — file vs vault) | **Proposed** (Step 3 V4 후 Accepted) | 2026-05-14 | `20260514_install_runtime` |
+| [ADR-0014](0014-drive-access-mechanism-revisited.md) | Drive 접근 — gws CLI 채택 (ADR-0004 supersede) — **Superseded by ADR-0035** | Superseded | 2026-05-13 | `20260513_wikihub_schema_v1` |
+| [ADR-0015](0015-gws-pinned-version-and-install-channel.md) | gws pinned version + 설치 채널 — `0.22.5` lock, Rust target triple asset 이름, GitHub Releases binary + SHA256 (V8 결함 #3·#4a fix) — **Superseded by ADR-0035** | Superseded | 2026-05-14 / 2026-05-17 (V8 hand-check) | `20260514_install_runtime` |
+| [ADR-0017](0017-gws-stderr-error-mapping.md) | gws stderr → wikihub exit code 매핑 (scope 컬럼 — file vs vault) — **Superseded by ADR-0035** (Accepted 도달 전 무효화) | Superseded | 2026-05-14 | `20260514_install_runtime` |
 | [ADR-0018](0018-install-script-single-model.md) | install.sh 단일 모델 (deploy.sh 미존재) | Accepted | 2026-05-14 | `20260514_install_runtime` |
 | [ADR-0019](0019-per-vault-systemd-unit-substitution.md) | per-vault systemd unit (file substitution + Python helper) | Accepted | 2026-05-14 | `20260514_install_runtime` |
 | [ADR-0020](0020-python-venv-location.md) | Python venv 위치 — `~/.local/share/wikihub/venv` (XDG) | Accepted | 2026-05-14 | `20260514_install_runtime` |
@@ -81,14 +81,15 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0024](0024-fatal-alert-contract.md) | fatal 알림 contract — last_failure.json + dedup + Hermes 이중 경로 (v9 본문 minor: `scope="mount"` 추가) | Accepted | 2026-05-14 / 2026-05-15 (v9 minor) | `20260514_install_runtime` |
 | [ADR-0025](0025-rclone-mount-adoption.md) | rclone mount 채택 — vault 자체 mount + vfs-cache full + GitHub Releases binary + SHA256SUMS verify + curl retry | Accepted | 2026-05-15 | `20260514_install_runtime` |
 | [ADR-0026](0026-vfs-refresh-policy.md) | vfs refresh 정책 — 사이클 시작 시 `vfs/refresh recursive=true` 1회 (K1) | Accepted | 2026-05-15 | `20260514_install_runtime` |
-| [ADR-0027](0027-rclone-gws-responsibility-split.md) | rclone vs gws 책임 분리 — Path C+ 정본화 (rclone = mount/다운로드/UX, gws = changes API). ADR-0014·0006 supersede 없음 | Accepted | 2026-05-15 | `20260514_install_runtime` |
+| [ADR-0027](0027-rclone-gws-responsibility-split.md) | rclone vs gws 책임 분리 — Path C+ 정본화 (rclone = mount/다운로드/UX, gws = changes API). ADR-0014·0006 supersede 없음 — **Superseded by ADR-0035** | Superseded | 2026-05-15 | `20260514_install_runtime` |
 | [ADR-0028](0028-uv-python-runtime.md) | uv 기반 Python runtime — GitHub Releases binary + SHA256, Python 3.12 pinned, `python3-venv` apt 의존 제거 (V8 결함 #1·#2·#5·#6 fix) | Accepted | 2026-05-17 | `20260514_install_runtime` |
-| [ADR-0029](0029-service-account-auth.md) | Service Account 기반 Drive 인증 (gws + rclone 둘 다 SA JSON key, Personal Google OK, vault 폴더 명시 공유) | Proposed | 2026-05-17 | `20260514_install_runtime` |
+| [ADR-0029](0029-service-account-auth.md) | Service Account 기반 Drive 인증 (gws + rclone 둘 다 SA JSON key, Personal Google OK, vault 폴더 명시 공유) — **Superseded by ADR-0035** (Personal Drive SA write 불가 실증) | Superseded | 2026-05-17 | `20260514_install_runtime` |
 | [ADR-0030](0030-update-workflow-orchestration.md) | install.sh dual-mode lifecycle (`_step2_update` git fetch + reset, `--force-fresh`/`--version` flag, systemd stop/start orchestration + rollback trap, log rotation) | Accepted | 2026-05-17 | `20260517_update_mode` |
 | [ADR-0031](0031-yaml-template-materialization.md) | wikihub.yaml template materialization — `/wh:setup` Step 0 단독 writer + 4-필드 patching + confirm drift fix + ruamel.yaml round-trip + Step 6 helper 통합 + §E schema version 정책 | Accepted | 2026-05-17 / 2026-05-18 (v2 + Step 4 통과) | `20260517_install_scope_reduction` |
 | [ADR-0032](0032-hermes-skill-registration-policy.md) | Hermes skill 등록 정책 — `external_dirs` + install-time materialized SKILL.md + marker comment + flock·backup·sha256 safety (4 sub-decision) | Accepted | 2026-05-18 | `20260518_hermes_adapter` |
 | [ADR-0033](0033-skill-prefix-hyphen-lock.md) | Skill namespace prefix lock — `wh-` (hyphen) — **Supersedes ADR-0011** | Accepted | 2026-05-18 | `20260518_hermes_adapter` |
 | [ADR-0034](0034-data-first-layout.md) | Data-first layout — `~/wikihub/` = 운영 자산 + `~/.local/share/wikihub/src/` = 시스템 코드 (XDG). env swap (WIKIHUB_HOME 의미 변경 + WIKIHUB_SRC 신규 + WIKIHUB_INSTANCE_ROOT 폐기) + migration helper + mv-only backup (4 sub-decision) | Accepted | 2026-05-19 | `20260519_dir_layout_refactor` |
+| [ADR-0035](0035-rclone-only-unified-oauth.md) | rclone 단독 + OAuth 단일 인증 — gws CLI 폐기 + SA 폐기. lsjson full snapshot + file_map(source_id 키) diff + false-delete 가드. **Supersedes ADR-0014/0015/0017/0027/0029** | Accepted | 2026-05-19 | `20260519_oauth_unify_rclone_only` |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

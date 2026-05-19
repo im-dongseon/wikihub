@@ -55,10 +55,13 @@ def test_extract_dispatch_keys_covered() -> None:
 
 
 def test_gws_export_mime_mapping() -> None:
-    # Google native MIME → export MIME (L1 정합)
-    assert GWS_EXPORT_MIME["application/vnd.google-apps.document"] == "text/markdown"
-    assert GWS_EXPORT_MIME["application/vnd.google-apps.spreadsheet"] == "text/csv"
-    assert GWS_EXPORT_MIME["application/vnd.google-apps.presentation"] == "text/plain"
+    # ADR-0027 Q1 / ADR-0035 정합 — Google native MIME → rclone mount export binary MIME (docx/xlsx/pptx)
+    assert GWS_EXPORT_MIME["application/vnd.google-apps.document"] \
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert GWS_EXPORT_MIME["application/vnd.google-apps.spreadsheet"] \
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert GWS_EXPORT_MIME["application/vnd.google-apps.presentation"] \
+        == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 @pytest.mark.skip(reason="python-pptx 등 binary extraction 은 실제 fixture + install 필요 — V8")

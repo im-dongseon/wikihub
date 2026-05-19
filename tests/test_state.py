@@ -34,33 +34,22 @@ def test_atomic_write_cleans_tmp_on_failure(tmp_path: Path) -> None:
     assert tmps == []
 
 
-def test_cursor_save_load(tmp_path: Path) -> None:
-    state.save_cursor(tmp_path, "TOKEN123", vault_id="gdrive", vault_type="gdrive_api")
-    obj = state.load_cursor(tmp_path)
-    assert obj["cursor"] == "TOKEN123"
-    assert obj["vault_id"] == "gdrive"
-    assert obj["cursor_updated_at"] is not None
-
-
-def test_cursor_initial_load_missing(tmp_path: Path) -> None:
-    obj = state.load_cursor(tmp_path)
-    assert obj["cursor"] == ""
-
-
-def test_has_cursor_empty_or_absent(tmp_path: Path) -> None:
-    # B2 정합: empty stub vs absent 동등 — 둘 다 False
-    assert state.has_cursor({"cursor": ""}) is False
-    assert state.has_cursor({"cursor": "   "}) is False
-    assert state.has_cursor({"cursor": "TOKEN"}) is True
-    assert state.has_cursor({}) is False
+# ADR-0035: cursor 함수 (initial_cursor/load_cursor/save_cursor/has_cursor) 폐기 — 관련 테스트 제거.
 
 
 def test_file_map_roundtrip(tmp_path: Path) -> None:
+    """ADR-0035: file_map primary key 가 source_id (Drive fileId)."""
     fm = state.initial_file_map("gdrive")
-    fm["files"]["a.md"] = {"source_id": "id1", "wiki_path": "wiki/sources/gdrive/a.md"}
+    fm["files"]["id1"] = {
+        "source_relpath": "a.md",
+        "source_mtime": "2026-05-19T00:00:00Z",
+        "wiki_path": "wiki/sources/gdrive/a.md",
+        "bytes": 100,
+        "last_synced_at": "2026-05-19T00:00:00Z",
+    }
     state.save_file_map(tmp_path, fm)
     loaded = state.load_file_map(tmp_path)
-    assert loaded["files"]["a.md"]["source_id"] == "id1"
+    assert loaded["files"]["id1"]["source_relpath"] == "a.md"
     assert loaded["updated_at"] is not None
 
 

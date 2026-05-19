@@ -1,10 +1,14 @@
 # ADR-0015: gws pinned version + 설치 채널
 
-- **Status**: Accepted
-- **Date**: 2026-05-14 (Proposed) / 2026-05-17 (Accepted — V8 hand-check 결과 lock)
+- **Status**: Superseded
+- **Date**: 2026-05-14 (Proposed) / 2026-05-17 (Accepted — V8 hand-check 결과 lock) / 2026-05-19 (Superseded by ADR-0035)
 - **Feature**: features/20260514_install_runtime
 - **Supersedes**: 없음
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0035 (gws CLI 폐기로 본 ADR 의 pin·설치 채널 결정 전체 무효화)
+
+## Note (2026-05-19, ADR-0035 supersede)
+
+ADR-0014 (gws CLI 채택) 자체가 ADR-0035 로 supersede 되어 본 ADR 의 pinned version + 설치 채널 결정도 무효화. install.sh 의 `_step5_gws_install` 폐기, `INSTALLED_VERSIONS.json` 의 `gws` 키 폐기, `operations.gws_min_version` yaml key 폐기. 본문은 역사적 맥락 보존을 위해 유지.
 
 ## Context
 

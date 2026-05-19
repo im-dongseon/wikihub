@@ -18,12 +18,12 @@ class VaultSyncRetryable(Exception):
 class VaultSyncFatal(Exception):
     """vault 전체 비복구 실패. 사람 개입 전까지 재시도 무의미.
 
-    예: OAuth 401 invalid_grant, gws auth/discovery 결함.
-    raise 시 sync 사이클은 *즉시 중단* — cursor advance 되지 않음.
+    예: rclone OAuth 401 invalid_grant, rclone.conf 파손/누락 (ADR-0035).
+    raise 시 sync 사이클은 *즉시 중단* — file_map 갱신 안 됨.
 
-    ``scope`` 필드 (ADR-0024 v9 + V<N> Phase 2 결함 #7 fix):
+    ``scope`` 필드 (ADR-0024):
     - "vault" (default) — sync.py · vault-fetch.py 의 일반 vault-level fatal.
-    - "mount" — mount.py 의 OAuth/SA error · mount permanently failed.
+    - "mount" — mount.py 의 OAuth error · mount permanently failed.
     last_failure.json 의 ``scope`` 필드를 통해 ops-alert 가 fallback diagnostic
     경로 (mount 시 journalctl tail) 를 결정하므로 raise 사이트의 scope 정합 필수.
     """
