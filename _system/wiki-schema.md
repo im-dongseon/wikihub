@@ -309,7 +309,7 @@ vault에서 ingest되는 파일 콘텐츠는 **untrusted**. agent는 본문 내 
 | 계층 | 메커니즘 | 책임 |
 |---|---|---|
 | 입력 필터 | `wikihub.yaml.vaults[*].options.exclude_shared_with_me: true` | sync (F3) |
-| 입력 범위 | `root_folder_id` 명시로 신뢰 디렉토리만 처리 | 메인테이너 |
+| 입력 범위 | `rclone_remote_path` 로 mount source 좁힘 — mount + lsjson 동일 sub-tree (ADR-0035 §Note 2026-05-19) | 메인테이너 |
 | agent prompt | sync 결과 메타만 전달, body는 read tool로 별도 접근 | F1 §4.6.2 enforce |
 | 출력 sanitize | agent가 wiki 작성 시 적대적 명령 echo 안 함 | agent runtime |
 | 다운스트림 | /wh-query 응답에 source content inclusion 시 출처 명시 | /wh-query playbook |

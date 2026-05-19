@@ -149,19 +149,22 @@ def classify_rclone_error(returncode: int, stderr: str, *, vault_id: str) -> Exc
 def lsjson(
     remote: str,
     *,
+    path: str = "",
     recursive: bool = True,
     timeout_sec: int = 300,
     vault_id: str | None = None,
     binary: str = "rclone",
     env_extra: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """``rclone lsjson <remote>:`` 호출 → listing list 반환.
+    """``rclone lsjson <remote>:<path>`` 호출 → listing list 반환.
 
     각 항목 schema (rclone v1.69.1 기준):
         ``{Path, Name, Size, MimeType, ModTime, IsDir, ID}``
 
     Args:
         remote: rclone remote 이름 (예: ``"gdrive"``). 함수가 ``:`` 자동 부착.
+        path: remote 내 sub-path (예: ``"wikihub"``). 빈 문자열이면 remote 루트 (``<remote>:``).
+            mount source path 와 동일해야 mount/lsjson scope 정합 (ADR-0035 §Note 2026-05-19).
         recursive: ``--recursive`` 플래그 (default True).
         timeout_sec: subprocess timeout.
         vault_id: 에러 매핑 시 VaultSync* 예외에 채울 vault_id. None 이면 ``remote`` 사용.
@@ -172,7 +175,8 @@ def lsjson(
         VaultSyncFatal · VaultSyncRetryable · RcloneBinaryMissing.
     """
     vid = vault_id or remote
-    args = ["lsjson", f"{remote}:"]
+    spec = f"{remote}:{path}" if path else f"{remote}:"
+    args = ["lsjson", spec]
     if recursive:
         args.append("--recursive")
 
@@ -208,8 +212,8 @@ def lsjson(
             reason=f"rclone lsjson 출력이 list 아님: type={type(data).__name__}",
             remediation="rclone v1.65+ 권장 — schema 호환성 확인.",
         )
-    log.info("rclone lsjson: remote=%s items=%d duration_ms=%d",
-             remote, len(data), result.duration_ms)
+    log.info("rclone lsjson: remote=%s path=%s items=%d duration_ms=%d",
+             remote, path or "", len(data), result.duration_ms)
     return data
 
 

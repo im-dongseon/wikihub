@@ -290,3 +290,32 @@ def test_sync_first_run_all_listing_treated_as_created(
     # file_map 영속화 — source_id 키
     fm = json.loads((state_dir / "file_map.json").read_text())
     assert "id_a" in fm["files"]
+
+
+def test_sync_passes_rclone_remote_path_to_lsjson(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0035 §Note 2026-05-19 — yaml.options.rclone_remote_path 가 lsjson 의 path 인자로 전달."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+
+    captured: dict[str, Any] = {}
+
+    def _spy_lsjson(remote: str, *, path: str = "", **kw: Any) -> list[dict[str, Any]]:
+        captured["remote"] = remote
+        captured["path"] = path
+        return []
+
+    monkeypatch.setattr(sync, "lsjson", _spy_lsjson)
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive", "rclone_remote_path": "wikihub"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+    assert captured == {"remote": "gdrive", "path": "wikihub"}
+    assert result.has_changes is False

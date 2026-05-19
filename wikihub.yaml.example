@@ -20,14 +20,15 @@ vaults:
     sync_interval_sec: 600     # 10분
     local_path: ~/wikihub/vault/gdrive             # rclone mount 가 마운트하는 path (= mount_path 정합, ADR-0025)
     options:
-      # ADR-0035: credentials_path 폐기. rclone.conf 가 단일 인증 자료 (~/.config/rclone/rclone.conf).
-      root_folder_id: ""              # Drive 의 vault root folder ID. OAuth user 의 owned 파일 전체 보이므로 trust boundary 좁히려면 명시 권장 (v0.1.0 은 hook only — mount listing 자체가 mount root 단위)
+      # ADR-0035: credentials_path / root_folder_id 폐기. rclone.conf 가 단일 인증 자료 (~/.config/rclone/rclone.conf).
+      # mount root 자체가 trust boundary — sub-path (rclone_remote_path) 로 scope 좁힘.
       exclude_shared_with_me: true    # sharedWithMe 파일 제외 (trust boundary). rclone lsjson default 가 정합
       max_file_size_mb: 50            # 큰 파일 skip threshold
       false_delete_threshold: 0.3     # ADR-0035 §ζ2 — 한 사이클의 삭제 비율 임계치. 초과 시 Retryable (mount/auth 부분 장애 가드)
       # ADR-0025·0026·0035 — rclone mount + lsjson:
       mount_path: ~/wikihub/vault/gdrive            # local_path 와 동일 — rclone mount 가 마운트하는 path
-      rclone_remote_name: gdrive                    # ~/.config/rclone/rclone.conf 의 remote 이름 + lsjson 대상 (setup.md Step 5.5 정합)
+      rclone_remote_name: gdrive                    # ~/.config/rclone/rclone.conf 의 remote 이름 (rclone.conf section 명, OAuth provider 식별)
+      rclone_remote_path: wikihub                   # remote 내 sub-path (빈 문자열이면 remote 루트). mount + lsjson 공통 scope. mount 시 부재면 자동 mkdir
       rclone_rc_port: 5572                          # per-vault rclone rc port. 다중 vault 시 +1 순번
 
 operations:

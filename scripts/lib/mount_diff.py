@@ -10,9 +10,9 @@ diff 4 분류:
 - ``deleted``  — file_map 의 ID 가 listing 에 없음
 
 trust boundary filter:
-- ``root_folder_id`` — lsjson 호출 자체가 ``<remote>:`` 단위라 사후 filter.
-  rclone v1.69.1 의 lsjson 결과는 mount 의 root 부터 시작 — Drive 의 폴더 ID 기반
-  filter 는 v0.2.x deferred. v0.1.0 은 ``exclude_shared_with_me`` 만 적용.
+- mount source path 자체가 boundary (ADR-0035 §Note 2026-05-19) — yaml.options.rclone_remote_path
+  로 좁힘. lsjson 호출이 ``<remote>:<path>`` 단위로 같은 scope 조회.
+- v0.1.0 추가 filter: ``exclude_shared_with_me`` 만 적용. (SA 시절 root_folder_id 는 폐기.)
 """
 from __future__ import annotations
 

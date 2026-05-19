@@ -13,7 +13,8 @@ Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=RCLONE_CONFIG={rclone_config_path}
 ExecStartPre=-/bin/fusermount3 -uz {wikihub_home}/vault/%i
 ExecStartPre=/bin/mkdir -p {wikihub_home}/vault/%i
-ExecStart={rclone_bin} mount {remote_name_for_%i}: {wikihub_home}/vault/%i \
+ExecStartPre=-{rclone_bin} mkdir {remote_name_for_%i}:{remote_path_for_%i}
+ExecStart={rclone_bin} mount {remote_name_for_%i}:{remote_path_for_%i} {wikihub_home}/vault/%i \
   --vfs-cache-mode minimal \
   --vfs-cache-max-size {vfs_cache_max_size} \
   --drive-export-formats docx,xlsx,pptx,md \
@@ -32,6 +33,9 @@ SyslogIdentifier=wikihub-mount-%i
 #   결함 차단 (V<N> Phase 2 결함 #3, 2026-05-17). `-` prefix 로 exit code 무시 (mount 안 됐을
 #   땐 자연스럽게 no-op). `-z` lazy unmount — busy mount (열린 파일 / cwd 안에 있는 process)
 #   에서도 detach 강제, restart loop 재발 회피 (R16-H5 V<N> R16 SRE 리뷰, 2026-05-17).
+# ExecStartPre= -rclone mkdir — remote_path 부재 시 자동 생성 (멱등). `-` prefix: 이미 존재 시
+#   exit 비0 무시. remote_path 가 빈 문자열이면 `rclone mkdir gdrive:` (no-op).
+#   ADR-0035 §Note 2026-05-19 — mount source path 사전 보장 책임은 systemd unit.
 # Type=simple — daemon 상시 살아있음. process 시작 시점이 active (FUSE 준비 완료 시점 아님 — assert_mount_alive 가 보강).
 # Restart=always + StartLimitBurst=5/300s — 5회 fail/5min 초과 시 permanently failed → OnFailure=ops-alert.service.
 # --rc-addr — vault@.service 가 mount.vfs_refresh 호출. per-vault port (yaml.vaults[*].options.rclone_rc_port).

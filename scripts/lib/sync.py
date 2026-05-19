@@ -428,15 +428,16 @@ def sync(
     vault_id = vault_cfg.id
     options = dict(vault_cfg.options)
     remote = str(options.get("rclone_remote_name") or vault_id)
+    remote_path = str(options.get("rclone_remote_path") or "")
     exclude_swm = bool(options.get("exclude_shared_with_me", True))
     max_file_size_mb = options.get("max_file_size_mb")
     false_delete_threshold = float(options.get("false_delete_threshold", 0.3))
 
-    log.info("sync start: vault=%s remote=%s exclude_swm=%s",
-             vault_id, remote, exclude_swm)
+    log.info("sync start: vault=%s remote=%s path=%s exclude_swm=%s",
+             vault_id, remote, remote_path or "", exclude_swm)
 
-    # 1. lsjson 호출
-    listing = lsjson(remote, recursive=True, vault_id=vault_id)
+    # 1. lsjson 호출 — mount source 와 동일 scope (ADR-0035 §Note 2026-05-19).
+    listing = lsjson(remote, path=remote_path, recursive=True, vault_id=vault_id)
 
     # 2. file_map 로드 + retry 로드
     file_map = load_file_map(state_dir)

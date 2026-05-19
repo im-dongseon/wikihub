@@ -5,7 +5,7 @@ Description=WikiHub lint timer
 # OnUnitInactiveSec={lint_interval_hours}h: default 24h (wikihub.yaml.operations.lint_interval_hours)
 # !! systemd unit syntax — trailing inline comment 미지원 (V<N> 결함 #5, 2026-05-17)
 [Timer]
-Unit=lint.service
+Unit=wikihub-lint.service
 OnBootSec=5min
 OnUnitInactiveSec={lint_interval_hours}h
 Persistent=true

@@ -5,8 +5,3 @@ platforms: [linux]
 metadata:
   tags: [wikihub, graph, knowledge-graph]
   category: knowledge-management
-  config:
-    wikihub_home_required: true
-required_environment_variables:
-  - WIKIHUB_HOME
-  - WIKIHUB_INSTANCE_ROOT

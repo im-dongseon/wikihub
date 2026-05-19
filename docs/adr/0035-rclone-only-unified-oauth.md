@@ -273,3 +273,26 @@ journalctl --user -u wikihub-vault@gdrive.service -f
 - **본 ADR 의 분석 정본**: [features/20260519_oauth_unify_rclone_only/analysis_and_design.md](../../features/20260519_oauth_unify_rclone_only/analysis_and_design.md)
 - **계기 백로그**: [features/backlog.md](../../features/backlog.md) §D·§I
 - **2026-05-19 OCI 실증 결과**: 동 backlog.md 의 §D 근본 원인 (SA storageQuotaExceeded) + 본 feature 의 analysis_and_design.md §2.4 (lsjson ID/MimeType 노출)
+
+## Note (2026-05-19, feature `rclone_remote_path`) — schema 보강 + root_folder_id 폐기
+
+본 ADR Accepted 직후 OCI 실증에서 다음 결함 surface:
+
+1. `rclone_remote_name: gdrive` 단일 필드로는 mount/lsjson 의 sub-path scope 표현 불가. mount 는 systemd unit 의 `rclone mount <remote>:` 가 Drive 루트 전체, lsjson 도 `<remote>:` 단위 — 즉 mount 와 lsjson 의 scope 강제 일치는 OK 이지만, 사용자가 `gdrive:wikihub` 등 sub-path mount 로 trust boundary 좁히려 할 때 schema 가 가로막음.
+2. SA 시절 trust boundary narrow 용 `root_folder_id` 필드가 yaml.example 에 dead config (mount_diff.py 주석 명시) 로 잔존.
+
+### 결정 보강
+
+- `wikihub.yaml.vaults[*].options.rclone_remote_path` (string, default `""`) 신설 — mount + lsjson 의 공통 sub-path scope. 빈 문자열이면 remote 루트.
+- `root_folder_id` 폐기 (yaml.example 제거). v0.1.0 미배포 시점이라 마이그레이션 0.
+- mount template `ExecStartPre=-{rclone_bin} mkdir {remote}:{path}` 추가 — source path 부재 시 멱등 자동 생성.
+- `scripts/lib/rclone.py:lsjson(path: str = "")` 인자 추가, `scripts/lib/sync.py` 가 yaml 의 `rclone_remote_path` 전달.
+
+§Decision 본문 (β2 lsjson + ε2 rclone.conf only) 의미는 그대로 — `<remote>:<path>` spec 형태로 호출 범위만 명시화. trust boundary 도 mount source path 자체 (사용자가 yaml 로 통제) 가 정본.
+
+**연계 영향**:
+- ADR-0027 §Decision L65 `mount_path`/`rclone_remote_name`/`rclone_rc_port` catalog 에 `rclone_remote_path` 가 추가됐으나, ADR-0027 본문은 supersede 상태라 미수정 — historical 컨텍스트 보존. catalog 정본은 본 ADR.
+- ADR-0031 §Decision B catalog (derived 4필드: instance.root, vaults[*].local_path, rclone_remote_name, mount_path) 영향 없음 — `rclone_remote_path` 는 maintainer 책임 필드 (derived 아님).
+
+본 변경의 분석 정본: [features/archive/20260519_rclone_remote_path/analysis_and_design.md](../../features/archive/20260519_rclone_remote_path/analysis_and_design.md)
+

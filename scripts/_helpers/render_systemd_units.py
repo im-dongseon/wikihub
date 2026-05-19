@@ -222,6 +222,7 @@ def _cross_vault_subs(vault: dict) -> dict[str, str]:
     opts = vault.get("options") or {}
     return {
         f"remote_name_for_{vid}": str(opts.get("rclone_remote_name", vid)),
+        f"remote_path_for_{vid}": str(opts.get("rclone_remote_path") or ""),
         f"rc_port_for_{vid}": str(opts.get("rclone_rc_port", 5572)),
     }
 
