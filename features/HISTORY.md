@@ -61,4 +61,20 @@
 - **후속 cleanup (2026-05-19, 같은 release window 흡수)**: 3 playbook 의 graphify 사용 패턴 검토 (서브에이전트 2건 design review 통합) 후 3건 채택 — (a) `.graphifyignore` 의 `**/log.md` 추가 (vault 별 ingest log 의 entity-noise 차단), (b) `ingest.md` 산출물 표에 `graphify-out/` 미관여 명시 (책임 경계 1줄), (c) `lint.md` Step 9 의 graphify 결과 self-check (`N/M < 0.5` ratio 가 Pass 3 silent partial failure 의심 가드, ops-alert 트리거). #2 (lint churn §Note) + #4 (query Leiden v0.2.x §Note) 는 ADR-0036 §D4 / context.md echo 위험으로 drop (Karpathy §2 Simplicity First 정합). 별도 feature ID 미발급 — design review evidence 는 features/archive/20260519_graphify_usage_review/ 보존.
 - **추가 cleanup — systemd timer `OnActiveSec` (같은 release window 흡수, ADR-0036 무관)**: Hermes OCI 운영 중 surface 한 결함 — `install.sh --update` 후 `daemon-reload` + timer 재시작 시 `next_elapse=0` 으로 영원히 대기 → 운영자/Hermes 가 매번 수동 trigger 필요했음. 근본 원인: timer template (vault@ + lint) 가 `OnBootSec` (boot 기준, system uptime 길면 이미 과거) + `OnUnitInactiveSec` (service prior run 없으면 기준점 부재) 두 조건만 보유 → timer 재시작 on running system 시나리오 미커버. `Persistent=true` 는 `OnCalendar=` 전용이라 본 unit 들에서 no-op (dead config). Fix — 두 template 에 `OnActiveSec=Ns` 추가 (timer active 기준 monotonic) + `Persistent=true` 제거. ADR 무신설 (ADR-0030 의 install.sh `--update` auto-recovery 의도 정합 보강). systemd render dry-run — vault@/lint 모두 `OnActiveSec` 정확 출력 + `Persistent=` 제거 확인.
 - **추가 cleanup — install.sh `_migrate_agent_schema` in-place `--yolo` 삽입 (v0.1.3 self-fix)**: v0.1.3 첫 OCI 배포 직후 Hermes 가 surface — render 후 unit ExecStart 에 `--yolo` 미반영. 근본 원인: migration 의 trigger 조건이 `{skill}` placeholder **부재** 시만 overwrite — v0.1.0~v0.1.2 시점에 이미 F5 form 으로 작성된 yaml (`oneshot_args: [chat, --skills, {skill}, --quiet, --query]`) 은 `{skill}` 존재라 migration skip → 기존 `--yolo` 없는 형태 그대로 render. Fix — `_migrate_agent_schema` detection 분기에 "F5 form 인데 `--yolo` 누락" 케이스 추가 + PYEOF block 에 in-place 삽입 로직 (`--query` 앞에 `--yolo` insert, 운영자 override 의 다른 인자 보존). v0.1.0~v0.1.2 → v0.1.3+ upgrade path 자동 정합화. `Persistent=true` 제거 (위 OnActiveSec 항목) 와 함께 v0.1.3 amend 반영.
+
+---
+
+## [2026-05-20] install_robustness (v0.1.4)
+
+- **목적**: v0.1.3 의 두 fix (in-place `--yolo` migration + `OnActiveSec` 추가) 가 default 호출 경로에서 무력화되는 결함 closed — Hermes OCI 운영 중 surface.
+  1. `_migrate_agent_schema` 의 prompt 가 `curl | bash` (ADR-0023 default invocation) 의 pipe stdin 에서 즉시 EOF → 자동 N → migration 거부 → yaml 의 `--yolo` 미삽입 → 매 install.sh 호출마다 systemd unit 의 `--yolo` 누락.
+  2. `_step8_systemd_render` 가 daemon-reload 만 하고 timer restart 안 함 → fresh / `--force-fresh` 경로에서 이미 enable+start 상태인 timer 가 새 template 적용 안 됨 → OnActiveSec=5min 도 stale "active since" 기준이라 이미 과거 → lint NEXT="-" 영원히 대기.
+- **로직**: install.sh 2곳 fix.
+  - `install.sh:745` (`_migrate_agent_schema`) — `[[ -t 0 ]] && [[ -z "${WIKIHUB_NONINTERACTIVE:-}" ]]` 조건 추가. stdin 이 tty 가 아니면 (pipe / cron / Hermes subprocess) 자동 진행. backup (`.wikihub-bak.<ts>`) 생성은 그대로 보존.
+  - `install.sh:1542` (`_step8_systemd_render`) — daemon-reload 직후 `systemctl --user try-restart 'wikihub-mount@*.service' 'wikihub-vault@*.timer' wikihub-lint.timer` 호출. `try-restart` 는 inactive unit 에 no-op 이라 update path 의 stop/start 시퀀스와 충돌 없음. 이미 running 인 timer 만 restart → "active since" fresh → OnActiveSec=5min 정상 trigger.
+- **생성 ADR**: 없음 (ADR-0030 `--update` auto-recovery + ADR-0023 install distribution 의 default invocation 정합 보강).
+- **트레이드오프**: 자동 migration 진행이 운영자 의도와 다를 risk — 보수적 transformation (schema lift + flag insert) + backup 생성으로 mitigation. `WIKIHUB_NONINTERACTIVE` env 미설정 + tty 검출이 명시 거부 경로.
+- **결론**: 2 곳 변경 (install.sh) + VERSION 0.1.3 → 0.1.4. pytest 57 pass 유지. v0.1.3 immutability 회복 — force-push 1회로 종료, 본 변경은 새 commit + v0.1.4 tag 로 정합.
+- **참조**: features/archive/20260519_install_robustness/
+
 - **참조**: features/archive/20260519_graphify_integration/ + features/archive/20260519_graphify_usage_review/

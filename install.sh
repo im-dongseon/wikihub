@@ -745,13 +745,16 @@ _migrate_agent_schema() {
 
     [[ "$needs_migrate" == 0 ]] && return 0
 
-    if [[ -z "${WIKIHUB_NONINTERACTIVE:-}" ]]; then
+    # ADR-0023 default invocation `curl | bash` 은 stdin=pipe → `read -r` 즉시 EOF → 무조건 N.
+    # tty 가 있을 때만 prompt, 아니면 자동 진행 (v0.1.4, 2026-05-19).
+    # WIKIHUB_NONINTERACTIVE env 도 보존 — 운영자 명시 override 경로.
+    if [[ -t 0 ]] && [[ -z "${WIKIHUB_NONINTERACTIVE:-}" ]]; then
         echo "F5 migration: wikihub.yaml 의 agent.skill_prefix·oneshot_args 갱신 필요. 진행? [y/N]"
         read -r reply
         [[ "${reply,,}" == "y" || "${reply,,}" == "yes" ]] \
             || { warn "schema migration 거부 — 운영자가 직접 갱신 후 install.sh 재호출 권장"; return 0; }
     else
-        info "WIKIHUB_NONINTERACTIVE=1 → schema migration 자동 진행"
+        info "noninteractive (stdin 미-tty 또는 WIKIHUB_NONINTERACTIVE) → schema migration 자동 진행"
     fi
 
     # backup
@@ -1540,7 +1543,13 @@ _step8_systemd_render() {
         --render --out "$HOME/.config/systemd/user/" \
         || { err "render_systemd_units.py 실패"; return 2; }
     systemctl --user daemon-reload
-    ok "Step 8 systemd render + daemon-reload 완료"
+    # ADR-0030 §Note (v0.1.4, 2026-05-20) — daemon-reload 는 active unit 의 "active since" 미갱신.
+    # fresh / --force-fresh 경로에서 이미 enable+start 상태인 timer 의 새 template (OnActiveSec 등)
+    # 이 무력화되는 결함 closure. `try-restart` 는 inactive unit 에 no-op — update path 의
+    # stop/start 순서와 충돌 없음.
+    systemctl --user try-restart 'wikihub-mount@*.service' \
+        'wikihub-vault@*.timer' wikihub-lint.timer 2>/dev/null || true
+    ok "Step 8 systemd render + daemon-reload + try-restart 완료"
 }
 
 # best-effort hermes /wh-setup — F5 정합 (chat --skills --quiet --query) + update path 만
