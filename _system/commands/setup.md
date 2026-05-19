@@ -94,7 +94,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 위 derived 필드 외 **모든 yaml 필드**는 maintainer-controlled — Step 0 절대 미관여. 명시 예시 (ADR-0035 정합):
 - `version`, `instance.timezone`
 - `vaults[*]`: `id`·`enabled`·`type`·`sync_interval_sec`·`options.exclude_shared_with_me`·`options.max_file_size_mb`·`options.false_delete_threshold`·`options.mount_path`·`options.rclone_remote_name`·`options.rclone_remote_path`·`options.rclone_rc_port`
-- `operations`: `lint_interval_hours`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`
+- `operations`: `lint_interval_hours`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`·`graphify_min_version`·`graphify_max_version`·`graphify_api_key_env_name`
 - `agent.*` 전체
 
 특히 `mount_path` 는 Path C+ default 패턴에선 `local_path` 와 동일하지만, advanced 운영자가 bind-mount / ramdisk / multi-vault layout 분리로 명시 분리 가능 (HIGH-A1 design review). Step 1 schema 검증의 soft warn 만 발생, Step 0 미관여.
@@ -106,7 +106,9 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 - **wikihub.yaml 스키마**: `version == 1`, `instance.root` **(없으면 mkdir -p — 운영자가 yaml의 `instance.root`를 install.sh 기본값 외로 편집한 경우 자동 생성, 이후 쓰기 권한 검증)**, 각 `vaults[*]`의 `id` 형식(`^[a-z][a-z0-9_]*$`)·`type`·`enabled`·`sync_interval_sec ≥ 60`·`local_path` (없으면 mkdir + 쓰기 권한 검증), `operations.lint_interval_hours ≥ 1`, `agent.binary` 실행 가능 (`agent.type`별 ADR-0012 매핑 정합). **`operations.disk.*` 스키마는 F4 산출물(`wikihub.yaml.example`)에서 정의됨 — F4 완료 전까지 본 항목 검증 생략 가능 (L1)**
   - **CRIT-R10-2**: `instance.root` 디렉토리 ensure 가 본 Step의 명시적 책임. 미존재 시 unit template의 `WorkingDirectory={instance_root}`가 `203/CHDIR`로 즉시 fail → OnFailure → ops-alert 매 사이클 발화. **추가 안전망**으로 unit template `ExecStartPre=/bin/mkdir -p {instance_root}` 보유 (정상 운영에서는 redundant, yaml 편집 직후 reboot 등 race window 방어).
 - **rclone.conf 검증** (enabled gdrive_api vault만, ADR-0035): `~/.config/rclone/rclone.conf` 파일 존재 + 권한 0600 + `[<rclone_remote_name>]` 섹션 등록. 추가로 light call `rclone about <remote>:` 로 OAuth 유효성 검증. 401/Forbidden 시 보고 + 해당 vault 제외 (해당 vault unit 생성 skip)
+- **graphify env file 검증** (ADR-0036): `~/.config/wikihub/env` 파일 존재 (install.sh `_step5_instance_dirs` 가 보장) + 권한 0600 + `<operations.graphify_api_key_env_name>` (default `ANTHROPIC_API_KEY`) 키 존재. **값 채워졌는지는 검증 안 함** — 운영자 책임. 빈 값 / 파일 부재 시 보고 (warn) + 진행 — wh-lint Step 9 의 graphify chain 만 fail, lint 본체는 정상 동작.
 - **wiki/ 디렉토리**: 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` + 각 vault별 `sources/{vault_id}/` 존재 (없으면 생성)
+- **wiki/.graphifyignore** (ADR-0036 §D3): 부재 시 default template 배치 — `_system/templates/wiki/.graphifyignore` 를 `cp -n` 으로 복사 (`-n`: 존재 시 미덮어쓰기, idempotent). default 내용은 `_lint/`, `_state/` 제외 (gitignore 문법). 메타 디렉토리가 graphify 그래프의 noise 노드로 포함되는 것 차단. 운영자가 vault 별 추가 패턴 직접 편집 가능.
 - **_state/ 디렉토리**: 각 enabled vault의 `_state/{vault_id}/` + 초기 state 파일 (없을 때만 — ADR-0007 all JSON, ADR-0035 cursor 폐기)
   - **초기 파일 형식**:
     - `file_map.json` → `{"vault_id": "<id>", "updated_at": null, "files": {}}` (ADR-0035: primary key 는 source_id)

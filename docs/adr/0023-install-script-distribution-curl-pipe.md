@@ -180,3 +180,14 @@ ADR-0034 의 data-first layout invert 에 따른 본 ADR §Decision 갱신:
 본 변경 후 `--force-fresh` 가 운영 자산 (`$WIKIHUB_HOME`) wipe 절대 안 함. 별도 backup 불요 — 운영 자산은 wipe scope 외.
 
 Status 변경 없음. self-replace + wipe path + safety guard 본문 갱신.
+
+## Note (2026-05-19, feature `graphify_integration`) — graphify CLI 설치 책임 추가
+
+본 ADR §Decision 의 "install.sh 가 외부 binary 설치 + supply chain 검증 (SHA256)" 책임 본문 그대로. 본 §Note 는 ADR-0036 §D1 의 graphify CLI 설치 layer 분리를 명시:
+
+- **rclone**: GitHub Releases 의 binary + SHA256SUMS verify (본 ADR §Decision 정합) — `_install_rclone`.
+- **graphify (graphifyy)**: PyPI 패키지 + pip hash-based install — `_install_graphify` (신규, ADR-0036). pip 의 PEP 658 hashes + 운영자 venv 격리에 의존.
+
+graphify 의 hash pin enforce (rclone SHA256 패턴 차용) 는 v0.2.x 검토 트리거 — ADR-0036 §Consequences 재검토 트리거 정합.
+
+§Decision 본문 미수정 — supply chain 격리 layer 가 binary vs PyPI 둘로 분기.

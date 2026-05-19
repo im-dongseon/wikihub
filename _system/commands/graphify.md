@@ -15,9 +15,10 @@
 
 ## 사전 조건
 
-- `graphify` CLI 실행 가능 (install.sh가 Python venv에 설치)
+- `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, 2 y; ADR-0036)
 - `wiki/` 디렉토리 존재 (페이지 0개여도 OK — 빈 그래프 생성)
 - `instance.root`/`graphify-out/` 쓰기 권한
+- `~/.config/wikihub/env` 의 LLM API key 채워짐 — Pass 3 (Claude/OpenAI subagent semantic extraction) 가 호출 (ADR-0036). default env var: `ANTHROPIC_API_KEY` (yaml `operations.graphify_api_key_env_name` 으로 override)
 
 ## 절차
 
@@ -28,26 +29,29 @@ command -v graphify >/dev/null
 ```
 
 - 없음 → "graphify 미설치 — install.sh 재실행 안내" + exit 2 (Fatal, ops-alert)
-  - 참고: graphify PyPI 패키지명 확정·release 상태는 F4 install.sh 구현 시점에 확인 (현재 잠정). install.sh가 venv에 pinned 버전 설치 가정
+  - PyPI 패키지: `graphifyy` (2 y; ADR-0036). CLI 명령: `graphify`. install.sh `_install_graphify` 가 venv 에 설치.
 - 있음 → 버전 확인:
   ```bash
   graphify --version
   ```
-  버전이 `MIN_GRAPHIFY_VERSION` 미만 (현 잠정 — F4가 install.sh의 pinned 버전과 일치하도록 본 값 확정): stderr 경고 + 진행. GRAPH_REPORT.md 없으면 wiki/index.md 폴백 (ADR-0005)
+  버전이 `operations.graphify_min_version` (default `0.8.0`, ADR-0036; v0.1.0 documentation only — 실 enforce 는 v0.2.x) 미만: stderr 경고 + 진행. GRAPH_REPORT.md 없으면 wiki/index.md 폴백 (ADR-0005)
 
 ### Step 2. 빌드 모드 결정
 
-- `--rebuild` 플래그 있음 → 전체 재빌드 (graph.json 기존 파일 무시)
-- `--rebuild` 없음 + `graphify-out/graph.json` 존재 → **증분 빌드**:
+- `--rebuild` 플래그 있음 → 전체 재빌드 (graph.json 기존 파일 무시):
   ```bash
-  graphify update /opt/wikihub/wiki
+  graphify "$WIKIHUB_HOME/wiki"
+  ```
+- `--rebuild` 없음 + `graphify-out/graph.json` 존재 → **증분 빌드** (`--update` 플래그):
+  ```bash
+  graphify "$WIKIHUB_HOME/wiki" --update
   ```
 - `--rebuild` 없음 + graph.json 부재 → **최초 빌드**:
   ```bash
-  graphify /opt/wikihub/wiki
+  graphify "$WIKIHUB_HOME/wiki"
   ```
 
-> wiki/ 경로는 `instance.root`/wiki 기준. 메타 디렉토리(`wiki/_lint/`)는 graphify가 underscore-prefix 디렉토리를 자동 제외한다는 가정. 미제외 시 noise 노드 발생 → F4에서 `.graphifyignore` 같은 제외 설정 검토
+> wiki/ 경로는 `instance.root`/wiki 기준 (`$WIKIHUB_HOME/wiki`, ADR-0034). 메타 디렉토리 제외는 `wiki/.graphifyignore` 파일이 책임 (gitignore 문법; ADR-0036 §D3) — install.sh 또는 wh-setup 가 default template 배치 (`_lint/`, `_state/` 제외). 운영자가 vault 별 추가 패턴 직접 편집 가능.
 
 ### Step 3. 결과 검증
 
@@ -80,9 +84,11 @@ command -v graphify >/dev/null
 
 ## 멱등성
 
-- 같은 wiki 상태에 대해 N회 빌드 → 동일 graph.json (graphify가 deterministic 가정)
-- 증분 빌드는 stale graph.json도 안전히 갱신
-- `--rebuild`는 항상 전체 재계산 = always 정합
+- 같은 wiki 상태에 대해 N회 빌드 → graph.json **structural** 동등.
+  - Pass 1 (Tree-sitter code analysis) deterministic — 같은 입력 → 같은 syntax tree.
+  - Pass 3 (LLM semantic extraction) **non-deterministic** (temperature / sampling, ADR-0036 §D4). graphify 내부 cache (graph.json 보존) 가 증분 단계에서 unchanged 노드는 보존 → cycle 간 churn 부분 완화. 노드 메타데이터의 minor drift 는 operational normal (panic 아님).
+- 증분 빌드는 stale graph.json도 안전히 갱신.
+- `--rebuild`는 항상 전체 재계산 = always 정합 (Pass 3 churn 포함).
 
 ## 자동 호출 흐름 (lint와 통합)
 
@@ -102,3 +108,4 @@ command -v graphify >/dev/null
 - ADR-0005 wiki/index.md vs graphify 관계 (graphify는 1차, index는 폴백)
 - ADR-0006 unified orchestration (본 명령도 lint 사이클의 일부로 자동 호출)
 - ADR-0008 lint 권한 — graphify는 비파괴 (graphify-out만 만지므로 자동 OK)
+- ADR-0036 graphify CLI 통합 — PyPI 패키지 `graphifyy` + `~/.config/wikihub/env` API key + Pass 3 non-deterministic 가정 + `.graphifyignore` 정책 + 운영 비용 모델

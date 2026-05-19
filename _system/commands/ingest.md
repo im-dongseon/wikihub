@@ -192,6 +192,7 @@ Step 5까지 무에러 완료 시:
 | `wiki/sources/<vault_id>/log.md` | agent | append |
 | `wiki/index.md` | **본 명령은 수정 안 함** (ADR-0005 — `/wh-lint` 책임) | — |
 | `wiki/analyses/` | **본 명령은 수정 안 함** (`/wh-query` 책임) | — |
+| `graphify-out/` | **본 명령은 수정 안 함** (graphify rebuild = `/wh-lint` Step 9 chain, ADR-0036 §D6) | — |
 
 ## 실패 처리
 

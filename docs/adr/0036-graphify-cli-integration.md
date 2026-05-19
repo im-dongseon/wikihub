@@ -1,0 +1,140 @@
+# ADR-0036: graphify CLI 통합 — PyPI 의존성 + API key 자료 layer + non-deterministic Pass 3 가정
+
+- **Status**: Accepted
+- **Date**: 2026-05-19
+- **Feature**: features/archive/20260519_graphify_integration
+- **Supersedes**: 없음
+- **Superseded by**: 없음
+
+## Context
+
+`_system/commands/graphify.md` (F2 시점 작성) 은 `graphify` 라는 CLI 가 wikihub 의 wiki 지식 그래프를 빌드한다고 가정 + L31/L36/L50/L83 의 4항목을 "F4 install.sh 구현 시점에 확정" 으로 잠정 표시. 2026-05-19 검토 — graphify.net 의 graphify CLI (PyPI `graphifyy`) 가 정확히 이 가정과 매칭 (출력 디렉토리 `graphify-out/`, 파일 `graph.json` + `GRAPH_REPORT.md` + `graph.html`, CLI `graphify <path>` build / `graphify <path> --update` incremental).
+
+격차 — install.sh 가 실제로 graphify CLI 를 설치하는 plumbing 부재. wh-lint Step 9 의 chain 호출 (`<agent_invocation> "/wh-graphify"`) 가 `command -v graphify` false → exit 2 Fatal → ops-alert 매 사이클 발화 결함. v0.1.0 미배포라 surface 안 됐을 뿐.
+
+추가 — graphify 3-pass 의 Pass 3 (Claude/OpenAI subagent semantic extraction) 가 LLM 호출 → API key 자료 + 비용 모델 + non-deterministic output 이라는 3가지 새 운영 제약 surface.
+
+## Considered Options
+
+### O1. PyPI 패키지 선택
+
+- **(α1) `graphifyy` (graphify.net 공식)**: 2 y 패키지명. MIT. NetworkX + Tree-sitter 의존.
+- (β1) self-host 대안 (`graphify-dotnet` 등 .NET port): wikihub 의 Python venv 구조와 정합 약함.
+- (γ1) wikihub 자체 graph builder 구현: cost 과대, 본 ADR 의 목적 벗어남.
+
+### O2. API key 자료 layer
+
+- **(α2) `~/.config/wikihub/env` + systemd `EnvironmentFile=`** : 새 파일, KEY=VALUE 형식.
+- (β2) 운영자 shell rc (`.bashrc` export) + systemd `PassEnvironment=` : systemd --user manager env 가 운영자 shell env 와 분리돼 미작동 가능.
+- (γ2) 별도 credentials 파일 (rclone.conf 패턴): rclone 의 OAuth token 과 LLM API key 는 의미 다름. 별도 layer 가 정합.
+
+### O3. graphify install (Claude Code hook) 통합
+
+- (α3) install.sh 가 `graphify install` 도 호출 → wikihub agent (Hermes) 가 보유 안 한 PreToolUse hook 충돌 가능.
+- **(β3) hook 통합 skip — PyPI 설치만 수행**: hermes 가 graphify 를 subprocess 로 호출 — hook 의존 0.
+
+### O4. .graphifyignore 정책
+
+- **(α4) wiki root 단일 `.graphifyignore`** : graphify 의 표준 — repo root 1개로 subfolder 호출 시에도 정합.
+- (β4) wikihub 의 메타 디렉토리 (`_lint/`, `_state/`) underscore-prefix 자동 제외 — graphify 가 보장 안 함. 명시 ignore 가 안전.
+
+### O5. non-deterministic Pass 3 의 멱등성 해석
+
+- (α5) graphify deterministic 으로 가정 — graphify.md L83 의 기존 표현. **부정확** (Pass 3 LLM).
+- **(β5) Tree-sitter Pass 1 만 deterministic, Pass 3 churn 가능성 인지** — graphify 내부 cache (graph.json 보존) 가 증분 단계에서 변경되지 않은 노드는 보존하므로 cycle 간 churn 부분 완화 — operational 으로 acceptable.
+
+### O6. 운영 비용 모델
+
+- (α6) wikihub 가 token-budget 제어 — `operations.graphify.token_budget` 등 schema 추가.
+- **(β6) graphify CLI default + wh-lint timer 주기 통제** : `operations.lint_interval_hours` (default 24h) 가 자연 cost upper bound. v0.1.0 minimum viable. 후속 schema 확장은 v0.2.x 검토 트리거.
+
+## Decision
+
+**채택**: (α1) `graphifyy` PyPI + (α2) `~/.config/wikihub/env` EnvironmentFile + (β3) hook skip + (α4) wiki root `.graphifyignore` + (β5) Pass 3 churn 인지 + (β6) timer 주기 통제.
+
+### 구체적 결정
+
+#### D1. PyPI 패키지 + 버전 pinning
+
+- 패키지: `graphifyy` (PyPI), CLI: `graphify`. install.sh `_install_graphify` 함수가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 수행.
+- `wikihub.yaml.operations.graphify_min_version` / `graphify_max_version` schema 추가 — v0.1.0 은 documentation only (rclone min/max 와 동일 — 실제 enforce 는 v0.2.x).
+- `INSTALLED_VERSIONS.json` 에 graphify key 추가 — `_write_installed_versions_sidecar` 의 출력 schema 갱신.
+
+#### D2. API key 저장 — `~/.config/wikihub/env` (EnvironmentFile)
+
+- 새 파일: `~/.config/wikihub/env` — systemd `EnvironmentFile=` 호환 형식 (KEY=VALUE per line, no quoting).
+- install.sh `_step5_instance_dirs` 가 `~/.config/wikihub/` 디렉토리 (chmod 700) + `env` 파일 (chmod 600, 미존재 시 빈 template) ensure.
+- 운영자가 1회 수동으로 `ANTHROPIC_API_KEY=sk-ant-...` 채움. wikihub 시스템은 자동 입력 안 함 (secret material).
+- systemd `_system/systemd/lint.service.template` 에 `EnvironmentFile=-%h/.config/wikihub/env` (lenient `-` prefix — 부재 시 unit start fail 안 함).
+- hermes 가 호출하는 graphify subprocess 는 자연스럽게 lint.service env 상속.
+- default env var name: `ANTHROPIC_API_KEY` (wikihub agent = Hermes/Claude 정합).
+- yaml `operations.graphify_api_key_env_name` 으로 override (e.g. `OPENAI_API_KEY` — graphify CLI 가 다중 backend 수용).
+
+#### D3. `.graphifyignore` 정책 — wiki root 배치
+
+- `wiki/.graphifyignore` 파일을 install.sh `_step5_instance_dirs` 또는 wh-setup playbook 의 wiki/ ensure 단계가 배치 (template literal 또는 separate file).
+- default 제외:
+  ```
+  # wikihub 메타 디렉토리 — graphify 분석 대상 아님 (ADR-0036)
+  _lint/
+  _state/
+  ```
+- `sources/` 는 vault mirror — graphify 가 vault content 와 wiki page 를 함께 분석 정합 → 제외 안 함. 운영자가 vault 별 ignore 패턴 필요 시 본 파일에 직접 추가.
+
+#### D4. Pass 3 non-deterministic 가정
+
+- `commands/graphify.md` L83 의 "graphify deterministic 가정" 표현 §Note 보강 — Pass 1 (Tree-sitter) deterministic, Pass 3 (LLM) non-deterministic.
+- graphify 내부 cache (graph.json) 가 증분 단계에서 unchanged 노드 보존 → cycle 간 churn 부분 완화.
+- wh-lint Step 9 의 보고 (`graph rebuilt: N nodes, M edges`) 가 cycle 간 drift 시 panic 아님 — operational normal.
+- 멱등성 spec 갱신: 같은 wiki 상태 N회 호출 시 graph.json **structural** 동등 (LLM-driven 노드 메타데이터 minor drift 허용).
+
+#### D5. graphify install (Claude Code hook) skip
+
+- install.sh `_install_graphify` 는 PyPI 설치 + version check 만. `graphify install` 호출 안 함.
+- 사유: wikihub agent (Hermes) 가 graphify 를 subprocess 로 호출 — hook 의존 0. Claude Code 용 PreToolUse hook 은 wikihub 컨텍스트 무관.
+
+#### D6. 운영 비용 — wh-lint timer 주기 + 운영자 자체 cost 인지
+
+- v0.1.0 default: graphify CLI default backend (Anthropic) + 기본 token-budget.
+- wikihub 의 호출 빈도 통제: `operations.lint_interval_hours` (default 24h) — wh-lint timer fire 시점만 graphify chain. 24h 1회 호출이 default cost upper bound.
+- install.sh `_step8_guide` + setup.md 에 cost 환기 메시지 추가.
+- graphify-side token-budget / backend 제어 schema (`operations.graphify.token_budget`, `operations.graphify.backend`) 는 v0.2.x 검토 트리거.
+
+## Consequences
+
+### 긍정
+
+- wh-lint Step 9 chain 의 graphify Fatal 결함 해소 — `command -v graphify` true.
+- API key 자료 위치 명확화 + chmod 600 + EnvironmentFile lenient prefix 로 운영자 미입력 상태에서도 lint unit start 자체는 성공 (graphify 호출만 fail).
+- `_system/commands/graphify.md` 의 잠정 4항목 모두 확정.
+- graphify 의 3-pass 아키텍처 + .graphifyignore + Pass 3 churn 인지가 wikihub 의 명시 spec 으로 lift.
+
+### 부정 / 제약
+
+- PyPI 의존성 추가 (`graphifyy`) — install.sh 의 supply chain surface 확장. rclone 의 SHA256 검증 vs PyPI 의 hash-based pip install (pip 자체의 PEP 658 + hashes 의존). install.sh 가 추가로 hash pin 옵션 검토는 v0.2.x.
+- API key 자료 신규 layer (`~/.config/wikihub/env`) — ADR-0035 가 폐기한 `~/.credentials/wikihub/` (SA JSON) 와 별도 경로. 보안 자료 layer 가 2개로 분리 (rclone.conf 의 OAuth + 본 env 파일의 LLM key) — 단일 layer 통합 검토는 v0.2.x.
+- graphify Pass 3 가 운영자 별도 API 비용 발생 — 운영자 인지 책임. token-budget / backend 통제 schema 부재 (v0.1.0).
+- wh-lint timer 가 graphify Fatal 을 cycle 단위로 surface 가능 — 운영자가 ops-alert 받고 API key 채우는 흐름. setup.md / install.sh `_step8_guide` 안내.
+
+### 후속 영향
+
+- `_system/commands/graphify.md` 의 잠정 4항목 확정 — L18/L31, L36, L44/L47, L50, L83.
+- `_system/commands/setup.md` Step 0 entry condition 에 `~/.config/wikihub/env` 존재 (API key 채워졌는지 *확인 안 함* — 운영자 책임) 안내.
+- `wikihub.yaml.example` 의 `operations.*` 에 graphify 관련 3 필드 추가.
+- `_system/systemd/lint.service.template` 의 `EnvironmentFile=` 추가.
+- install.sh INSTALLED_VERSIONS.json schema 갱신 (graphify key).
+- v0.1.0 의 graphify Pass 3 churn 운영 데이터 surface 시 D4 의 cycle 간 drift 허용 범위 재검토 트리거.
+- v0.2.x 검토 트리거: graphify-side token-budget / backend 통제 schema (`operations.graphify.*`), PyPI hash pin 옵션, secret material layer 통합.
+
+### 재검토 트리거
+
+- graphify Pass 3 cycle 간 graph.json drift 가 wh-lint 보고에서 운영적 불편 surface 시 → D4 churn 허용 범위 또는 token-budget schema 도입.
+- LLM cost 가 운영자 base 의 부담으로 surface 시 → backend=ollama 등 local LLM 옵션 yaml schema 격상.
+- graphifyy 의 hash / supply chain 사고 발생 시 → install.sh hash pin enforce (rclone SHA256 패턴 차용).
+
+## Cross-references
+
+- **연계 정합**: ADR-0005 (wiki/index.md fallback) — graphify primary 본문 그대로, §Note 추가 (도구 정해짐). ADR-0023 (install.sh distribution) — graphify install.sh 책임 §Note 추가. ADR-0024 (fatal alert) — graphify 실패 → ops-alert 경로 동일. ADR-0032 (agent invocation) — hermes invocation 본문 무관.
+- **비교 / 분리**: ADR-0035 (rclone OAuth) — `~/.config/rclone/rclone.conf` 가 OAuth credentials, 본 ADR 의 `~/.config/wikihub/env` 가 LLM API key — 경로/책임 모두 별개.
+- **본 ADR 의 분석 정본**: [features/archive/20260519_graphify_integration/analysis_and_design.md](../../features/archive/20260519_graphify_integration/analysis_and_design.md)
+- **2026-05-19 검토 자료**: graphify.net / GitHub safishamsi/graphify (MIT) — pypi.org/project/graphifyy

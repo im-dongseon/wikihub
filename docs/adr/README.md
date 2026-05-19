@@ -90,6 +90,7 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0033](0033-skill-prefix-hyphen-lock.md) | Skill namespace prefix lock — `wh-` (hyphen) — **Supersedes ADR-0011** | Accepted | 2026-05-18 | `20260518_hermes_adapter` |
 | [ADR-0034](0034-data-first-layout.md) | Data-first layout — `~/wikihub/` = 운영 자산 + `~/.local/share/wikihub/src/` = 시스템 코드 (XDG). env swap (WIKIHUB_HOME 의미 변경 + WIKIHUB_SRC 신규 + WIKIHUB_INSTANCE_ROOT 폐기) + migration helper + mv-only backup (4 sub-decision) | Accepted | 2026-05-19 | `20260519_dir_layout_refactor` |
 | [ADR-0035](0035-rclone-only-unified-oauth.md) | rclone 단독 + OAuth 단일 인증 — gws CLI 폐기 + SA 폐기. lsjson full snapshot + file_map(source_id 키) diff + false-delete 가드. **Supersedes ADR-0014/0015/0017/0027/0029** | Accepted | 2026-05-19 | `20260519_oauth_unify_rclone_only` |
+| [ADR-0036](0036-graphify-cli-integration.md) | graphify CLI 통합 — PyPI 패키지 `graphifyy` install.sh 책임 + `~/.config/wikihub/env` (EnvironmentFile) API key + Pass 3 non-deterministic 가정 + `wiki/.graphifyignore` 정책 + 운영 비용 모델 (timer 주기 통제) | Accepted | 2026-05-19 | `20260519_graphify_integration` |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

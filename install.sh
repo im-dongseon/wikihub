@@ -569,6 +569,33 @@ _install_rclone() {
     ok "rclone v${pinned} 설치 완료 (/usr/local/bin/rclone)"
 }
 
+_install_graphify() {
+    # ADR-0036 — graphify CLI (PyPI graphifyy) PyPI 설치 + version 검증.
+    # rclone 의 binary 설치 (_install_rclone) 와 달리 PyPI 패키지 — pip 의 hash-based install 의존.
+    # supply chain hash pin enforce 는 v0.2.x 검토 트리거.
+    local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.8.0,<1.0.0}"
+
+    if command -v graphify >/dev/null 2>&1; then
+        local current
+        current="$(graphify --version 2>/dev/null | awk '{print $NF}' || true)"
+        if [[ -n "$current" ]]; then
+            info "graphify $current 이미 설치됨 — pip install 로 pin 재확인"
+        fi
+    fi
+
+    info "graphify (PyPI: $pin_spec) 설치 — $VENV_PATH/bin/pip install"
+    "$VENV_PATH/bin/pip" install --quiet "$pin_spec" \
+        || { err "graphify 설치 실패 — PyPI 접근 또는 pip cache 확인"; exit 2; }
+
+    # venv 의 bin/ 이 PATH 에 우선해야 systemd unit 의 PATH={venv_path}/bin:... 이 graphify 호출.
+    command -v graphify >/dev/null 2>&1 \
+        || { err "graphify 설치됐으나 PATH 에서 찾을 수 없음 — $VENV_PATH/bin 확인"; exit 2; }
+
+    local installed
+    installed="$(graphify --version 2>/dev/null | awk '{print $NF}' || true)"
+    ok "graphify ${installed:-?} 설치 완료 ($pin_spec)"
+}
+
 _enforce_rclone_conf_perms() {
     local conf="${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}"
     if [[ -f "$conf" ]]; then
@@ -593,8 +620,10 @@ _write_installed_versions_sidecar() {
     # Stale .tmp.* 5분 이상 자동 cleanup (이전 process 의 SIGTERM/errexit 흔적).
     find "$target_dir" -maxdepth 1 -name "${target_base}.tmp.*" -mmin +5 -delete 2>/dev/null || true
 
-    local rclone_v
+    local rclone_v graphify_v
     rclone_v="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//' || true)"
+    # ADR-0036 — graphify 도 INSTALLED_VERSIONS.json 의 fact 로 기록. graphify --version 형식 미보장 → 단순 last-field 추출.
+    graphify_v="$(graphify --version 2>/dev/null | awk '{print $NF; exit}' || true)"
 
     local tmp="${target}.tmp.$$"
     # 본 함수 ERR/RETURN 시 tmp 자동 회수 — set -e 환경에서 cat/sync fail 시 orphan 차단.
@@ -603,6 +632,7 @@ _write_installed_versions_sidecar() {
 {
   "schema_version": 1,
   "rclone": "${rclone_v:-}",
+  "graphify": "${graphify_v:-}",
   "uv": "${UV_VERSION}",
   "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
   "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -618,6 +648,7 @@ EOF
 _step45_rclone() {
     _install_rclone
     _enforce_rclone_conf_perms
+    _install_graphify
     _write_installed_versions_sidecar
     # rc port pre-check — yaml 이 이미 Step 5 에서 복사된 상태 가정. 첫 실행 (yaml 미복사) 시 skip.
     if [[ -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
@@ -648,7 +679,29 @@ _step45_rclone() {
 
 _step5_instance_dirs() {
     mkdir -p "$WIKIHUB_HOME"
-    ok "Step 5 instance dir 확인 ($WIKIHUB_HOME)"
+    # ADR-0036 — graphify Pass 3 (LLM API) 의 key 자료 layer.
+    # systemd unit (`wikihub-lint.service`) 의 `EnvironmentFile=-%h/.config/wikihub/env` 가 본 파일을 lenient 로 읽음.
+    # 운영자가 수동으로 `ANTHROPIC_API_KEY=...` 채움. install.sh 는 빈 template + 권한만 보장.
+    local wh_config_dir="$HOME/.config/wikihub"
+    local wh_env_file="$wh_config_dir/env"
+    mkdir -p "$wh_config_dir"
+    chmod 700 "$wh_config_dir"
+    if [[ ! -f "$wh_env_file" ]]; then
+        cat > "$wh_env_file" <<'EOF'
+# wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036).
+# graphify Pass 3 (Claude/OpenAI subagent semantic extraction) 의 LLM API key.
+# 운영자가 수동으로 본 파일을 채워야 graphify chain (wh-lint Step 9) 이 정상 동작.
+# 미입력 상태에서도 systemd unit start 자체는 성공 — graphify subprocess 만 fail.
+#
+# 형식: KEY=VALUE (per line, 따옴표 미사용)
+# 예시:
+#   ANTHROPIC_API_KEY=sk-ant-...
+# 또는 OpenAI backend 사용 시:
+#   OPENAI_API_KEY=sk-...
+EOF
+    fi
+    chmod 600 "$wh_env_file"
+    ok "Step 5 instance dir + ~/.config/wikihub/env 확인 ($WIKIHUB_HOME)"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -685,6 +738,9 @@ _migrate_agent_schema() {
     if [[ ",$oneshot_args_str," != *"{skill}"* ]]; then
         needs_migrate=1
         info "operational yaml drift: agent.oneshot_args legacy form → F5 schema (ADR-0032)"
+    elif [[ ",$oneshot_args_str," != *",--yolo,"* ]]; then
+        needs_migrate=1
+        info "operational yaml drift: agent.oneshot_args F5 form 인데 --yolo 누락 → in-place 삽입 (ADR-0032 §Note 2026-05-19)"
     fi
 
     [[ "$needs_migrate" == 0 ]] && return 0
@@ -713,9 +769,25 @@ with open(path, encoding="utf-8") as f:
 agent = data.setdefault("agent", {})
 if agent.get("skill_prefix") == "wh:":
     agent["skill_prefix"] = "wh-"
-oneshot = agent.get("oneshot_args") or []
-if not any("{skill}" in str(a) for a in oneshot):
+oneshot = list(agent.get("oneshot_args") or [])
+has_placeholder = any("{skill}" in str(a) for a in oneshot)
+has_yolo = any(str(a) == "--yolo" for a in oneshot)
+if not has_placeholder:
+    # legacy schema → 전체 overwrite (F5 migration, ADR-0032)
     agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]
+elif not has_yolo:
+    # F5 form 인데 --yolo 누락 (v0.1.0~v0.1.2 → v0.1.3+ upgrade path, ADR-0032 §Note 2026-05-19)
+    # --query 앞에 in-place 삽입 — 운영자 override 의 다른 인자 보존.
+    new_args = []
+    inserted = False
+    for arg in oneshot:
+        if str(arg) == "--query" and not inserted:
+            new_args.append("--yolo")
+            inserted = True
+        new_args.append(arg)
+    if not inserted:
+        new_args.append("--yolo")
+    agent["oneshot_args"] = new_args
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     yaml.dump(data, f)
@@ -1034,7 +1106,8 @@ ${C_OK}=== WikiHub 설치 완료 ===${C_RST}
       └── wiki/                           # 통합 wiki (자동)
   $WIKIHUB_SRC/                           # 시스템 코드 (XDG, install.sh 가 git clone — sparse, ADR-0023·ADR-0034)
   ~/.config/rclone/                       # rclone.conf — OAuth token 단일 인증 자료 (ADR-0035)
-  $VENV_PATH/                             # Python venv (install.sh 관리, 메인테이너 미관여)
+  ~/.config/wikihub/env                   # graphify Pass 3 LLM API key (ADR-0036, chmod 600)
+  $VENV_PATH/                             # Python venv (install.sh 관리, 메인테이너 미관여 — graphify 도 venv 내부)
   ~/.config/systemd/user/                 # systemd unit (install.sh _step8_systemd_render 관리)
 
 ${C_WARN}⚠ wikihub.yaml 은 아직 부재합니다 (ADR-0031 §Decision A — install.sh 는 yaml 미관여).${C_RST}
@@ -1047,8 +1120,16 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   2. rclone OAuth 발급 (ADR-0035 — gws SA 폐기, rclone.conf 단일 인증 자료):
        rclone config              # remote name 은 wikihub.yaml.vaults[*].options.rclone_remote_name 정합
        chmod 0600 ~/.config/rclone/rclone.conf
-  3. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
+  3. graphify LLM API key 입력 (ADR-0036 — wh-lint Step 9 chain 의 Pass 3 가 요구):
+       \$EDITOR ~/.config/wikihub/env
+       # 예: ANTHROPIC_API_KEY=sk-ant-...  (또는 OPENAI_API_KEY=...)
+       # 미입력 상태에서도 systemd start 자체는 성공 — graphify subprocess 만 fail.
+  4. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
        <agent_invocation> "/wh:setup --enable"
+
+[운영 비용 환기 — graphify Pass 3 (ADR-0036)]
+  wh-lint timer (default 24h) 가 graphify chain 호출. wiki page 별 Claude/OpenAI subagent 호출
+  발생 — 운영자 API 비용 모델 인지 필요. 호출 빈도 통제: operations.lint_interval_hours 조정.
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
   curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash

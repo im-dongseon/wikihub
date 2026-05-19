@@ -2,13 +2,17 @@
 Description=WikiHub lint timer
 
 # OnBootSec=5min: reboot 직후 vault-ingest 다음으로 fire
+# OnActiveSec=5min: timer 자체가 active 가 된 시점 기준 (monotonic). install.sh --update 후
+#   daemon-reload + timer 재시작 시 OnBootSec 가 이미 과거라 미발화 + OnUnitInactiveSec 가 service
+#   prior run 없어 기준점 부재인 시나리오 가드 (2026-05-19).
 # OnUnitInactiveSec={lint_interval_hours}h: default 24h (wikihub.yaml.operations.lint_interval_hours)
 # !! systemd unit syntax — trailing inline comment 미지원 (V<N> 결함 #5, 2026-05-17)
+# Persistent=true 제거 (2026-05-19) — OnCalendar= 전용. monotonic timer 에선 no-op.
 [Timer]
 Unit=wikihub-lint.service
 OnBootSec=5min
+OnActiveSec=5min
 OnUnitInactiveSec={lint_interval_hours}h
-Persistent=true
 AccuracySec=15min
 
 [Install]

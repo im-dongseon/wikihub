@@ -2,15 +2,19 @@
 Description=WikiHub vault ingest timer — %i
 
 # OnBootSec=2min: reboot 후 network-online + cloud-init settle 시간 (F1 §4.8.2 lift)
+# OnActiveSec=2min: timer 자체가 active 가 된 시점 기준 (monotonic). install.sh --update 후
+#   daemon-reload + timer 재시작 시 OnBootSec 가 이미 과거라 미발화 + OnUnitInactiveSec 가 service
+#   prior run 없어 기준점 부재인 시나리오 가드. 운영자 수동 trigger 회피 (2026-05-19).
 # OnUnitInactiveSec={sync_interval_sec}s: 직전 service inactive 후 N초 (Active 아님)
-# Persistent=true: reboot 중 놓친 fire 부팅 후 catch up (V12 acceptance)
 # AccuracySec=1min: 전력 절감 (F1 §4.8.2 lift)
 # !! systemd unit syntax — trailing inline comment 미지원, 같은 라인 끝 `# ...` 금지 (V<N> 결함 #5, 2026-05-17)
+# Persistent=true 제거 (2026-05-19) — systemd 문서상 OnCalendar= 전용. monotonic timer
+#   (OnBootSec/OnActiveSec/OnUnitInactiveSec) 에선 no-op 였음. dead config 정리.
 [Timer]
 Unit=wikihub-vault@%i.service
 OnBootSec=2min
+OnActiveSec=2min
 OnUnitInactiveSec={sync_interval_sec}s
-Persistent=true
 AccuracySec=1min
 
 [Install]

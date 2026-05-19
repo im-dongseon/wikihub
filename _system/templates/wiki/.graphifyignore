@@ -1,0 +1,11 @@
+# wikihub default .graphifyignore — ADR-0036 §D3
+# gitignore 문법 (graphify CLI v0.8+). wh-setup playbook 의 wiki/ ensure 단계가 부재 시 배치.
+# 운영자가 vault 별 추가 패턴 직접 편집 가능 (예: 특정 source mirror, sensitive 디렉토리).
+
+# 메타 디렉토리 — graphify 분석 대상 아님
+_lint/
+_state/
+
+# vault 별 ingest log — append-only timeline 텍스트. graphify 가 본 파일의 timestamp/이력 텍스트를
+# entity 후보로 추출하면 god-node noise. ADR-0036 후속 cleanup (2026-05-19).
+**/log.md

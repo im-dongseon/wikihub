@@ -152,6 +152,17 @@ lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참�
 - 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh-query·/wh-lint 정확도 저하)
 - 본 단계의 exit code는 lint의 exit code에 영향 안 줌 (graphify 실패가 lint 자체를 fail시키지 않음 — graph는 보조 자원)
 
+**graphify 결과 self-check (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드)**:
+
+- graphify 호출 성공 (exit 0) 후 `graphify-out/graph.json` read → 노드 수 = `N`
+- `wiki/` 전체 페이지 수 = `M` (mechanical count — `**/*.md` 재귀 카운트, `_lint/`·`_state/` 제외)
+- `M == 0` (빈 wiki) → check skip — 정상 첫 사이클
+- `N / M < 0.5` (graph 가 wiki 의 절반 이하 표현) → **Pass 3 partial failure 의심**:
+  - report 에 `graphify partial failure 의심: N=<N>, M=<M>, ratio=<r>` 추가
+  - ops-alert 트리거 (운영자 진단 trigger — API key/quota/network 점검)
+  - 본 check 실패는 lint exit 에 영향 없음 (graph 는 보조 자원, ADR-0036 §D6 정합)
+- threshold `0.5` 는 보수적 default — wiki 규모가 작거나 entity stub 누적이 적은 초기 운영 시점에 false positive 우려 → 운영자가 yaml `operations.graphify_partial_failure_threshold` 로 override 가능 (v0.2.x 검토 트리거: 운영 데이터 surface 후 자동 ranging)
+
 ## 출력 산출물
 
 | 변경 대상 | 모드 | 비고 |

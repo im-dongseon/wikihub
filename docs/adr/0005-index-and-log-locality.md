@@ -63,3 +63,9 @@ F2 Step 2에서 검색·운영 use case를 분석한 결과 두 항목은 **본�
   - F2 `_system/commands/ingest.md`: index 갱신 책임 명시적 제외
   - F2 `_system/wiki-schema.md`: wiki/index.md = "agent /lint가 재구성하는 카탈로그"로 정의
   - F4(systemd_orchestrator): /lint 주기를 별도 timer로 (예: 1시간 또는 매일). ingest timer와 분리
+
+## Note (2026-05-19, feature `graphify_integration`)
+
+본 ADR §Decision 본문의 "graphify는 1차, wiki/index.md 는 폴백" 정책 그대로 유지. graphify 도구가 어떤 구현체인지 잠정 상태였음 — 2026-05-19 검토로 **graphify.net 의 graphify CLI (PyPI `graphifyy`)** 로 확정 (ADR-0036). graphify CLI 의 출력 (`graphify-out/graph.json` + `GRAPH_REPORT.md`) 이 본 ADR 의 §Decision 본문이 가정한 자료 그대로 — 결정 변경 없음.
+
+§Decision 본문 미수정 — 도구 ↔ 구현체 매핑이 ADR-0036 §D1 으로 lock.
