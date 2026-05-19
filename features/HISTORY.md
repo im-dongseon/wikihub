@@ -37,3 +37,14 @@
 - **트레이드오프**: 새 yaml 필드 1건 추가 — v0.1.0 미배포 시점이라 마이그레이션 0. 기존 운영자가 yaml 에 필드 미명시 시 빈 문자열 default 로 기존 `gdrive:` 동작 유지 (backward-compat).
 - **결론**: yaml schema 1 필드 추가 + 1 필드 제거 (root_folder_id), 코드 ~10줄, systemd template +2줄, 문서 정리. pytest 57 pass / 1 skip (신규 path-인자 spy 테스트 1건 추가).
 - **참조**: features/archive/20260519_rclone_remote_path/
+
+---
+
+## [2026-05-19] hermes_yolo_flag
+
+- **목적**: v0.1.2 OCI 실증 결함 closed — install.sh post-install `hermes chat --skills wh-setup --quiet --query "/wh-setup"` 호출이 Hermes 의 보안 승인 layer (tirith) 에 의해 `Choice [o/s/D]: ✗ Denied` 로 중단. `/wh-setup` playbook 의 inline python 호출 (`python3 -c`, `cat | python3`) 이 위험 명령으로 분류돼 prompt → noninteractive context (install.sh + systemd timer) 에서 응답 불가. systemd timer 가 호출하는 wh-ingest / wh-lint / wh-graphify 도 동일 결함.
+- **로직**: agent 의 oneshot 호출 cmdline 에 `--yolo` (Hermes noninteractive auto-approve) 표준 형태로 포함. 4 layer 동시 갱신 — (1) `wikihub.yaml.example:57` `agent.oneshot_args` default, (2) `install.sh:718` F5 migration default literal (update path 자동 갱신), (3) `install.sh:1486-1487` `_step8_wh_setup_skill_meta` 의 직접 호출 cmdline, (4) `scripts/_helpers/render_systemd_units.py:158-159` fail-fast 안내 메시지. systemd unit render dry-run 검증 — vault@/lint ExecStart 둘 다 `--yolo` 포함 확인.
+- **생성 ADR**: 없음 (ADR-0032 §Note 추가 — `--yolo` plumbing 결정 기록. §sub-3 cmdline schema 본문 미수정 — 운영자 yaml override 가능 형태 그대로).
+- **트레이드오프**: `--yolo` 는 tirith 의 prompt 를 자동 승인 → noninteractive 환경에선 효과적 동일 (prompt 응답 불가로 deny 만 발생했음). interactive manual hermes 호출은 운영자가 yaml override 또는 직접 cmdline 사용 시 trust 모델 본인 책임.
+- **결론**: 4 파일 미만 small change. pytest 57 pass / 1 skip 유지. systemd render 결과에 `--yolo` 정확히 주입됨. install.sh 자동 호출 + systemd timer fire 둘 다 tirith 차단 회피.
+- **참조**: features/archive/20260519_hermes_yolo_flag/

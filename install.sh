@@ -715,7 +715,7 @@ if agent.get("skill_prefix") == "wh:":
     agent["skill_prefix"] = "wh-"
 oneshot = agent.get("oneshot_args") or []
 if not any("{skill}" in str(a) for a in oneshot):
-    agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--query"]
+    agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     yaml.dump(data, f)
@@ -1482,9 +1482,9 @@ _step8_wh_setup_skill_meta() {
         info "agent.binary ($agent_binary) 미설치 — /wh-setup skill 메타 갱신 skip"
         return 0
     fi
-    info "agent skill 메타 갱신 (best-effort) — $agent_binary chat --skills wh-setup --quiet --query \"/wh-setup\" (timeout=${timeout_sec}s)"
+    info "agent skill 메타 갱신 (best-effort) — $agent_binary chat --skills wh-setup --quiet --yolo --query \"/wh-setup\" (timeout=${timeout_sec}s)"
     WIKIHUB_NONINTERACTIVE=1 timeout "$timeout_sec" "$agent_binary" \
-        chat --skills wh-setup --quiet --query "/wh-setup" \
+        chat --skills wh-setup --quiet --yolo --query "/wh-setup" \
         || warn "/wh-setup 호출 실패 — Hermes skill 미인식 또는 LLM transient (systemd render 는 install.sh 가 이미 수행)"
 }
 

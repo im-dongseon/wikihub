@@ -145,7 +145,7 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
     """ADR-0032 §sub-2 / ADR-0033: per-unit `{skill}` placeholder substitution.
 
     `oneshot_args` 에 `{skill}` placeholder 가 반드시 있어야 함 (fail-fast).
-    F5 schema: `oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--query"]`.
+    F5 schema (+ 2026-05-19 §Note ADR-0032): `oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]`.
     F5 이전 (e.g. update_mode rollback) 의 `oneshot_args: ["-z"]` 는 placeholder 부재 → fail.
     """
     agent = cfg.get("agent") or {}
@@ -156,7 +156,7 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
         print(
             f"ERROR: agent.oneshot_args 에 '{{skill}}' placeholder 누락 — "
             f"F5 schema (ADR-0032) 요구. 현재 oneshot_args={oneshot_args!r}. "
-            f"yaml 의 oneshot_args 를 `[\"chat\", \"--skills\", \"{{skill}}\", \"--quiet\", \"--query\"]` 로 갱신 필요 "
+            f"yaml 의 oneshot_args 를 `[\"chat\", \"--skills\", \"{{skill}}\", \"--quiet\", \"--yolo\", \"--query\"]` 로 갱신 필요 "
             f"(또는 F5 이전 ref 로 rollback 시 `[\"-z\"]` 로 다운그레이드).",
             file=sys.stderr,
         )

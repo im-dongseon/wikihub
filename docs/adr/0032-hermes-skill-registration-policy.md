@@ -103,3 +103,33 @@ ADR-0034 data-first layout invert 후 본 ADR §Decision 의 path 변경:
 운영자가 직접 등록한 marker 부재 entry 는 보존 (CR2-HIGH-1 정합).
 
 Status 변경 없음. path + migration 자동화 추가.
+
+## Note (2026-05-19, feature `hermes_yolo_flag`) — oneshot_args 에 `--yolo` 보강
+
+### 발견
+
+v0.1.2 OCI 실증 — install.sh post-install `hermes chat --skills wh-setup --quiet --query "/wh-setup"` 가 Hermes 의 보안 승인 layer (tirith) 에 의해 `Choice [o/s/D]: ✗ Denied` 로 중단. `/wh-setup` playbook 의 yaml 검증·상태 확인이 inline python 호출 (`cat | python3`, `python3 -c`) 로 구성돼 있어 tirith 가 위험 명령으로 분류 → prompt → noninteractive context (install.sh + systemd timer) 에서 응답 불가 → deny 폴백.
+
+### 결정
+
+agent 의 oneshot 호출 cmdline 에 `--yolo` 인자를 표준 형태로 포함.
+
+**Before**: `["chat", "--skills", "{skill}", "--quiet", "--query"]`
+**After**:  `["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]`
+
+`--yolo` = Hermes 의 noninteractive auto-approve. install.sh 의 직접 호출 (`_step8_wh_setup_skill_meta`) + systemd unit ExecStart (vault@/lint timer 가 호출) 모두 동일 plumbing.
+
+§sub-3 (cmdline schema) 본문은 미수정 — 운영자가 yaml 에서 override 가능한 형태 그대로. yaml.example 의 default form 만 갱신.
+
+### 적용 layer
+
+- `wikihub.yaml.example` — `agent.oneshot_args` default
+- `install.sh` F5 migration default literal (update path 의 schema 자동 갱신)
+- `install.sh _step8_wh_setup_skill_meta` 의 직접 호출 cmdline
+- `scripts/_helpers/render_systemd_units.py` fail-fast 안내 메시지
+
+### Trust 가정 변화
+
+`--yolo` 가 tirith 의 prompt 를 자동 승인 → noninteractive 운영 환경에선 효과 동일 (prompt 없으니 deny 만 발생했음). interactive 운영자 manual hermes 호출은 영향 받지 않음 (yaml override 또는 직접 cmdline 사용 시 trust 모델 본인 책임).
+
+본 변경의 분석 정본: [features/archive/20260519_hermes_yolo_flag/analysis_and_design.md](../../features/archive/20260519_hermes_yolo_flag/analysis_and_design.md)
