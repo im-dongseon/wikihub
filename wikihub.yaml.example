@@ -33,6 +33,8 @@ vaults:
 
 operations:
   lint_interval_hours: 24
+  lint_contradiction_check: true      # v0.1.5 toggle — false 시 lint Step 6 (LLM 모순·stale·entity 누락 점검) skip. DeepSeek 등 느린 backend 의 cost/시간 통제.
+  graphify_enabled: true              # v0.1.5 toggle — false 시 lint Step 9 의 graphify chain skip. 운영자 cost / API key 부재 대응. Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작.
   max_concurrent_vaults: serial       # v0.1.0 단일 vault 가정 — F6 시점 재검토
   retry:
     max_attempts: 5
@@ -60,5 +62,5 @@ agent:
   binary: /usr/local/bin/hermes                                           # R10 MED-8: 미설치 시 운영자가 별도 설치 책임
   oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]     # ADR-0032 + 2026-05-19 §Note — `{skill}` per-unit placeholder, `--quiet` transcript 차단, `--yolo` tirith auto-approve (noninteractive 환경 필수)
   skill_prefix: "wh-"                                                     # ADR-0033 (ADR-0011 supersedes — colon `wh:` → hyphen `wh-`)
-  timeout_sec: 600                                                        # bash timeout + systemd TimeoutStartSec sync source (ADR-0032 §sub-4)
+  timeout_sec: 1200                                                       # bash timeout + systemd TimeoutStartSec sync source (ADR-0032 §sub-4). v0.1.5 default 600 → 1200 — DeepSeek 등 느린 LLM backend 대비 (Hermes 실증, 2026-05-20).
   notify_on_fatal: true                                                   # ADR-0024 — Hermes 통지 (v0.1.0 은 stub, v0.2.x 활성화)

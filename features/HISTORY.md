@@ -99,5 +99,17 @@
 - **결론**: install.sh `_migrate_agent_schema` 의 prompt 블록 10줄 → info log 1줄. v0.1.4 → v0.1.5 patch bump. pytest 57 pass 유지.
 - **참조**: features/archive/20260520_migration_prompt_review/ (context + 2 design reviews + plan)
 
+---
+
+## [2026-05-20] lint_fallback_toggles (v0.1.5 wave — 2번째 entry)
+
+- **목적**: Hermes OCI lint timeout 진단 — root cause = DeepSeek API 응답 느림 (네트워크 대기, CPU 10.6초). 운영자(Hermes) 수동 SIGINT 로 lint 중단. lint chain 의 graphify (Step 9) 호출 + lint 본체 모순 점검 (Step 6) 의 LLM cost 통제 토글 부재 — quick fix 로 yaml schema 보강.
+- **로직**: yaml 3 변경 — (a) `agent.timeout_sec` default 600 → 1200 (Hermes 가 이미 TimeoutStartSec=1200 으로 manual patch 실증), (b) `operations.graphify_enabled` (default true; false 시 lint Step 9 skip + report 1줄), (c) `operations.lint_contradiction_check` (default true; false 시 lint Step 6 skip — 가장 무거운 LLM 호출). lint.md Step 6/Step 9 진입에 yaml toggle read + skip 분기. setup.md maintainer catalog 갱신.
+- **생성 ADR**: 없음 (ADR-0036 §Note 추가 — graphify_enabled toggle + v0.1.6 분리 트리거 명시).
+- **트레이드오프**: `graphify_enabled: false` 시 lint Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작 — graph.json 갱신만 stale (다음 cycle 까지). `lint_contradiction_check: false` 시 wiki 의 모순·stale 정보 자동 detect 안 됨 — 메인테이너 수동 `--apply` 호출 시 1회 점검 보완 권장.
+- **결론**: yaml 3 field 변경 + lint.md 2 분기 + setup.md catalog + ADR-0036 §Note. v0.1.5 wave 2번째 commit (migration_prompt_simplify `152d751` 와 함께 push 예정). graphify 별도 systemd unit 분리는 v0.1.6 별도 feature.
+- **참조**: features/archive/20260520_lint_fallback_toggles/
+
+
 
 - **참조**: features/archive/20260519_graphify_integration/ + features/archive/20260519_graphify_usage_review/

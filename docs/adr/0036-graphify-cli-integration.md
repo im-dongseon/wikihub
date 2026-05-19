@@ -201,3 +201,34 @@ graphify subprocess 가 hang (API key 부재 / endpoint 응답 없음 / etc.) �
 - §D2 본문 ↔ 본 §Note 정합. 본문 미수정 — 역사적 맥락 보존, schema 정본은 본 §Note + 본 feature 의 analysis_and_design.md.
 - 본 feature 의 분석 정본: [features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md](../../features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md)
 - 2026-05-20 검토 자료: `graphifyy 0.8.13/llm.py` (BACKENDS dict, line 47-118; client init line 287).
+
+## Note (2026-05-20, feature `lint_fallback_toggles` v0.1.5) — graphify chain skip toggle + v0.1.6 분리 트리거
+
+### 발견
+
+OCI 운영 중 lint timeout 결함 surface — 운영자(Hermes) 가 수동 SIGINT (`systemctl --user stop`). 진짜 root cause = `_interruptible_streaming_api_call` 의 `lock.acquire()` 5분 대기 = **DeepSeek API 응답 느림** (네트워크 대기, CPU 10.6초). lint Step 9 의 graphify chain 이 cost 비대칭 — 운영자가 chain 자체 skip 원할 때 toggle 부재.
+
+### Quick fix (본 §Note)
+
+yaml schema 토글 신설 — lint chain 안에서 graphify 호출 skip 가능:
+
+- `operations.graphify_enabled: true` (default; false 시 lint Step 9 skip)
+- `operations.lint_contradiction_check: true` (default; false 시 lint Step 6 skip — 가장 무거운 LLM 호출)
+- `agent.timeout_sec: 600 → 1200` (default 증설 — DeepSeek 등 느린 backend 대비)
+
+§D6 의 "wh-lint timer 주기로만 cost 통제" 가정 보강 — 운영자가 chain 분리 통제도 가능.
+
+### v0.1.6 분리 트리거 (재검토 트리거)
+
+본 quick fix 는 lint chain **안에서** toggle. 더 architectural 한 fix = `wikihub-graphify.service` + `.timer` 신설 (lint 와 분리). lint chain 의 Step 9 제거 → lint 본체만 단일 systemd unit, graphify 가 자기 timer 로 별도 trigger.
+
+분리 이점:
+- lint timeout 영향 격리 (graphify hang 이 lint 와 무관)
+- 주기 별도 통제 (`operations.graphify_interval_hours`)
+- failure isolation (각자 OnFailure ops-alert)
+
+분리 시 ADR-0006 (unified orchestration) §Note 검토 필요 — "각 skill 이 자기 unified 경로" 의 재해석. graphify 분리는 v0.1.6 별도 feature 로 추출.
+
+### 본 §Note 의 분석 정본
+
+[features/archive/20260520_lint_fallback_toggles/](../../features/archive/20260520_lint_fallback_toggles/)

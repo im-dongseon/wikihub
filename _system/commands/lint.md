@@ -86,6 +86,15 @@ ADR-0005에 따라 `/wh-lint`가 index 재구성 책임 보유:
 
 ### Step 6. 모순·정보 갱신 점검 (보고만)
 
+**Toggle 확인 (v0.1.5)**:
+
+```bash
+contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIHUB_HOME/wikihub.yaml")"
+```
+
+- `contradiction_check == false` → 본 단계 skip + `_lint/report.md` 에 1줄 `contradiction check skipped (yaml toggle)`. Step 7 으로 jump.
+- `contradiction_check == true` (default) → 아래 진행.
+
 각 페이지를 LLM으로 점검:
 
 - 페이지 간 모순되는 클레임
@@ -141,6 +150,15 @@ ADR-0005에 따라 `/wh-lint`가 index 재구성 책임 보유:
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 
 ### Step 9. /wh-graphify 자동 호출
+
+**Toggle 확인 (v0.1.5)**:
+
+```bash
+graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wikihub.yaml")"
+```
+
+- `graphify_enabled == false` → 본 단계 skip + `_lint/report.md` 에 1줄 `graphify chain skipped (yaml toggle)`. Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작 — graph.json 갱신만 미수행 (다음 cycle 까지 graph stale).
+- `graphify_enabled == true` (default) → 아래 진행.
 
 lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참조: lint 후 자동 호출 = 하루 1회 자연 갱신).
 
