@@ -202,6 +202,12 @@ graphify subprocess 가 hang (API key 부재 / endpoint 응답 없음 / etc.) �
 - 본 feature 의 분석 정본: [features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md](../../features/archive/20260520_graphify_backend_flexibility/analysis_and_design.md)
 - 2026-05-20 검토 자료: `graphifyy 0.8.13/llm.py` (BACKENDS dict, line 47-118; client init line 287).
 
+## Note (2026-05-20, lint default 변경) — §D6 cost 모델 보강
+
+v0.1.5 wave 의 default `operations.lint_interval_hours: 24 → 3` 변경. §D6 "wh-lint timer 주기로만 cost 통제" 가정 그대로 — 단 cost upper bound 가 24h 1회 → 3h 1회 (8배). 운영자가 부담 시 `operations.graphify_enabled: false` toggle 로 chain 자체 skip.
+
+§D6 본문 미수정 — default 값 변경만 운영적 사실로 명시.
+
 ## Note (2026-05-20, feature `lint_fallback_toggles` v0.1.5) — graphify chain skip toggle + v0.1.6 분리 트리거
 
 ### 발견

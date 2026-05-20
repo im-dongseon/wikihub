@@ -9,7 +9,7 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 <agent_invocation> "/wh-lint --apply"    # 파괴 가능 작업까지 수행 (메인테이너 수동 호출)
 ```
 
-- **트리거 (기본)**: systemd timer (하루 1회 권장, `wikihub.yaml.operations.lint_interval_hours`)
+- **트리거 (기본)**: systemd timer (3시간 1회, v0.1.5 default `wikihub.yaml.operations.lint_interval_hours: 3`. 24h 이전 default 에서 변경 — graphify chain 의 cost 8배 증가하나 wiki 위생 사이클 빠른 surface 가치 우선)
 - **트리거 (`--apply`)**: 메인테이너가 `wiki/_lint/report.md` read 후 의도적 수동 호출
 - **vault 무관 (wiki-wide)**: 단일 명령으로 전체 wiki 점검
 

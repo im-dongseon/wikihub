@@ -204,3 +204,7 @@ F5 의 해결:
 본 ADR 의 §v0.2.x notify_via_hermes stub 은 F5 범위 밖 — 별도 v0.2.x feature 가 Telegram 통지 본문 채움. F5 는 invocation 정합 한정.
 
 Status 변경 없음.
+
+## Note (2026-05-20, feature `alert_pipeline_overhaul` v0.1.5)
+
+본 ADR 의 contract (failure → alert 의무) 본문 그대로 유지. dispatch + trigger layer architecture 는 **ADR-0037 (alert pipeline architecture)** 가 confirm — Telegram channel 추가 (webhook 병행) + wikihub-pending-monitor systemd unit 신설 (age-based trigger). 본 ADR 의 §v0.2.x notify_via_hermes stub 도 ADR-0037 이 직접 Telegram bot API 호출로 대체 — stub 의도 일부 충족.

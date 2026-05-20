@@ -56,6 +56,8 @@ class OperationsConfig:
     rclone_max_version: str = "1.99.99"
     vfs_cache_max_size: str = "10G"
     vfs_refresh_mode: str = "recursive"  # recursive | per-file | none — K1·K2·K3
+    # ADR-0037 §D3 (v0.1.5) — alert pipeline 의 age-based monitor threshold
+    pending_alert_age_sec: int = 3600   # vault pending_ingest.json 이 N초 이상 stuck 시 alert
 
 
 @dataclass
@@ -155,6 +157,8 @@ def _parse_operations(ocfg: dict[str, Any]) -> OperationsConfig:
         rclone_max_version=str(ocfg.get("rclone_max_version", "1.99.99")),
         vfs_cache_max_size=str(ocfg.get("vfs_cache_max_size", "10G")),
         vfs_refresh_mode=str(ocfg.get("vfs_refresh_mode", "recursive")),
+        # ADR-0037 §D3
+        pending_alert_age_sec=int(ocfg.get("pending_alert_age_sec", 3600)),
     )
 
 

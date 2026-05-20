@@ -14,6 +14,9 @@ WorkingDirectory={wikihub_home}
 ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
+# ADR-0037 §D1 (v0.1.5) — Telegram alert channel env. lenient `-` prefix: 파일 부재/빈 값 OK.
+# 운영자가 ~/.config/wikihub/env 에 TELEGRAM_ALERT_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID 채움.
+EnvironmentFile=-%h/.config/wikihub/env
 ExecStart={venv_path}/bin/python {wikihub_src}/scripts/ops-alert.py
 # R16-M1 (V<N> R16 SRE 리뷰): 30s → 180s. ops-alert.py 의 collect_mount_fallback_failures
 # 가 vault 마다 systemctl is-failed (5s) + journalctl -u (10s) 호출 — N vault 시 최악 N*15s.

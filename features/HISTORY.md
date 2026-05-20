@@ -121,6 +121,26 @@
 - **결론**: yaml 1 map + render helper 14줄 + lint.md 1 section + ADR §Note + setup.md catalog 1줄. v0.1.5 amend (force-push 4번째). render dry-run 검증 — lint.service 만 `--model minimax-m2.5` inject, 다른 wh-* unit 미영향 확인. pytest 57 pass.
   - **wh-ingest 추가** (2026-05-20 후속): `agent.models` 에 `wh-ingest: deepseek-v4-pro` 추가 — per-source LLM 호출 (entity/concept 추출) 의 reasoning 정확도 활용. 운영자 판단 — max_tokens hang risk 인지 (Hermes 실증) 후 운영 모델 선택. surface 시 `qwen3.6-plus` 로 fallback 권장 (non-reasoning + 한국어 안정).
   - **ingest.md 출력 언어 정책 추가** (2026-05-20 후속): `_system/commands/ingest.md` 상단에 lint.md 와 동일 패턴 "출력 언어 정책" section — Step 4 (entity/concept 추출) 의 LLM 응답에서 한자 → 한글 변환 지시. deepseek-v4-pro / minimax 등 모델의 동음이의 한자 출력 결함 대비.
+
+---
+
+## [2026-05-20] alert_pipeline_overhaul (v0.1.5 wave — architectural)
+
+- **목적**: ADR-0024 (fatal alert contract) 의 dispatch + trigger layer 두 한계 — (a) single-channel (webhook URL 만), (b) attempts-based trigger 만 (age-based monitor 부재) — wikihub spec 차원 통합. Hermes OCI 패치 (Telegram 발송 + 30분 cron pending-check) 정본화.
+- **로직**: ADR-0037 (alert pipeline architecture) 신설 (Accepted, ADR-0024 complement).
+  1. **Telegram channel** (ADR-0037 §D1): `scripts/ops-alert.py` 에 `send_telegram` + `format_telegram_message` 추가. `main()` dispatch 가 webhook + Telegram 병행 — 한쪽이라도 성공 시 `alerted_at` 갱신. env: `TELEGRAM_ALERT_BOT_TOKEN` + `TELEGRAM_ALERT_CHAT_ID`. `_system/systemd/ops-alert.service` 에 `EnvironmentFile=-%h/.config/wikihub/env` 추가.
+  2. **wikihub-pending-monitor systemd unit** (ADR-0037 §D2): `_system/systemd/wikihub-pending-monitor.{service,timer}.template` 신설. timer `OnBootSec=10min / OnActiveSec=10min / OnUnitInactiveSec=30min`. service oneshot, `ExecStart=python scripts/pending_monitor.py`. `OnFailure` 미설정 — 항상 exit 0 + ops-alert recursion 회피.
+  3. **`scripts/pending_monitor.py` 신설**: enabled vault 순회 → `pending_ingest.json` mtime age 검사 → age > `operations.pending_alert_age_sec` (default 3600s) → `last_failure.json` 갱신 (scope="ingest_pending") + `systemctl --user start ops-alert.service` 호출.
+  4. **yaml schema**: `operations.pending_alert_age_sec` (default 3600). `OperationsConfig` dataclass + `_parse_operations` 갱신.
+  5. **install.sh**: `_step5_instance_dirs` 의 env template 에 `TELEGRAM_ALERT_*` 예시 + bot 생성 안내. `_systemd_stop_before_update` + `_systemd_start_after_update` + `_step8_systemd_render` try-restart + reset-failed list 에 pending-monitor 추가. `_step8_guide` 에 운영 진단 + Telegram 검증 명령.
+  6. **setup.md catalog**: `pending_alert_age_sec` 추가.
+  7. **ADR**: ADR-0037 신설 (Accepted, ADR-0024 complement) + ADR-0024 §Note 1줄 (cross-reference) + docs/adr/README.md index 갱신.
+- **생성 ADR**: ADR-0037 (alert pipeline architecture)
+- **트레이드오프**: Telegram bot token / chat_id 가 secret — `~/.config/wikihub/env` + Hermes `terminal.env_passthrough` 운영자 책임. pending_monitor → ops-alert.service 호출 recursion risk — 둘 다 항상 exit 0 + StartLimitBurst mitigation. wikihub-pending-monitor.service 가 systemd unit 1개 추가 — render 부담 acceptable.
+- **결론**: 새 systemd unit 2개 + 새 script 1개 + ADR 신설 + ops-alert.py Telegram 통합 + yaml schema 1 field + install.sh 다중 갱신. render dry-run 8 units 출력 확인 (기존 6 + pending-monitor 2). pytest 57 pass + ops-alert/pending_monitor import 검증.
+- **버전**: v0.1.5 유지 (user 명시 "버전은 0.1.5 사용"). v0.1.5 wave 의 architectural 보강 — main fast-forward push + v0.1.5 tag re-point (force-update) + latest force-update.
+- **참조**: features/archive/20260520_alert_pipeline_overhaul/
+  - **lint default interval 24h → 3h** (2026-05-20 후속): `wikihub.yaml.example` 의 `operations.lint_interval_hours: 24 → 3` 갱신 — 더 빠른 wiki 위생 사이클. lint.timer.template / setup.md / lint.md / ADR-0036 §Note 동기화. graphify chain (graphify_enabled=true) 의 cost 가 8배 증가하나 `graphify_enabled: false` toggle 로 운영자 통제 가능. ADR-0036 §D6 cost upper bound 가정 변경 — default 값만 갱신, 본문 미수정.
 - **참조**: features/archive/20260520_agent_model_per_skill/
 
 

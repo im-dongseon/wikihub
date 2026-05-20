@@ -716,6 +716,13 @@ _step5_instance_dirs() {
 #
 # 5. Claude Code 구독 활용 (`--backend claude-cli`, API key 불필요):
 #    (env var 비움 — yaml operations.graphify_backend=claude-cli + Claude CLI binary PATH 만)
+#
+# === Alert channel — Telegram bot (ADR-0037 §D1) ===
+# wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
+# webhook 과 병행 — 양쪽 설정 시 둘 다 발송. 미설정 시 journal only.
+# bot 생성: @BotFather 에서 /newbot → token 받음 + chat_id 는 https://api.telegram.org/bot<token>/getUpdates 또는 @userinfobot 활용.
+#    TELEGRAM_ALERT_BOT_TOKEN=123456:ABC...
+#    TELEGRAM_ALERT_CHAT_ID=-100123456
 EOF
     fi
     chmod 600 "$wh_env_file"
@@ -1165,6 +1172,8 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
                        (alert 발송 실패는 "webhook 발송 실패" warn 로 기록)
   mount 로그:         journalctl --user -t wikihub-mount-<vault_id> --since '24h ago'
   timer 상태:         systemctl --user list-timers '*wikihub*' 'lint*' '*-ingest*'
+  pending monitor:    systemctl --user status wikihub-pending-monitor.timer  /  journalctl --user -t wikihub-pending-monitor
+  alert 발화 (test):  systemctl --user start wikihub-ops-alert.service  (Telegram bot / webhook 검증)
   install 로그:       cat $WIKIHUB_HOME/install.log
   last_failure 요약:  for s in $WIKIHUB_HOME/_state/*/last_failure.json; do
                         [ -f "\$s" ] && echo "─ \$s" && cat "\$s"; done
@@ -1469,6 +1478,8 @@ _systemd_stop_before_update() {
         systemctl --user stop "wikihub-vault@${v}.timer" 2>/dev/null || true
     done
     systemctl --user stop wikihub-lint.timer 2>/dev/null || true
+    systemctl --user stop wikihub-pending-monitor.timer 2>/dev/null || true
+    systemctl --user stop wikihub-pending-monitor.service 2>/dev/null || true
     # vault@.service mid-sync 대기 — 15min grace (TimeoutStartSec=15min 정합)
     # MED-N4: progress info — 운영자 visual 안심
     for v in $all_vaults; do
@@ -1484,7 +1495,8 @@ _systemd_stop_before_update() {
     # R2-CRIT-2: StartLimitBurst 카운터 초기화
     systemctl --user reset-failed 'wikihub-mount@*.service' \
         'wikihub-vault@*.service' 'wikihub-vault@*.timer' \
-        'wikihub-lint.service' 'wikihub-lint.timer' 2>/dev/null || true
+        'wikihub-lint.service' 'wikihub-lint.timer' \
+        'wikihub-pending-monitor.service' 'wikihub-pending-monitor.timer' 2>/dev/null || true
     # CRIT-N2: stop 직후 daemon-reload — Step 8 render 이전 race window 차단.
     systemctl --user daemon-reload 2>/dev/null || true
     ok "systemd stop sequence 완료"
@@ -1516,6 +1528,8 @@ _systemd_start_after_update() {
             || warn "vault@${v}.timer start 실패"
     done
     systemctl --user start wikihub-lint.timer 2>/dev/null || warn "lint.timer start 실패"
+    # ADR-0037 §D2 (v0.1.5) — pending_ingest age monitor
+    systemctl --user start wikihub-pending-monitor.timer 2>/dev/null || warn "pending-monitor.timer start 실패"
     ok "systemd start sequence 완료"
 }
 
@@ -1561,7 +1575,7 @@ _step8_systemd_render() {
     # 이 무력화되는 결함 closure. `try-restart` 는 inactive unit 에 no-op — update path 의
     # stop/start 순서와 충돌 없음.
     systemctl --user try-restart 'wikihub-mount@*.service' \
-        'wikihub-vault@*.timer' wikihub-lint.timer 2>/dev/null || true
+        'wikihub-vault@*.timer' wikihub-lint.timer wikihub-pending-monitor.timer 2>/dev/null || true
     ok "Step 8 systemd render + daemon-reload + try-restart 완료"
 }
 
