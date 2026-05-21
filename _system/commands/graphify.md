@@ -38,18 +38,34 @@ command -v graphify >/dev/null
 
 ### Step 2. 빌드 모드 결정
 
+**Backend resolution (v0.1.6 — graphify.md ↔ lint.md Step 9 정합 fix)**:
+
+```bash
+backend="$(yq '.operations.graphify_backend // ""' "$WIKIHUB_HOME/wikihub.yaml")"
+backend_flag=""
+[[ -n "$backend" ]] && backend_flag="--backend $backend"
+```
+
+- `backend == ""` → flag 생략 → graphify CLI auto-detect (claude → kimi → openai → gemini → claude-cli → ollama 순)
+- `backend != ""` → `--backend $backend` 명시 — yaml override (운영자 의도 명확화, auto-detect 우선순위 충돌 회피)
+- ADR-0036 §Note (2026-05-20 backend flexibility) 정합
+
+**빌드 모드 분기 (`$backend_flag` 공통 적용 + `timeout 300` 보호)**:
+
 - `--rebuild` 플래그 있음 → 전체 재빌드 (graph.json 기존 파일 무시):
   ```bash
-  graphify "$WIKIHUB_HOME/wiki"
+  timeout 300 graphify "$WIKIHUB_HOME/wiki" $backend_flag
   ```
 - `--rebuild` 없음 + `graphify-out/graph.json` 존재 → **증분 빌드** (`--update` 플래그):
   ```bash
-  graphify "$WIKIHUB_HOME/wiki" --update
+  timeout 300 graphify "$WIKIHUB_HOME/wiki" --update $backend_flag
   ```
 - `--rebuild` 없음 + graph.json 부재 → **최초 빌드**:
   ```bash
-  graphify "$WIKIHUB_HOME/wiki"
+  timeout 300 graphify "$WIKIHUB_HOME/wiki" $backend_flag
   ```
+
+- `timeout 300`: graphify 가 어떤 사유로든 hang 하면 SIGTERM (exit 124). 호출자 (lint Step 9 또는 수동 invoke) 보호. exit 124 시 보고서에 `graph rebuild timeout (300s, backend=$backend)` 기록 + 호출자 진행 계속 (ADR-0036 §D6 정합).
 
 > wiki/ 경로는 `instance.root`/wiki 기준 (`$WIKIHUB_HOME/wiki`, ADR-0034). 메타 디렉토리 제외는 `wiki/.graphifyignore` 파일이 책임 (gitignore 문법; ADR-0036 §D3) — install.sh 또는 wh-setup 가 default template 배치 (`_lint/`, `_state/` 제외). 운영자가 vault 별 추가 패턴 직접 편집 가능.
 
