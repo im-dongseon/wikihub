@@ -748,53 +748,120 @@ _hermes_config_path() {
     echo "${HERMES_CONFIG_HOME:-$HOME/.hermes}/config.yaml"
 }
 
-# 1회성 schema lift — `wh:` / `["-z"]` 잔존 operational yaml 의 drift fix.
-# ADR-0033 + R3-CR3-1-HIGH-N1 (idempotent + marker 보호)
+# 1회성 schema lift — operational yaml 의 schema drift fix.
+# ADR-0033 + ADR-0032 (기존: `wh:` / oneshot_args) + ADR-0032 §Note v0.1.7 (확장: v0.1.5+
+# 신설 field 자동 추가 + ADR-0035 폐기 field cleanup). PTY-safe — prompt 0, idempotent.
 _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
-    local needs_migrate=0
-    local skill_prefix oneshot_args_str
-    skill_prefix="$("$VENV_PATH/bin/python3" -c \
-        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('skill_prefix',''))" \
-        "$yaml" 2>/dev/null || echo '')"
-    oneshot_args_str="$("$VENV_PATH/bin/python3" -c \
-        "import yaml,sys; print(','.join(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('oneshot_args',[])))" \
-        "$yaml" 2>/dev/null || echo '')"
 
-    if [[ "$skill_prefix" == "wh:" ]]; then
-        needs_migrate=1
-        info "operational yaml drift: agent.skill_prefix=\"wh:\" → \"wh-\" (ADR-0033)"
-    fi
-    if [[ ",$oneshot_args_str," != *"{skill}"* ]]; then
-        needs_migrate=1
-        info "operational yaml drift: agent.oneshot_args legacy form → F5 schema (ADR-0032)"
-    elif [[ ",$oneshot_args_str," != *",--yolo,"* ]]; then
-        needs_migrate=1
-        info "operational yaml drift: agent.oneshot_args F5 form 인데 --yolo 누락 → in-place 삽입 (ADR-0032 §Note 2026-05-19)"
-    fi
+    # drift detect — Python single-shot 으로 모든 3-group 검사 + flag 반환.
+    # 단순 grep 으로 안전한 비교가 어려운 nested key (예: vaults[].options.bootstrap_allowed)
+    # 가 있어서 yaml load + dict navigation 으로 detect.
+    local drift_flags
+    drift_flags="$("$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
+import sys, yaml as _yaml
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as f:
+        data = _yaml.safe_load(f) or {}
+except Exception:
+    print("")
+    sys.exit(0)
 
-    [[ "$needs_migrate" == 0 ]] && return 0
+agent = data.get("agent") or {}
+operations = data.get("operations") or {}
+vaults = data.get("vaults") or []
 
-    # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY 환경에서
-    # 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 → v0.1.4 cycle 의
-    # root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety net — 운영자가 의도와
-    # 다르면 cp 1회로 즉시 복원. transformation 자체는 idempotent + scoped (skill_prefix +
-    # oneshot_args 만, 다른 yaml 필드 미터치). 외부 운영자 의도 override 시나리오는 v0.2.x 시점
-    # 재검토 트리거 (그때 WIKIHUB_SKIP_MIGRATION 같은 escape hatch 별도 feature 로 추출).
+flags = []
+# Group A — ADR-0033 / ADR-0032 기존 drift
+if agent.get("skill_prefix") == "wh:":
+    flags.append("A_skill_prefix")
+oneshot = list(agent.get("oneshot_args") or [])
+has_placeholder = any("{skill}" in str(a) for a in oneshot)
+has_yolo = any(str(a) == "--yolo" for a in oneshot)
+if not has_placeholder:
+    flags.append("A_oneshot_legacy")
+elif not has_yolo:
+    flags.append("A_yolo_missing")
 
-    # backup
+# Group B — v0.1.5+ 신설 field 부재 (자동 추가 — 안전 default)
+if "timeout_sec" not in agent:
+    flags.append("B_agent_timeout_sec")
+if "models" not in agent:
+    flags.append("B_agent_models")
+if "pending_alert_age_sec" not in operations:
+    flags.append("B_pending_alert_age_sec")
+if "lint_contradiction_check" not in operations:
+    flags.append("B_lint_contradiction_check")
+if "graphify_enabled" not in operations:
+    flags.append("B_graphify_enabled")
+if "graphify_backend" not in operations:
+    flags.append("B_graphify_backend")
+if "graphify_min_version" not in operations:
+    flags.append("B_graphify_min_version")
+if "graphify_max_version" not in operations:
+    flags.append("B_graphify_max_version")
+
+# Group C — ADR-0035 폐기 field 잔존 (자동 삭제)
+_legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
+for idx, v in enumerate(vaults):
+    if not isinstance(v, dict):
+        continue
+    opts = v.get("options") or {}
+    for lo in _legacy_vault_opts:
+        if lo in opts:
+            flags.append(f"C_vaults[{idx}].options.{lo}")
+
+print(",".join(flags))
+PYEOF
+)"
+
+    [[ -z "$drift_flags" ]] && return 0
+
+    # info log 출력 — 운영자가 어떤 drift 가 감지됐는지 surface
+    info "schema drift detected — auto migration (PTY-safe, idempotent):"
+    local f
+    IFS=',' read -ra _flags <<< "$drift_flags"
+    for f in "${_flags[@]}"; do
+        case "$f" in
+            A_skill_prefix)        info "  - [ADR-0033] agent.skill_prefix \"wh:\" → \"wh-\"" ;;
+            A_oneshot_legacy)      info "  - [ADR-0032] agent.oneshot_args legacy → F5 schema (`{skill}` + --yolo)" ;;
+            A_yolo_missing)        info "  - [ADR-0032 §Note] agent.oneshot_args 의 --yolo 누락 → in-place 삽입" ;;
+            B_agent_timeout_sec)        info "  - [v0.1.5] agent.timeout_sec 부재 → 1200 추가 (DeepSeek/MiniMax latency 대응)" ;;
+            B_agent_models)             info "  - [v0.1.5] agent.models 블록 부재 → {wh-lint, wh-ingest} 추가 (per-skill --model lock)" ;;
+            B_pending_alert_age_sec)    info "  - [ADR-0037] operations.pending_alert_age_sec 부재 → 3600 추가" ;;
+            B_lint_contradiction_check) info "  - [v0.1.5] operations.lint_contradiction_check 부재 → true 추가" ;;
+            B_graphify_enabled)         info "  - [v0.1.5] operations.graphify_enabled 부재 → true 추가" ;;
+            B_graphify_backend)         info "  - [ADR-0036] operations.graphify_backend 부재 → \"\" 추가 (auto-detect)" ;;
+            B_graphify_min_version)     info "  - [ADR-0036] operations.graphify_min_version 부재 → \"0.8.0\" 추가" ;;
+            B_graphify_max_version)     info "  - [ADR-0036] operations.graphify_max_version 부재 → \"0.99.99\" 추가" ;;
+            C_*)                        info "  - [ADR-0035] 폐기 field cleanup: ${f#C_}" ;;
+        esac
+    done
+
+    # backup — 변경 발생 시만 (위 early return 통과한 경우)
     local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -p "$yaml" "$backup"
-    info "schema drift detected — auto migration (backup: $backup)"
+    info "backup: $backup"
+
+    # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY
+    # 환경에서 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 →
+    # v0.1.4 cycle 의 root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety
+    # net — 운영자가 의도와 다르면 cp 1회로 즉시 복원. v0.1.7 §Note — 자동 추가 (Group B) +
+    # 폐기 cleanup (Group C) 확장. **값 변경은 자동 회피** — 운영자 의도 (또는 schema drift)
+    # 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec, operations.lint_interval_hours).
 
     "$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
 import sys, ruamel.yaml
 path = sys.argv[1]
 yaml = ruamel.yaml.YAML(typ="rt")
 yaml.preserve_quotes = True
+yaml.indent(mapping=2, sequence=4, offset=2)
 with open(path, encoding="utf-8") as f:
     data = yaml.load(f)
+
+# Group A — ADR-0033 / ADR-0032
 agent = data.setdefault("agent", {})
 if agent.get("skill_prefix") == "wh:":
     agent["skill_prefix"] = "wh-"
@@ -802,11 +869,8 @@ oneshot = list(agent.get("oneshot_args") or [])
 has_placeholder = any("{skill}" in str(a) for a in oneshot)
 has_yolo = any(str(a) == "--yolo" for a in oneshot)
 if not has_placeholder:
-    # legacy schema → 전체 overwrite (F5 migration, ADR-0032)
     agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]
 elif not has_yolo:
-    # F5 form 인데 --yolo 누락 (v0.1.0~v0.1.2 → v0.1.3+ upgrade path, ADR-0032 §Note 2026-05-19)
-    # --query 앞에 in-place 삽입 — 운영자 override 의 다른 인자 보존.
     new_args = []
     inserted = False
     for arg in oneshot:
@@ -817,6 +881,44 @@ elif not has_yolo:
     if not inserted:
         new_args.append("--yolo")
     agent["oneshot_args"] = new_args
+
+# Group B — v0.1.5+ 신설 field 자동 추가 (안전 default, 부재 시만)
+if "timeout_sec" not in agent:
+    agent["timeout_sec"] = 1200
+if "models" not in agent:
+    # ruamel CommentedMap 으로 추가 — 다른 field 의 주석 보존
+    from ruamel.yaml.comments import CommentedMap
+    models = CommentedMap()
+    models["wh-lint"] = "deepseek-v4-flash"
+    models["wh-ingest"] = "deepseek-v4-pro"
+    agent["models"] = models
+
+operations = data.setdefault("operations", {})
+_op_defaults = {
+    "pending_alert_age_sec": 3600,
+    "lint_contradiction_check": True,
+    "graphify_enabled": True,
+    "graphify_backend": "",
+    "graphify_min_version": "0.8.0",
+    "graphify_max_version": "0.99.99",
+}
+for k, v in _op_defaults.items():
+    if k not in operations:
+        operations[k] = v
+
+# Group C — ADR-0035 폐기 field cleanup
+_legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
+vaults = data.get("vaults") or []
+for v in vaults:
+    if not isinstance(v, dict):
+        continue
+    opts = v.get("options")
+    if not isinstance(opts, dict):
+        continue
+    for lo in _legacy_vault_opts:
+        if lo in opts:
+            del opts[lo]
+
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     yaml.dump(data, f)
@@ -825,6 +927,8 @@ os.replace(tmp, path)
 PYEOF
 
     ok "schema migration 완료 (backup: $backup)"
+    info "  운영자 의도 영향 field (sync_interval_sec, lint_interval_hours 등) 의 새 default 적용은"
+    info "  wikihub.yaml.example 참조 후 manual edit + install.sh 재실행 권장."
 }
 
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.

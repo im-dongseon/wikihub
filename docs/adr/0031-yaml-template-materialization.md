@@ -301,3 +301,35 @@ ADR-0034 data-first layout invert 후 본 ADR §Decision B catalog 의 default �
 `/wh-setup` 이 `$WIKIHUB_HOME/wikihub.yaml` atomic write 단독 책임 (ADR-0031 §Decision A). install.sh yaml 미관여 정책 ADR-0034 후에도 그대로.
 
 Status 변경 없음. default 값 정합.
+
+---
+
+## Note (2026-05-22, feature `yaml_schema_drift_migration` v0.1.7) — §Decision A 의 drift fix 예외 lift
+
+### 발견
+
+2026-05-22 OCI 운영 server `install.sh --update` 직후 운영자의 manual systemd unit edit 4건 (lint·ingest `--model` × 2 + `TimeoutStartSec` + `OnUnitInactiveSec`) 손실 사건. 진단 — 운영자의 `~/wikihub/wikihub.yaml` 이 v0.1.0 era schema 동결 + v0.1.5+ 신설 field (`agent.timeout_sec`, `agent.models`, `operations.pending_alert_age_sec` 등) 부재 → render 가 default 600·flag 미주입 으로 unit 출력 → 운영자 manual edit overwrite.
+
+§Decision A 의 "install.sh 는 yaml 미관여" 원칙은 *operational value 보호* 가 의도. 그러나 신설 field 부재로 인한 render 의 unsafe default fallback 은 운영 risk — 운영자 trust 보호와 schema drift 보호의 분리 필요.
+
+### §Decision A 의 예외 lift — install.sh 의 schema drift fix 책임 추가
+
+**install.sh `_migrate_agent_schema` 의 역할 범위 확장** (PTY-safe + idempotent + 보수적):
+
+1. **자동 추가** — yaml.example 의 신설 field 가 운영 yaml 에 부재 시 안전 default 값으로 추가 (예: `agent.timeout_sec: 1200`, `agent.models: {wh-lint, wh-ingest}`, `operations.pending_alert_age_sec: 3600`). yaml.example schema 정합 보장.
+2. **자동 삭제** — ADR-0035 폐기 field (`vaults[].options.bootstrap_allowed` 등) 잔존 시 cleanup. schema noise 제거.
+3. **값 변경 자동 회피** — 값이 이미 존재하면 미터치 (예: `sync_interval_sec: 600` 그대로). 운영자 의도 (또는 schema drift) 구분 불가 → 보수적 보호. 운영자가 새 default 적용하려면 yaml 직접 편집 + install.sh 재실행.
+4. **backup** — `.wikihub-bak.<utc_iso>` 매 migration 시 자동 생성. 운영자가 의도와 다르면 `cp` 1회로 즉시 복원.
+
+### §Decision A 의 본문 정합
+
+§Decision A 의 "install.sh 는 yaml 의 모든 mutation 에 미관여" 는 **value mutation 한정**. schema mutation (field 추가/삭제) 은 install.sh 가 책임 (yaml.example schema 의 single source of truth 보장).
+
+→ ADR-0031 의 원칙은 그대로. 본 §Note 가 mutation 의 두 종류 (value vs schema) 의 책임 boundary 명확화.
+
+### Cross-references
+
+- ADR-0032 §Note (2026-05-22 v0.1.7) — `_migrate_agent_schema` 의 확장 범위 정본화
+- ADR-0035 — 폐기 field catalog 의 cleanup layer 등록
+- 사건 trail: 2026-05-22 OCI 운영 사건 (lint·ingest `--model` × 2 + `TimeoutStartSec` + `OnUnitInactiveSec` 4건 manual edit 손실 → 운영 yaml schema drift 진단)
+- 본 변경의 분석 정본: features/archive/20260522_yaml_schema_drift_migration/ (예정)

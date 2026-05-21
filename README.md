@@ -2,21 +2,21 @@
 
 <div align="center">
 
-# WikiHub v0.1.6
+# WikiHub v0.1.7
 
 서버에서 다중 소스를 통합 관리하는 LLM 위키 허브
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.6%20ready-green)](features/archive/)
-[![Version](https://img.shields.io/badge/Version-0.1.6-blue)](AGENTS.md)
+[![Status](https://img.shields.io/badge/Status-v0.1.7%20ready-green)](features/archive/)
+[![Version](https://img.shields.io/badge/Version-0.1.7-blue)](AGENTS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
 ---
 
-> **개발 상태** (2026-05-22 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.6 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장). v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
+> **개발 상태** (2026-05-22 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), **yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
 
 ---
 
@@ -222,7 +222,7 @@ v0.1.0 feature 진행 상황 (2026-05-18 기준 — **acceptance 달성**):
 | **`install_scope_reduction`** | sparse-checkout 6필드 lock + install.sh yaml 미관여 + `/wh-setup` Step 0 yaml writer 단독 책임 + ruamel.yaml round-trip. F4 결함 #E·#F closure. ADR-0031 신설 | ✅ archive (2026-05-18) |
 | **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh-*` skill ↔ Hermes skill 시스템 정합화 (`hermes chat --skills <name> --quiet --query "/<name> ..."`). install-time materialized SKILL.md (frontmatter + commands body) + external_dirs + flock·backup·sha256 + Hermes detect gate. F4 결함 #12 closure. ADR-0032 (skill registration policy) + ADR-0033 (`wh-` prefix lock, supersedes ADR-0011) 신설 | ✅ archive (2026-05-18) |
 | **`dir_layout_refactor`** | Data-first layout invert — `~/wikihub/` = 운영 자산 (WIKIHUB_HOME), `~/.local/share/wikihub/src/` = 시스템 코드 (WIKIHUB_SRC, XDG). env swap + 폐기 + WIKIHUB_INSTANCE_ROOT 폐기. migration helper (`scripts/migrate_layout.sh`, 9-phase state machine + flock + rollback trap + rclone FUSE unmount retry). ADR-0034 신설 + 7 ADR Note (0010·0020·0023·0029·0030·0031·0032). e2e PASS (wikihub-test VM Ubuntu 24.04 ARM + Hermes v0.14.0 + deepseek-v4-pro) | ✅ archive (2026-05-19) |
-| **v0.1.x 운영 정본화 (2026-05-19 ~ 2026-05-22)** | rclone unify (ADR-0035) · graphify CLI (ADR-0036 + backend flexibility) · alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor) · per-skill model override (`agent.models`) · 운영 정본 default align (v0.1.6 — wh-lint=deepseek-v4-flash · sync_interval=1h · hermes `delegation.model` 권장) | ✅ archive (`features/archive/` 다수) |
+| **v0.1.x 운영 정본화 (2026-05-19 ~ 2026-05-22)** | rclone unify (ADR-0035) · graphify CLI (ADR-0036 + backend flexibility) · alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor) · per-skill model override (`agent.models`) · 운영 정본 default align (v0.1.6 — wh-lint=deepseek-v4-flash · sync_interval=1h · hermes `delegation.model` 권장) · yaml schema drift auto-migration (v0.1.7 — `_migrate_agent_schema` 확장: 신설 field 자동 추가 + ADR-0035 폐기 field cleanup) | ✅ archive (`features/archive/` 다수) |
 | **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
 
 **v0.1.0 acceptance 달성** = F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 + dir_layout_refactor (모두 archive). install + update + skill registration + sync→ingest 자동화 사슬 + data-first layout end-to-end 검증 (multipass VM Ubuntu 24.04 ARM + Hermes v0.14.0 + LLM provider 환경에서 V1·V2·V3·V5a·V6·V7·V8·V9 PASS). v0.1.x patch 누적 (2026-05-22 v0.1.6 시점) — OCI 운영 정본 align 완료.

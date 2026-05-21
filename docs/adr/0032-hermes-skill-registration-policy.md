@@ -241,3 +241,65 @@ wh-lint Step 6 등 subagent 호출 시 적용되는 `delegation.model` 권장값
 - 이전 §Note (2026-05-20 agent_model_per_skill) — wh-lint default `minimax-m2.5` 결정. 본 §Note 가 운영 검증 trail 로 갱신 (한자→한글 정책이 v0.1.5 에서 model-agnostic layer 가 되며 minimax 한정 안전 가정 해제)
 
 본 변경의 분석 정본: features/archive/20260522_v016_operational_default_align/ (예정)
+
+---
+
+## Note (2026-05-22, feature `yaml_schema_drift_migration` v0.1.7) — `_migrate_agent_schema` 확장
+
+### 발견
+
+본 §Note 의 직전 §Note (v0.1.6 `v016_operational_default_align`) 에서 yaml.example default 를 운영 정본에 align 했으나, **운영자의 wikihub.yaml 은 .example 자동 sync 안 됨** — ADR-0031 §Decision A 의 "install.sh 가 yaml 미관여" 정책 정합. 결과: v0.1.5+ 신설 field (`agent.models`, `agent.timeout_sec`, `operations.pending_alert_age_sec` 등) 운영 yaml 부재 → render 가 default 600·flag 미주입 fallback → 운영자 manual systemd unit edit 4건 overwrite 사건 (2026-05-22 OCI).
+
+기존 `_migrate_agent_schema` 함수 (`install.sh:751`) 는 ADR-0033 (skill prefix `wh:` → `wh-`) + ADR-0032 §Note 2026-05-19 (oneshot_args `--yolo` 누락) 만 처리. 신설 field 자동 추가 미처리.
+
+### 결정 — `_migrate_agent_schema` 확장
+
+ADR-0031 §Note (v0.1.7) 의 schema mutation 책임 정합으로 본 함수의 처리 범위 확장:
+
+#### Group A — 기존 처리 (불변)
+- `agent.skill_prefix: "wh:" → "wh-"` (ADR-0033)
+- `agent.oneshot_args` legacy form → F5 schema (ADR-0032)
+- `agent.oneshot_args` 의 `--yolo` 누락 → in-place 삽입 (ADR-0032 §Note 2026-05-19)
+
+#### Group B — 자동 추가 (안전 default, **부재 시만**) — v0.1.7 신설
+- `agent.timeout_sec: 1200`
+- `agent.models: {wh-lint: deepseek-v4-flash, wh-ingest: deepseek-v4-pro}`
+- `operations.pending_alert_age_sec: 3600`
+- `operations.lint_contradiction_check: true`
+- `operations.graphify_enabled: true`
+- `operations.graphify_backend: ""`
+- `operations.graphify_min_version: "0.8.0"`
+- `operations.graphify_max_version: "0.99.99"`
+
+#### Group C — 자동 삭제 (ADR-0035 폐기 field cleanup) — v0.1.7 신설
+- `vaults[].options.bootstrap_allowed`
+- `vaults[].options.credentials_path`
+- `vaults[].options.root_folder_id`
+- `vaults[].options.cursor_path`
+
+#### 정책 — PTY-safe + idempotent + 보수적
+
+- **prompt 0** — v0.1.5 §Note 2026-05-20 의 PTY-safe 정책 일관성. Hermes PTY 환경에서 `[[ -t 0 ]]` 거짓 양성 회피.
+- **값 변경 자동 회피** — 값이 이미 존재하면 미터치 (운영자 의도 vs schema drift 구분 불가, 보수적 보호). 운영자가 새 default 적용 원하면 yaml 직접 편집 + install.sh 재실행.
+- **backup** — `.wikihub-bak.<utc_iso>` 변경 발생 시 자동 생성. safety net.
+- **idempotent** — 재실행 시 no-op (자동 추가는 부재 시만, 자동 삭제는 존재 시만).
+
+### 적용 layer
+
+`install.sh:751-870` 의 `_migrate_agent_schema` 단일 함수. 호출처 (`install.sh:1053`) 영향 없음. drift detect 단계의 Group A/B/C flag 분리 + Python heredoc mutation logic 확장.
+
+### Trust 가정
+
+ADR-0031 §Note v0.1.7 와 정합: **mutation 의 두 종류 분리**
+- **value mutation** — 운영자 trust boundary (install.sh 미관여)
+- **schema mutation** — yaml.example schema 의 single source of truth (install.sh 책임)
+
+### Cross-references
+
+- ADR-0031 §Note (2026-05-22 v0.1.7) — install.sh 의 yaml mutation 책임 boundary (value vs schema)
+- ADR-0035 — 폐기 field catalog (Group C cleanup 의 자료)
+- ADR-0036 — graphify 관련 신설 field (Group B 의 `graphify_*` 자료)
+- ADR-0037 — `pending_alert_age_sec` (Group B 자료)
+- 사건 trail: 2026-05-22 OCI 운영 사건 — 운영자 manual systemd unit edit 4건 손실 → 운영 yaml schema drift 진단 → 본 §Note 의 implementation trigger
+
+본 변경의 분석 정본: features/archive/20260522_yaml_schema_drift_migration/ (예정)

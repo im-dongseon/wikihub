@@ -167,3 +167,21 @@
 - **결론**: yaml.example 2줄 + install.sh 2블록 + setup.md 1줄 + ADR §Note + README 버전·로드맵·개발 상태 + HISTORY + VERSION. Step 4 (Review) 생략 — 외부 인터페이스 미변경 (스키마 동일, default 값만 변경, 가이드 추가). render dry-run 검증 — wh-lint.service 의 ExecStart 에 `--model deepseek-v4-flash` 정합 + vault@.timer 의 `OnUnitInactiveSec=3600s` 정합. v0.1.5 → v0.1.6 patch 승격 + 운영 server `install.sh --update`.
   - **graphify.md Step 2 정본 fix** (2026-05-22 후속, v0.1.6 유지): `_system/commands/graphify.md` Step 2 의 `graphify CLI` 호출에 `--backend $backend` flag + `timeout 300` 명시 lift — lint.md Step 9 의 backend-aware 호출 코드와 동일 패턴으로 정합. 이전 graphify.md Step 2 는 backend flag 부재로 graphify CLI auto-detect 의존 → 다중 backend env (예: ANTHROPIC_API_KEY + OLLAMA_API_KEY 공존) 시 우선순위 충돌 risk. fix 로 yaml `operations.graphify_backend` 명시값이 수동 `/wh-graphify` 호출에도 적용. v0.1.6 tag 재설정 (force-update) + latest 재설정.
 - **참조**: features/archive/20260522_v016_operational_default_align/
+
+---
+
+## [2026-05-22] yaml_schema_drift_migration (v0.1.7)
+
+- **목적**: v0.1.6 배포 직후 OCI 운영 server `install.sh --update` 실행 시 운영자의 manual systemd unit edit 4건 (lint·ingest `--model` × 2 + lint `TimeoutStartSec` + vault@.timer `OnUnitInactiveSec`) 손실 사건 surface. 진단: 운영자의 `~/wikihub/wikihub.yaml` 이 v0.1.0 era schema 동결 + v0.1.5+ 신설 field 부재 → render 의 default fallback (TimeoutStartSec=600, `--model` flag 미주입, OnUnitInactiveSec=600s) → 운영자 manual edit overwrite. install.sh 가 schema drift 보호 layer 신설.
+- **로직**: `install.sh` `_migrate_agent_schema` 확장 — 기존 Group A (ADR-0033 skill_prefix + ADR-0032 oneshot_args) 외에 두 그룹 신설.
+  1. **Group B — 자동 추가 (안전 default, 부재 시만)**: `agent.timeout_sec: 1200`, `agent.models: {wh-lint: deepseek-v4-flash, wh-ingest: deepseek-v4-pro}`, `operations.pending_alert_age_sec: 3600`, `operations.lint_contradiction_check: true`, `operations.graphify_enabled: true`, `operations.graphify_backend: ""`, `operations.graphify_min_version: "0.8.0"`, `operations.graphify_max_version: "0.99.99"`. yaml.example schema 와의 single source of truth 보장.
+  2. **Group C — 자동 삭제 (ADR-0035 폐기 field cleanup)**: `vaults[].options.{bootstrap_allowed, credentials_path, root_folder_id, cursor_path}` 잔존 시 삭제. schema noise 제거.
+  3. **정책**: PTY-safe (prompt 0 — v0.1.5 §Note 2026-05-20 일관성) + idempotent (재실행 no-op) + 값 변경 자동 회피 (운영자 trust — `sync_interval_sec: 600` 같은 값은 그대로). backup `.wikihub-bak.<utc_iso>` 매 migration 시 생성. ruamel.yaml round-trip 으로 주석 보존.
+  4. **drift detect**: Python single-shot 으로 3-group flag 수집 + 변경 발생 시 info log 로 어떤 drift 감지됐는지 출력 (운영자 surface).
+  5. **ADR 갱신**: ADR-0031 §Note (install.sh 의 yaml mutation 책임 boundary — value vs schema 분리), ADR-0032 §Note (`_migrate_agent_schema` 확장 범위 정본화).
+- **트레이드오프**:
+  - 값 변경 자동 회피 → 운영자가 새 default 적용 원하면 yaml 직접 편집 + install.sh 재실행 필요 (자동성 일부 희생, 운영자 trust 보호)
+  - yaml.example 의 신설 field 가 추가될 때마다 본 함수의 catalog 동기 갱신 필요 (추가 maintenance cost) — 단순 add 만이라 부담 작음
+  - PTY-safe 정책 유지 (prompt 0) → 값 변경 prompt 옵션 없음. `WIKIHUB_INTERACTIVE_MIGRATE=1` opt-in 은 v0.1.8+ 후보 (M3 미결 사항)
+- **결론**: install.sh `_migrate_agent_schema` 약 120줄 추가 (기존 ~80줄 → 약 200줄) + ADR-0031·ADR-0032 §Note + README 버전·로드맵 + VERSION 0.1.6→0.1.7 + HISTORY 항목. 자가 검증: fixture (v0.1.0 era yaml) 1차 migration → 신설 field 8건 자동 추가 + 폐기 field 2건 자동 삭제 + 운영자 의도 값 (sync_interval_sec=600, lint_interval_hours=24) 보존 + 주석 보존 확인. 2차 migration idempotent (diff 0). Step 4 (Review) — 멀티 reviewer 권장 수행이었으나 user 진행 압축 지시로 self-verification 으로 대체. v0.1.6 → v0.1.7 patch 승격 + 운영 server `install.sh --update` 흐름이 즉시 운영 yaml 자동 보강 효과.
+- **참조**: features/archive/20260522_yaml_schema_drift_migration/
