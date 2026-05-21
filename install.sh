@@ -717,6 +717,12 @@ _step5_instance_dirs() {
 # 5. Claude Code 구독 활용 (`--backend claude-cli`, API key 불필요):
 #    (env var 비움 — yaml operations.graphify_backend=claude-cli + Claude CLI binary PATH 만)
 #
+# 6. Google Gemini (`--backend gemini`, OpenAI-compatible endpoint):
+#    GEMINI_API_KEY=...
+#    GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+#    GEMINI_MODEL=gemini-2.5-flash-lite
+#    # graphify Pass 3 는 content 필드 직접 파싱 → non-reasoning flash-lite 계열 필수 (260521 §F 실증).
+#
 # === Alert channel — Telegram bot (ADR-0037 §D1) ===
 # wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
 # webhook 과 병행 — 양쪽 설정 시 둘 다 발송. 미설정 시 journal only.
@@ -1151,8 +1157,15 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
        <agent_invocation> "/wh:setup --enable"
 
 [운영 비용 환기 — graphify Pass 3 (ADR-0036)]
-  wh-lint timer (default 24h) 가 graphify chain 호출. wiki page 별 Claude/OpenAI subagent 호출
+  wh-lint timer (default 3h, v0.1.5) 가 graphify chain 호출. wiki page 별 Claude/OpenAI subagent 호출
   발생 — 운영자 API 비용 모델 인지 필요. 호출 빈도 통제: operations.lint_interval_hours 조정.
+
+[Hermes config.yaml 권장 (wikihub 정본 영역 외 — 운영자 책임)]
+  ~/.hermes/config.yaml 의 다음 필드 권장 설정:
+    delegation.model: minimax-m2.5         # wh-lint Step 6 등 subagent — non-reasoning 안정성 + 한자→한글 정합
+  wh-ingest·wh-lint 메인 모델은 wikihub agent.models 가 systemd \`--model\` 으로 lock — hermes
+  model.default 와 무관. Telegram 대화·미명시 skill (wh-query·wh-graphify·wh-setup) 의
+  model.default 는 운영자 일반 선호로 결정.
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
   curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash

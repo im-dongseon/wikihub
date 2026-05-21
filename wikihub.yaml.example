@@ -17,7 +17,7 @@ vaults:
   - id: gdrive
     type: gdrive_api
     enabled: false             # 운영 시작 시 true 로 변경
-    sync_interval_sec: 600     # 10분
+    sync_interval_sec: 3600    # 1h (v0.1.6 default 600 → 3600 — mechanical phase IO·log.md noise 절감, 260520 §V 운영 결정 align). has_changes=false 경로의 LLM cost 는 0 이지만 lsjson + log append cycle 빈도 6배 감소. 변경 detect 지연 (~1h) 트레이드오프 → 더 짧게 원하면 600 으로 override.
     local_path: ~/wikihub/vault/gdrive             # rclone mount 가 마운트하는 path (= mount_path 정합, ADR-0025)
     options:
       # ADR-0035: credentials_path / root_folder_id 폐기. rclone.conf 가 단일 인증 자료 (~/.config/rclone/rclone.conf).
@@ -66,7 +66,7 @@ agent:
   skill_prefix: "wh-"                                                     # ADR-0033 (ADR-0011 supersedes — colon `wh:` → hyphen `wh-`)
   timeout_sec: 1200                                                       # bash timeout + systemd TimeoutStartSec sync source (ADR-0032 §sub-4). v0.1.5 default 600 → 1200 — DeepSeek 등 느린 LLM backend 대비 (Hermes 실증, 2026-05-20).
   models:                                                                 # ADR-0032 §Note (v0.1.5) — per-skill model override. 빈 dict 면 hermes config.yaml.model.default 사용. reasoning 모델 (deepseek-v4-*, glm-5.1, mimo-v2.5-pro) 은 max_tokens 부족 시 hang risk — non-reasoning (minimax-m2.5/2.7, kimi-k2.5/2.6, glm-5, qwen3.5/3.6-plus) 권장.
-    wh-lint: minimax-m2.5                                                 # non-reasoning fast-response (Hermes 실증, 2026-05-20). wiki 전체 LLM 점검 (Step 3·4·5·6) — 한국어 출력 안정성 우선.
+    wh-lint: deepseek-v4-flash                                            # non-reasoning fast-response (latency 2.6~6.4s/call, 260521 §B 측정 — v0.1.6 default minimax-m2.5 → deepseek-v4-flash). wh-ingest (`-pro`) 와 동일 DeepSeek 패밀리 + opencode-go backend 일관성. 한자→한글 출력 안정성은 lint.md "출력 언어 정책" 섹션이 model-agnostic 보호 layer 로 담당. minimax-m2.5 보수적 default 원할 시 운영자 override.
     wh-ingest: deepseek-v4-pro                                            # per-source LLM 호출 (entity/concept 추출) — reasoning 모델의 정확도 활용. 운영 후 max_tokens hang surface 시 `qwen3.6-plus` 로 fallback 권장 (non-reasoning + 한국어 안정).
     # wh-query/graphify/setup 미명시 → hermes default.
   notify_on_fatal: true                                                   # ADR-0024 — Hermes 통지 (v0.1.0 은 stub, v0.2.x 활성화)

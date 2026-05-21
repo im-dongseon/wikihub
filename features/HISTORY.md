@@ -147,3 +147,22 @@
 
 
 - **참조**: features/archive/20260519_graphify_integration/ + features/archive/20260519_graphify_usage_review/
+
+---
+
+## [2026-05-22] v016_operational_default_align (v0.1.6)
+
+- **목적**: 운영자가 v0.1.5 배포 이후 자기 환경 (`~/wikihub/wikihub.yaml` + `~/.hermes/config.yaml` + `~/.config/wikihub/env` + systemd unit) 에 누적 적용한 운영 결정 ↔ wikihub repo 정본 default 의 4건 mismatch 해소. 새 운영자 / fork 가 운영자의 검증된 결정을 install 직후 자동 전수받도록 정본화.
+- **로직**: 4건 정본 변경 + 부속 갱신.
+  1. **`wikihub.yaml.example` `agent.models.wh-lint`**: `minimax-m2.5` → `deepseek-v4-flash`. 운영자 검증 latency (2.6~6.4s/call, 260521 §B 측정) + wh-ingest (`-pro`) 와 DeepSeek 패밀리·opencode-go backend 일관성. 한자→한글 보호는 lint.md "출력 언어 정책" 섹션이 v0.1.5 에서 이미 model-agnostic layer 로 강화돼 minimax 한정 안전 가정 해제.
+  2. **`wikihub.yaml.example` `vaults[].sync_interval_sec`**: `600` → `3600` (1h). mechanical phase IO·log.md noise 절감 (lsjson + log append 빈도 6배 감소). has_changes=false 경로 LLM cost 는 0 이지만 idle cycle 의 IO 부담 완화.
+  3. **`install.sh` `_step5_instance_dirs` env template**: graphify backend 예시 6번째 항목 `gemini` 추가 (`GEMINI_API_KEY` + `GEMINI_BASE_URL` + `GEMINI_MODEL`, non-reasoning flash-lite 계열 권장 — 260521 §F 실증). yaml.example `graphify_backend` catalog 의 `gemini` 와 비대칭 해소.
+  4. **`install.sh` `_step8_guide` + `_system/commands/setup.md` Step 1**: hermes `~/.hermes/config.yaml` 의 `delegation.model: minimax-m2.5` 권장 안내 추가. 자동 patch 미수행 (Hermes 는 wikihub 외 사용처 존재 가능 — 의도 침범 회피). setup.md Step 1 의 warn 출력에 정합 체크 1줄 추가 (정보 출력만).
+  5. **부속**: ADR-0032 §Note 추가 (wh-lint default 갱신 사유 + 운영 정본 trail). README v0.1.0 → v0.1.6 (badge + 개발 상태 1줄 + 로드맵 표 v0.1.x 누적 row 추가). `_system/VERSION` 0.1.5 → 0.1.6.
+- **트레이드오프**:
+  - wh-lint default `deepseek-v4-flash` 의 DeepSeek 한자 섞임 빈도가 minimax-m2.5 와 동등하다는 정량 검증은 운영자 실 운영 trail (한자 issue 미보고) 외에 없음 — lint.md output policy 의 후처리 보호 layer 가 의존 layer.
+  - sync_interval 1h → 변경 detect 지연 ~1h. 더 짧게 원하면 운영자 override.
+  - hermes config 자동 patch 회피 → 새 운영자가 안내 미숙독 시 subagent 가 hermes default 모델 fallback → 한자/비용/latency 불일치. setup.md warn 으로 surface.
+  - README ADR-0035·0036·0037 일괄 align (Mermaid gws/SA 잔존·F3·F4 description·graphify URL) 은 본 feature scope 초과로 별도 feature 분리 (v0.1.7 후보).
+- **결론**: yaml.example 2줄 + install.sh 2블록 + setup.md 1줄 + ADR §Note + README 버전·로드맵·개발 상태 + HISTORY + VERSION. Step 4 (Review) 생략 — 외부 인터페이스 미변경 (스키마 동일, default 값만 변경, 가이드 추가). render dry-run 검증 — wh-lint.service 의 ExecStart 에 `--model deepseek-v4-flash` 정합 + vault@.timer 의 `OnUnitInactiveSec=3600s` 정합. v0.1.5 → v0.1.6 patch 승격 + 운영 server `install.sh --update`.
+- **참조**: features/archive/20260522_v016_operational_default_align/

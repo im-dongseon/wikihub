@@ -194,3 +194,50 @@ agent:
 - backlog 260520-backlog.md (deepseek-v4-pro 로 lint 분리 시도 → reasoning hang surface 진단). 본 §Note 가 backlog §C-1 의 옵션 1 (systemd unit `--model` 추가) 을 yaml-driven 으로 격상.
 
 본 변경의 분석 정본: features/archive/20260520_agent_model_per_skill/ (예정)
+
+---
+
+## Note (2026-05-22, feature `v016_operational_default_align` v0.1.6) — wh-lint default 갱신 + hermes delegation.model 권장
+
+### 발견
+
+운영자가 v0.1.5 배포 이후 자기 환경에서 누적 적용한 결정 ↔ wikihub repo 정본 default 와 mismatch:
+
+1. **wh-lint 운영 = `deepseek-v4-flash`** (260521 §B latency 측정 2.6~6.4s/call, ExecStart verified) ↔ 정본 = `minimax-m2.5`
+2. **hermes `delegation.model` = `minimax-m2.5`** (운영자 적용, 260520 §M) ↔ wikihub 가이드 부재
+3. **vault `sync_interval_sec` = 3600 (1h)** (운영 적용 + 16:40 KST cycle verified) ↔ 정본 default = 600 (10분)
+
+### 결정
+
+#### A. yaml.example `agent.models.wh-lint` default 갱신
+
+`minimax-m2.5` → `deepseek-v4-flash`. 사유:
+
+- 운영자 검증된 latency 이점 (2.6~6.4s vs 5~10s 추정) 새 운영자에게 자동 전수
+- wh-ingest (`deepseek-v4-pro`) 와 동일 DeepSeek 패밀리 + opencode-go backend 일관성 (fast-response tier vs reasoning tier 명확 분리)
+- 한자→한글 보호는 lint.md "출력 언어 정책" 섹션이 v0.1.5 에서 이미 model-agnostic layer 로 강화됨 — DeepSeek 한자 섞임 risk 에도 동일 보호 적용 (이전 §Note 2026-05-20 의 minimax 한정 가정 해제)
+
+#### B. install.sh `_step8_guide` + setup.md Step 1 — hermes `delegation.model` 권장 안내
+
+wh-lint Step 6 등 subagent 호출 시 적용되는 `delegation.model` 권장값 `minimax-m2.5` 명시. wikihub 가 hermes config 를 자동 patch 하지 않음 (Hermes 는 wikihub 외 사용처 존재 가능 — 의도 침범 회피) — 안내만, warn 만.
+
+`wh-ingest`·`wh-lint` 메인은 wikihub `agent.models` 가 systemd `--model` 으로 lock — hermes `model.default` 와 완전 독립. 운영자가 hermes `model.default` 를 어떻게 바꾸든 wikihub 자동 운영 영향 없음.
+
+#### C. (별도 align, 본 §Note 인접) yaml.example `sync_interval_sec` default 600 → 3600
+
+직접적 §Decision 갱신 아님 — 운영 IO·log noise 절감 결정. mechanical phase 의 has_changes=false 경로 LLM cost 는 0 이지만 lsjson + log append 빈도가 6배 감소.
+
+### 영향
+
+- 새 운영자 install 직후 wh-lint default = deepseek-v4-flash → latency 이점 자동 전수
+- 기존 운영자 (이미 `deepseek-v4-flash` 적용) wikihub.yaml 영향 없음
+- setup.md Step 1 의 warn 출력에 `delegation.model` 정합 체크 1줄 추가 — 정보 출력만
+- ADR-0036 §Note (graphify backend flexibility) 의 backend catalog 와 install.sh env template GEMINI 블록 정합 (별도 결정 — backend 가이드 보강)
+
+### Cross-references
+
+- 운영 정본 근거: backlog `260520_wikihub_backlog.md` §V·§M (lint 모델 분리 trial trail), `260521_wikihub_backlog.md` §B·§C2·§F (TimeoutStartSec 1200·graphify backend·non-reasoning 정책)
+- ADR-0036 §Note (graphify backend flexibility) — backend 선택 layer 와 본 §Note 의 모델 선택 layer 분리
+- 이전 §Note (2026-05-20 agent_model_per_skill) — wh-lint default `minimax-m2.5` 결정. 본 §Note 가 운영 검증 trail 로 갱신 (한자→한글 정책이 v0.1.5 에서 model-agnostic layer 가 되며 minimax 한정 안전 가정 해제)
+
+본 변경의 분석 정본: features/archive/20260522_v016_operational_default_align/ (예정)
