@@ -923,6 +923,7 @@ PYEOF
 }
 
 # 1회성 env file 마이그레이션 — ADR-0038 (v0.1.7 follow-up).
+# !!! v0.1.8 에서 본 함수 + main flow 의 호출 라인 삭제 예정 (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup #M" 참조) !!!
 # 기존 ~/.config/wikihub/env 의 legacy 키 (OLLAMA_*/ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_*) 삭제
 # + Telegram 값 + 운영자 custom profile (WIKIHUB_GRAPHIFY_<X>_*, ollama_gemma 외) 보존
 # + ollama_gemma default inject (부재 시만, 기존 값 보존).

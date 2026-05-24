@@ -115,3 +115,20 @@ v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅)
 - vault 규모 N >> 10k 도달 — lsjson 응답 latency p95 > sync_interval_sec/3
 - Google native 파일이 vault 에 추가 — mtime 안정성 측정 verification 필요
 - rclone v2.x major upgrade 시 lsjson schema breaking change
+
+---
+
+## graphify_profile_namespace 산출 (2026-05-24 종료, v0.1.7 follow-up)
+
+### v0.1.8 cleanup 항목 — 1회성 migration 코드 삭제
+
+| ID | 영역 | 항목 | 결정 |
+|---|---|---|---|
+| #M | install.sh | `_migrate_graphify_env` 함수 (약 110줄, install.sh ~line 911-1035) | **v0.1.8 에서 삭제** — 운영자가 본 patch (v0.1.7 follow-up, commit `daba82f`) 의 `install.sh --update` 1회 실행 후 namespace 정착되면 본 함수는 영구 no-op return (drift 0). 1회성 migration 책임 완료. 동반 삭제: main flow 의 호출 라인 (line 1912) + 함수 머리 코멘트 + ADR-0036 §Note 2026-05-24 의 §Decision 7 (마이그레이션 절차) 의 `_migrate_graphify_env` 명시 부분. 보존: `_step5_instance_dirs` 의 env template (fresh install 용) + `_migrate_agent_schema` 의 `graphify_profile` 자동 추가 + W_invalid warn (운영자 yaml 수정 실수 대응으로 영구 가치). |
+
+### 삭제 전 확인 사항 (v0.1.8 진입 직전)
+
+- OCI 운영 server 의 env 파일이 namespace 정착됨 — `grep '^WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_' ~/.config/wikihub/env` 가 3 키 반환
+- legacy 키 부재 확인 — `grep -E '^(OLLAMA_|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_)' ~/.config/wikihub/env` 빈 결과
+- backup 파일 보존 (30일 retention 정책으로 v0.1.8 시점 자동 삭제 가능, 운영자 manual 보존 권장 시 별도 copy)
+- ADR-0038 §"후속 영향" 의 재검토 트리거 와는 별개 — migration 코드 삭제 ≠ ADR-0038 supersede
