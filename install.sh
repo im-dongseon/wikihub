@@ -96,6 +96,7 @@ if [[ -n "${WIKIHUB_INSTANCE_ROOT:-}" ]]; then
     exit 1
 fi
 # WIKIHUB_HOME silent bug detect: 명시 설정됐고 그 path 가 이전 의미 repo (= .git + im-dongseon/wikihub) 면 fail-fast
+# !!! v0.1.8 cleanup 예정 #P (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup 묶음") — pre-v0.1.0 layout transition 1회성 detect, 운영자 base 정착 후 영구 무용 !!!
 if [[ -d "$WIKIHUB_HOME/.git" ]] && \
    (cd "$WIKIHUB_HOME" 2>/dev/null && git config --get remote.origin.url 2>/dev/null | grep -q "im-dongseon/wikihub"); then
     err "WIKIHUB_HOME=$WIKIHUB_HOME 가 이전 semantic (repo dir) 로 사용됨."
@@ -728,6 +729,11 @@ _hermes_config_path() {
 # 1회성 schema lift — operational yaml 의 schema drift fix.
 # ADR-0033 + ADR-0032 (기존: `wh:` / oneshot_args) + ADR-0032 §Note v0.1.7 (확장: v0.1.5+
 # 신설 field 자동 추가 + ADR-0035 폐기 field cleanup). PTY-safe — prompt 0, idempotent.
+#
+# !!! v0.1.8 cleanup 예정 (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup 묶음") !!!
+#   #N: Group A 삭제 (A_skill_prefix / A_oneshot_legacy / A_yolo_missing) — v0.1.0~v0.1.3 era 1회성
+#   #O: Group C 삭제 (vaults[].options.{bootstrap_allowed,credentials_path,root_folder_id,cursor_path}) — v0.1.4/v0.1.5 era 1회성
+#   보존: Group B (v0.1.5+ field auto-add, schema 보강 영구 가치) + A4 W_graphify_profile_invalid warn (운영자 mistake 대응)
 _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0

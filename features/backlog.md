@@ -120,15 +120,49 @@ v0.1.0 acceptance = F4 (✅) + update_mode (✅) + install_scope_reduction (✅)
 
 ## graphify_profile_namespace 산출 (2026-05-24 종료, v0.1.7 follow-up)
 
-### v0.1.8 cleanup 항목 — 1회성 migration 코드 삭제
+### v0.1.8 cleanup 묶음 — 1회성 migration 코드 일괄 삭제 (별도 feature)
 
-| ID | 영역 | 항목 | 결정 |
-|---|---|---|---|
-| #M | install.sh | `_migrate_graphify_env` 함수 (약 110줄, install.sh ~line 911-1035) | **v0.1.8 에서 삭제** — 운영자가 본 patch (v0.1.7 follow-up, commit `daba82f`) 의 `install.sh --update` 1회 실행 후 namespace 정착되면 본 함수는 영구 no-op return (drift 0). 1회성 migration 책임 완료. 동반 삭제: main flow 의 호출 라인 (line 1912) + 함수 머리 코멘트 + ADR-0036 §Note 2026-05-24 의 §Decision 7 (마이그레이션 절차) 의 `_migrate_graphify_env` 명시 부분. 보존: `_step5_instance_dirs` 의 env template (fresh install 용) + `_migrate_agent_schema` 의 `graphify_profile` 자동 추가 + W_invalid warn (운영자 yaml 수정 실수 대응으로 영구 가치). |
+운영자 base 가 v0.1.7 정착 → v0.1.0~v0.1.6 era 의 1회성 migration 코드가 영구 no-op state. 단일 feature `legacy_migration_cleanup` (가칭) 으로 일괄 정리.
+
+| ID | 영역 | 항목 (라인 수) | 도입 시점 | 안전 마진 | 결정 |
+|---|---|---|---|---|---|
+| #M | install.sh `_migrate_graphify_env` | 함수 전체 (약 110줄, line ~911-1035) + main flow 호출 (line ~1917) + 머리 코멘트 + ADR-0036 §Note 의 §Decision 7 일부 | v0.1.7 follow-up (2026-05-24) | (v0.1.7→v0.1.8 = 1 minor) | **v0.1.8 삭제** — namespace 정착 후 drift 0 영구 no-op. 보존: `_step5_instance_dirs` env template (fresh install 영구 필요) + `_migrate_agent_schema` 의 `graphify_profile` 자동 추가·W_invalid warn (운영자 mistake 대응으로 영구 가치) |
+| #N | install.sh `_migrate_agent_schema` **Group A** | drift detect (line ~778-786) + migration 블록 (line ~866-883) + info log case 3개 (line ~828-830). 약 30줄 | ADR-0033 (v0.1.1~v0.1.2) + ADR-0032 (v0.1.0 + v0.1.3 §Note) | 4 minor (v0.1.3→v0.1.7) | **v0.1.8 삭제** — `A_skill_prefix` (wh:→wh-) + `A_oneshot_legacy` (F5 schema lift) + `A_yolo_missing` (in-place 삽입). 운영자 base 가 v0.1.4+ 이후 install 했으면 영구 no-op |
+| #O | install.sh `_migrate_agent_schema` **Group C** | drift detect (line ~807-814) + migration 블록 (line ~912-922) + info log case `C_*` (line ~831). 약 20줄 | ADR-0035 (v0.1.4/v0.1.5) | 2-3 minor (v0.1.5→v0.1.7) | **v0.1.8 삭제** — `vaults[].options.{bootstrap_allowed, credentials_path, root_folder_id, cursor_path}` legacy field cleanup. gws SA + cursor 모델 폐기 후 운영자 yaml 의 잔존 field 자동 삭제 — base 정착 후 영구 no-op. 단 #G (mount@ root_folder_id 전파, F4 backlog) 와의 의미적 충돌 0 — #G 는 신규 field 도입이고 #O 는 폐기 field cleanup |
+| #P | install.sh `WIKIHUB_HOME` silent bug detect | line 98-108 (10줄) + `err` 안내 + 폐기된 `migrate_layout.sh` 참조 | ADR-0034 (pre-v0.1.0, data-first layout transition) | 7+ minor (v0.0.x→v0.1.7) | **v0.1.8 삭제** — pre-v0.1.0 운영자 base 0건 가정 정합. ADR-0034 §sub-3 의 "release 전 마지막 architectural fix" 표현이 이미 본 detect 의 영구 무용 명시 |
+| #Q | `scripts/migrate_layout.sh` | 220줄 파일 전체 | ADR-0034 (pre-v0.1.0) | 7+ minor | **v0.1.8 삭제** — pre-v0.1.0 → v0.1.0 transition 1회성 helper. v0.1.0 이후 install 모든 운영자에게 영구 무의미. install.sh `WIKIHUB_SPARSE_PATHS` 의 `scripts` 도 그대로 (다른 active script 만 남음) |
 
 ### 삭제 전 확인 사항 (v0.1.8 진입 직전)
 
-- OCI 운영 server 의 env 파일이 namespace 정착됨 — `grep '^WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_' ~/.config/wikihub/env` 가 3 키 반환
-- legacy 키 부재 확인 — `grep -E '^(OLLAMA_|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_)' ~/.config/wikihub/env` 빈 결과
-- backup 파일 보존 (30일 retention 정책으로 v0.1.8 시점 자동 삭제 가능, 운영자 manual 보존 권장 시 별도 copy)
-- ADR-0038 §"후속 영향" 의 재검토 트리거 와는 별개 — migration 코드 삭제 ≠ ADR-0038 supersede
+운영자 base 의 마이그레이션 정착 검증:
+
+```bash
+# #M — env namespace 정착
+grep '^WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_' ~/.config/wikihub/env   # 3 키 반환 기대
+grep -E '^(OLLAMA_|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_)' ~/.config/wikihub/env   # 빈 결과 기대
+
+# #N — agent schema 정착 (Group A)
+yq '.agent.skill_prefix' ~/wikihub/wikihub.yaml                # "wh-" 기대 (wh: 아님)
+yq '.agent.oneshot_args' ~/wikihub/wikihub.yaml                # {skill} placeholder + --yolo 포함 기대
+
+# #O — vaults options cleanup 정착 (Group C)
+yq '.vaults[].options | keys' ~/wikihub/wikihub.yaml           # legacy 4 키 (bootstrap_allowed 등) 부재 기대
+
+# #P — WIKIHUB_HOME 의미 정착
+[[ -d "$HOME/wikihub/.git" ]] && echo "WARN: legacy repo state 잔존" || echo "OK: data-first layout 정착"
+
+# #Q — backup retention 만료 (선택)
+find ~/.config/wikihub -name '*.wikihub-bak.*' -mtime +30      # 30일 만료 backup 자동 정리 확인
+```
+
+모두 통과하면 v0.1.8 cleanup feature 진입 가능.
+
+### v0.1.8 cleanup feature 의 시작 안내
+
+- 분류: **리팩토링** (1회성 migration 코드 일괄 삭제)
+- 분석 대상 파일: `install.sh` + `scripts/migrate_layout.sh` + ADR-0034·0036 §Note (cross-reference 정리)
+- 영향: install.sh ~170줄 감소 + scripts/migrate_layout.sh 220줄 삭제 = 약 390줄 감소
+- ADR 작업:
+  - ADR-0034 §"후속 영향" 에 "v0.1.8 의 `migrate_layout.sh` 삭제 — pre-v0.1.0 transition 완료 정합" 1줄
+  - ADR-0036 §Note 2026-05-24 의 §Decision 7 (마이그레이션 절차) 정리 — `_migrate_graphify_env` 부분 삭제 + Rollback procedure 의 `<utc_iso>` placeholder 안내만 보존
+  - ADR-0038 §"후속 영향" 에 "v0.1.8 _migrate_graphify_env 삭제 — 운영자 base 정착 정합" 1줄

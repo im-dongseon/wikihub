@@ -2,6 +2,8 @@
 # scripts/migrate_layout.sh
 # wikihub layout migration helper (ADR-0034) — pre-ADR-0034 layout → v0.1.0 data-first.
 #
+# !!! v0.1.8 cleanup 예정 #Q (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup 묶음") — pre-v0.1.0 transition 1회성 helper, 운영자 base 정착 후 영구 무용. 본 파일 전체 삭제 예정 !!!
+#
 # pre-layout: ~/wikihub (repo) + ~/wikihub-instance (운영 자산)
 # new layout: ~/wikihub (운영 자산, WIKIHUB_HOME) + ~/.local/share/wikihub/src (시스템 코드, WIKIHUB_SRC)
 #
