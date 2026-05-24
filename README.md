@@ -123,16 +123,33 @@ multi-instance: 두 env 모두 override 가능 (`WIKIHUB_HOME=/var/wikihub-prod 
 ### 호출
 
 ```bash
-# 표준 — install / update 공용
+# 표준 — install / update 공용 (production: 검증된 stable)
 curl -fsSL --proto '=https' --tlsv1.2 \
   https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
 
 # 특정 tag 명시 (rollback 포함)
 curl -fsSL ... | bash -s -- --version v0.1.0
 
+# 검증 채널 (canary tag — release 전 OCI 사전 검증)
+curl -fsSL ... | bash -s -- --branch canary
+
 # 명시적 destructive 재설치 (5초 confirm + safety guard 4중) — WIKIHUB_SRC 만 wipe, WIKIHUB_HOME 안전
 curl -fsSL ... | bash -s -- --force-fresh
 ```
+
+### 배포 채널 (tag 운영)
+
+| Tag | 성격 | 가리키는 commit | 운영 의미 |
+|---|---|---|---|
+| `latest` | lightweight, force-move | 가장 최근 release commit (= 가장 최신 `vX.Y.Z` tag 와 동일) | **production default**. 검증된 stable 만 promote |
+| `canary` | lightweight, force-move | release 전 검증 trace commit | **pre-production 검증**. v0.1.X+1 작업 중 OCI 검증 trace — 통과 시 `latest` 로 promote |
+| `vX.Y.Z` | annotated, immutable | 해당 release commit | release 영구 record. rollback target |
+
+검증 흐름:
+1. 메인테이너가 v0.1.X+1 dev branch 의 작업 단위마다 `git tag -f canary <commit> && git push origin canary --force`
+2. 운영자가 OCI 검증: `install.sh --branch canary`
+3. 검증 통과 → annotated `v0.1.X+1` tag 발급 + `latest` 를 그 commit 으로 force-move (canary 와 동일)
+4. canary tag 는 그대로 보존 — 다음 검증 cycle 에 force-update
 
 ### 동작
 

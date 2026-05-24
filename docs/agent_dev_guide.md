@@ -214,6 +214,51 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 > 결정 이유의 상세는 ADR로 옮겨갔으므로 HISTORY 항목은 "생성 ADR" 한 줄로 참조한다. ADR이 없는 단순 운영성 feature는 이 줄을 생략한다.
 
+### 배포 채널 — `canary` tag 활용 (release 전 OCI 검증)
+
+운영 server (OCI) 에서 main merge 전 검증 trace 가 필요한 경우, **`canary` tag** 를 활용해 pre-production 검증 cycle 진행.
+
+**시점**: dev branch (예: v0.1.8) 에서 작업 단위 commit 누적 중. 각 검증 가치 있는 commit 마다 canary tag force-update.
+
+**절차**:
+
+```bash
+# 1. dev branch 의 최신 commit 에 canary tag — 매 검증 단위마다 force-update
+git tag -f canary <commit-sha>
+git push origin canary --force
+
+# 2. OCI 운영 server 에서 canary 채널로 install/update
+~/.local/share/wikihub/src/install.sh --update --branch canary
+# 또는 fresh:
+# curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/canary/install.sh | bash -s -- --branch canary
+
+# 3. 검증 — wh-lint / wh-ingest / wh-graphify timer 사이클 + journal
+journalctl --user -u wikihub-lint.service -n 50
+systemctl --user list-timers
+
+# 4. 검증 통과 → release 진행
+#    (a) annotated tag 발급
+git tag -a v0.1.X+1 -m "v0.1.X+1 — <description>" <commit-sha>
+git push origin v0.1.X+1
+#    (b) latest 를 canary 와 동일 commit 으로 force-move
+git tag -f latest <commit-sha>
+git push origin latest --force
+#    (c) main 으로 merge — dev branch (v0.1.X+1) 정합
+git checkout main && git merge v0.1.X+1 && git push origin main
+
+# 5. canary 는 그대로 보존 — 다음 검증 cycle 의 force-update target
+```
+
+**channel 의미**:
+
+| Tag | 성격 | 가리키는 commit | 운영 의미 |
+|---|---|---|---|
+| `latest` | lightweight, force-move | 가장 최근 release commit (= 가장 최신 `vX.Y.Z` tag 와 동일) | production default. 검증된 stable 만 promote |
+| `canary` | lightweight, force-move | release 전 검증 trace commit | pre-production. 검증 통과 시 `latest` 로 promote |
+| `vX.Y.Z` | annotated, immutable | 해당 release commit | release 영구 record |
+
+install.sh 변경 없음 — ADR-0030 의 `_resolve_ref` chain (`--version` / `--branch` / `BRANCH` env / `latest` fallback) 가 이미 운영자 의도 명시 흐름 지원. 운영자가 `--branch canary` 명시함으로써 검증 모드 진입 의도 self-document.
+
 ### Feature 종료 처리 (필수)
 
 feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 후), 다음을 수행한다.
