@@ -834,6 +834,14 @@ if "graphify_max_version" not in operations:
     flags.append("B_graphify_max_version")
 if "graphify_profile" not in operations:
     flags.append("B_graphify_profile")
+if "lint_interval_hours" not in operations:
+    flags.append("B_lint_interval_hours")
+
+# Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
+for idx, v in enumerate(vaults):
+    if isinstance(v, dict) and "sync_interval_sec" not in v:
+        vid = v.get("id", f"idx{idx}")
+        flags.append(f"B_vault_sync_interval_sec:{vid}")
 
 # A4 (ADR-0038) — 기존 graphify_profile 값의 정규식 fail-fast (install-time, non-fatal warn).
 # 운영자가 yaml 편집해 invalid profile 명 (대문자/특수문자/공백) 박은 경우 install 시점 surface.
@@ -878,6 +886,8 @@ PYEOF
             B_graphify_min_version)     info "  - [ADR-0036] operations.graphify_min_version 부재 → \"0.8.0\" 추가" ;;
             B_graphify_max_version)     info "  - [ADR-0036] operations.graphify_max_version 부재 → \"0.99.99\" 추가" ;;
             B_graphify_profile)         info "  - [ADR-0038] operations.graphify_profile 부재 → \"ollama_gemma\" 추가" ;;
+            B_lint_interval_hours)      info "  - [v0.1.6] operations.lint_interval_hours 부재 → 3 추가 (default 3h)" ;;
+            B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
             W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
             C_*)                        info "  - [ADR-0035] 폐기 field cleanup: ${f#C_}" ;;
         esac
@@ -945,14 +955,20 @@ _op_defaults = {
     "graphify_min_version": "0.8.0",
     "graphify_max_version": "0.99.99",
     "graphify_profile": "ollama_gemma",
+    "lint_interval_hours": 3,           # v0.1.6 default 3h (v0.1.5 era 24h 에서 변경)
 }
 for k, v in _op_defaults.items():
     if k not in operations:
         operations[k] = v
 
+# Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
+vaults = data.get("vaults") or []
+for v in vaults:
+    if isinstance(v, dict) and "sync_interval_sec" not in v:
+        v["sync_interval_sec"] = 3600
+
 # Group C — ADR-0035 폐기 field cleanup
 _legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
-vaults = data.get("vaults") or []
 for v in vaults:
     if not isinstance(v, dict):
         continue

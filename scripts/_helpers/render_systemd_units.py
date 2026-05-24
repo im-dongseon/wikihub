@@ -215,7 +215,7 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
         "rclone_config_path": rclone_config_path,
         "rclone_bin": rclone_bin,
         "vfs_cache_max_size": str(ops.get("vfs_cache_max_size", "10G")),
-        "lint_interval_hours": str(ops.get("lint_interval_hours", 24)),
+        "lint_interval_hours": str(ops.get("lint_interval_hours", 3)),   # v0.1.6 default (was 24 — v0.1.0 era stale)
         "agent_invocation": agent_invocation,
         "skill_prefix": agent.get("skill_prefix", "wh-"),
         # F5 — yaml.agent.timeout_sec ↔ systemd TimeoutStartSec sync (R3-CR3-2 B-HIGH-2)
@@ -251,7 +251,7 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
     ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
     """
     return {
-        "sync_interval_sec": str(vault.get("sync_interval_sec", 600)),
+        "sync_interval_sec": str(vault.get("sync_interval_sec", 3600)),   # v0.1.6 default 1h (was 600 — v0.1.5 era stale)
     }
 
 
