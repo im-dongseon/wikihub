@@ -597,6 +597,49 @@ _install_graphify() {
     ok "graphify ${installed:-?} 설치 완료 ($pin_spec)"
 }
 
+_install_yq() {
+    # mikefarah/yq (go version) — `_system/commands/lint.md` + `graphify.md` 의 `yq '.x // default'`
+    # 문법 정합. Ubuntu apt 의 `yq` 는 다른 도구 (Python wrapper) — 문법 호환 안 됨.
+    # GitHub Releases 의 single-binary direct download — supply chain: HTTPS + GitHub host trust.
+    # SHA256 verify 는 v0.2.x 검토 트리거 — mikefarah/yq 의 multi-hash `checksums` 형식
+    # (BLAKE-384/SHA-256/MD5 columnar) 추출 보강 필요 (rclone 의 SHA256SUMS 단순 형식과 다름).
+    local pinned="${YQ_PINNED_VERSION:-4.44.3}"
+
+    if command -v yq >/dev/null 2>&1; then
+        local current
+        current="$(yq --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')"
+        if [[ -n "$current" && "$current" == "$pinned" ]]; then
+            ok "yq $current 이미 설치됨 (pinned 일치) — skip"
+            return 0
+        fi
+        info "yq ${current:-?} 설치되어 있으나 pinned=$pinned 와 다름 — 재설치"
+    fi
+
+    local arch base tmpdir
+    case "$(uname -m)" in
+        aarch64|arm64) arch="arm64" ;;
+        x86_64|amd64)  arch="amd64" ;;
+        *) err "지원하지 않는 arch: $(uname -m)"; exit 2 ;;
+    esac
+    base="https://github.com/mikefarah/yq/releases/download/v${pinned}"
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' RETURN
+    info "yq v${pinned} 설치 (GitHub Releases + curl retry)"
+    _curl_with_retry "${base}/yq_linux_${arch}" "${tmpdir}/yq" \
+        || { err "yq 다운로드 실패 ($base/yq_linux_${arch})"; exit 2; }
+    chmod +x "${tmpdir}/yq"
+    # quick smoke test (binary execution) — corrupt download 차단
+    "${tmpdir}/yq" --version >/dev/null 2>&1 \
+        || { err "yq binary 실행 검증 실패 — 다운로드 손상 의심"; exit 2; }
+    sudo install -m 0755 "${tmpdir}/yq" /usr/local/bin/yq
+    rm -rf "$tmpdir"
+    trap - RETURN
+    command -v yq >/dev/null 2>&1 || { err "yq 설치 실패"; exit 2; }
+    local installed
+    installed="$(yq --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')"
+    ok "yq v${installed} 설치 완료 (/usr/local/bin/yq)"
+}
+
 _enforce_rclone_conf_perms() {
     local conf="${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}"
     if [[ -f "$conf" ]]; then
@@ -621,10 +664,12 @@ _write_installed_versions_sidecar() {
     # Stale .tmp.* 5분 이상 자동 cleanup (이전 process 의 SIGTERM/errexit 흔적).
     find "$target_dir" -maxdepth 1 -name "${target_base}.tmp.*" -mmin +5 -delete 2>/dev/null || true
 
-    local rclone_v graphify_v
+    local rclone_v graphify_v yq_v
     rclone_v="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//' || true)"
     # ADR-0036 — graphify 도 INSTALLED_VERSIONS.json 의 fact 로 기록. graphify --version 형식 미보장 → 단순 last-field 추출.
     graphify_v="$(graphify --version 2>/dev/null | awk '{print $NF; exit}' || true)"
+    # yq (mikefarah/yq go version) — `yq --version` 출력 last-field "v4.44.3" → v prefix strip.
+    yq_v="$(yq --version 2>/dev/null | awk '{print $NF; exit}' | sed 's/^v//' || true)"
 
     local tmp="${target}.tmp.$$"
     # 본 함수 ERR/RETURN 시 tmp 자동 회수 — set -e 환경에서 cat/sync fail 시 orphan 차단.
@@ -634,6 +679,7 @@ _write_installed_versions_sidecar() {
   "schema_version": 1,
   "rclone": "${rclone_v:-}",
   "graphify": "${graphify_v:-}",
+  "yq": "${yq_v:-}",
   "uv": "${UV_VERSION}",
   "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
   "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -650,6 +696,7 @@ _step45_rclone() {
     _install_rclone
     _enforce_rclone_conf_perms
     _install_graphify
+    _install_yq    # lint.md/graphify.md 의 runtime yq 호출 의존
     _write_installed_versions_sidecar
     # rc port pre-check — yaml 이 이미 Step 5 에서 복사된 상태 가정. 첫 실행 (yaml 미복사) 시 skip.
     if [[ -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
