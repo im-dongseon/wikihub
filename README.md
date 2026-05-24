@@ -16,7 +16,7 @@
 
 ---
 
-> **개발 상태** (2026-05-22 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), **yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
+> **개발 상태** (2026-05-24 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), **graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
 
 ---
 

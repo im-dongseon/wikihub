@@ -238,3 +238,106 @@ yaml schema 토글 신설 — lint chain 안에서 graphify 호출 skip 가능:
 ### 본 §Note 의 분석 정본
 
 [features/archive/20260520_lint_fallback_toggles/](../../features/archive/20260520_lint_fallback_toggles/)
+
+---
+
+## Note (2026-05-24, feature `graphify_profile_namespace` v0.1.7 follow-up) — CLI v8 sync
+
+> namespace 격리 결정은 본 §Note 에서 제외 — **ADR-0038** 로 분리 (Partially supersedes §D2). 본 §Note 는 graphify v8 의 실제 CLI 동작에 wikihub 정합하는 결정만 보유.
+
+### 발견
+
+graphify v8 (`graphifyy>=0.8.0`) 의 `--help` 와 OCI 운영 검증 (2026-05-22~24) 으로 graphify.md Step 2 가 v8 과 어긋남 확인:
+
+- v8 는 `extract <wiki>` subcommand 필수 (`graphify <wiki>` 단독 명령 없음). 기존 graphify.md 는 v7 패턴 (`graphify <wiki>` + `--update` flag) 사용 — 동작 불가.
+- `--out DIR` 명시 → `DIR/graphify-out/` 생성. 기존 graphify.md 는 묵시적 cwd `graphify-out/` 가정.
+- `--max-concurrency N` (default 4; "set 1 for local LLMs" 권장).
+- `--api-timeout S` (default 600s) per-request timeout — wrapper `timeout 300` (기존) 보다 더 큼.
+- v8 의 `update <wiki>` subcommand 는 AST-only (code 전용, no LLM) — markdown wiki 부적합.
+- v8 의 `check-update <wiki>` 는 "cron-safe" 표현 — OCI 검증 (3 시나리오 모두 exit=0 + stdout 무음) → 활용 불가.
+
+`docs/graphify-backend-test-reference.md` (2026-05-23) 가 ground truth.
+
+### 결정 A. CLI v8 sync
+
+graphify.md Step 2 전면 재작성 — `extract <wiki>` subcommand + `--out $WIKIHUB_HOME` + `--max-concurrency N` + `--model M` flag. v7 era 의 `--update` flag 사용 안 함 (v8 미존재).
+
+### 결정 B. endpoint pattern → ollama env 분기
+
+`--backend ollama` 호출 시 endpoint URL 형태로 두 env 컨벤션 중 분기:
+
+- `http://localhost:*` / `http://127.0.0.1:*` / `http://[::1]:*` (loopback hostname-anchored) → `OLLAMA_HOST` (native Ollama API)
+- 그 외 (`https://opencode.ai/zen/go/v1` 등) → `OLLAMA_BASE_URL` (OpenAI-compat client)
+
+substring (`*:11434*`) 대신 prefix-anchored — 외부 URL 의 `:11434` 우발 match 차단 (design review 합의).
+
+### 결정 C. `--max-concurrency` 휴리스틱
+
+- model 명에 `cloud` 부분일치 (예: `gemma4:31b-cloud`) → 4 (cloud-proxied, network-bound)
+- 그 외 + endpoint 가 loopback hostname → 1 (진짜 local LLM, resource-bound)
+- 그 외 (외부 cloud endpoint) → 4 (cloud, network-bound)
+
+v8 `--help` 의 "default 4; set 1 for local LLMs" 권장 정합.
+
+### 결정 D. 증분 빌드 — graphify internal cache 위임
+
+graphify v8 의 `extract` 가 graph.json 보존 시 internal cache 로 unchanged 노드 자동 보존. 외부 `--update` flag 불필요. 2-mode dispatch:
+
+- 수동 `--rebuild` flag → graph.json 삭제 후 `extract` (force full)
+- 그 외 (timer + 수동 일반) → `extract` 그대로 (graphify cache 가 자동 incremental)
+
+v7 era 의 rebuild/incremental/first 3-분기 폐기.
+
+### 결정 E. `check-update` gate deferred
+
+OCI 검증 (2026-05-24) 결과 — 3 시나리오 (graph.json 미존재 / extract 직후 up-to-date / wiki 수정 후 pending) 모두 `exit=0` + stdout 무음. graphify 본가의 notification 채널 미명세. gate 활용 불가 → 본 patch 에서 미사용. **재검토 트리거**: graphify 본가의 spec 명확화 (`--json` flag 도입 또는 exit code semantics 문서화) 시 v0.2.x 에서 재방문.
+
+### 결정 F. Step 3 결과 검증 — partial graph.json 보호
+
+`extract` 호출 후 graph.json 검증:
+
+- `jq 'keys' graph.json` fail → graph.json 이 invalid JSON 또는 partial write (timeout 도중 kill) → **삭제 + exit 1** (force clean). 다음 호출이 fresh state 로 시작.
+- pass → `jq '.nodes | length'` + `jq '.links | length'` 로 node/edge 수 출력. **edges 는 `.links` 위치** — NetworkX node-link format 정합 (`docs/graphify-backend-test-reference.md` §1 검증).
+
+### Rollback procedure
+
+`install.sh --update` 후 문제 발생 시 운영자 복원 절차:
+
+```bash
+# 1. backup 위치 확인 (.wikihub-bak.<utc_iso>)
+ls -la ~/.config/wikihub/env.wikihub-bak.*
+ls -la ~/wikihub/wikihub.yaml.wikihub-bak.*
+
+# 2. env 복원
+cp ~/.config/wikihub/env.wikihub-bak.<utc_iso> ~/.config/wikihub/env
+chmod 600 ~/.config/wikihub/env
+
+# 3. yaml 복원
+cp ~/wikihub/wikihub.yaml.wikihub-bak.<utc_iso> ~/wikihub/wikihub.yaml
+
+# 4. (선택) 즉시 적용 — 다음 timer fire 도 자동 적용
+sudo -u <wikihub_user> systemctl --user restart wikihub-lint.service
+
+# 5. install.sh 재실행 금지 — drift detect 가 다시 migration 시도
+```
+
+backup 파일은 30일 retention (install.sh `_migrate_graphify_env` 의 A6 정책). 30일 이내 복원 가능.
+
+### 배포 Gap window 분석
+
+systemd `EnvironmentFile=-%h/.config/wikihub/env` 는 **service start 시점 1회 read** semantics. install.sh 가 running service 중 env 파일을 rewrite 해도:
+- 호출 시점 ≤ install.sh start: graphify 이미 old env 받음 → 그 호출은 old 상태로 완료. Safe.
+- 호출 시점 > install.sh end: new env 로 동작. Safe.
+- install.sh 시간 동안: graphify subprocess 이미 받은 env, mv 의 inode swap 은 in-memory env 에 영향 없음. Safe.
+
+→ **실 race window = 0**. 운영자가 즉시 검증하고 싶을 때만 `systemctl --user restart wikihub-lint.service`.
+
+### Cross-references 갱신
+
+- ADR-0006 unified orchestration: 본 patch 의 lint.md Step 9 단순화 (`<agent_invocation> "/wh-graphify"` 1줄) 정합 — "각 skill 이 자기 unified 경로" 의 strict 해석. backend dispatch 의 single source 가 graphify.md.
+- ADR-0031 §Note (v0.1.7): `_migrate_*` 함수의 schema vs value mutation boundary — 본 §Note 의 모든 마이그레이션 (env legacy 키 삭제, yaml graphify_profile 자동 추가, profile 값 invalid warn-but-no-mutate) 이 정합.
+- ADR-0038 (신규): namespace 격리 — 본 §Note 의 §D2 partial supersede.
+
+### 본 §Note 의 분석 정본
+
+[features/20260524_graphify_profile_namespace/](../../features/20260524_graphify_profile_namespace/) (active, archive 이동 예정)

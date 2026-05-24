@@ -11,9 +11,9 @@ WorkingDirectory={wikihub_home}
 ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
-# ADR-0036 — graphify Pass 3 (LLM subagent) 의 API key. lenient `-` prefix:
-#   파일 부재 또는 빈 값이어도 unit start 자체는 성공 — graphify subprocess 만 fail.
-#   운영자가 ~/.config/wikihub/env 에 ANTHROPIC_API_KEY=... 채움 (chmod 600, install.sh 가 보장).
+# ADR-0036 + ADR-0038 (v0.1.7 follow-up) — graphify subprocess env namespace 격리.
+#   파일 부재 또는 빈 값이어도 unit start 자체는 성공 — graphify subprocess 만 fail (lenient `-` prefix).
+#   default WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_* 3 키 install.sh prefill. ollama_gemma 외 profile cookbook → docs/graphify-backend-test-reference.md §6.
 EnvironmentFile=-%h/.config/wikihub/env
 ExecStart={agent_invocation_for_wh_lint} "/wh-lint"
 SuccessExitStatus=0 75

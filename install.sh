@@ -679,54 +679,31 @@ _step45_rclone() {
 
 _step5_instance_dirs() {
     mkdir -p "$WIKIHUB_HOME"
-    # ADR-0036 — graphify Pass 3 (LLM API) 의 key 자료 layer.
+    # ADR-0036 + ADR-0038 (v0.1.7 follow-up) — graphify subprocess 의 env namespace 격리.
     # systemd unit (`wikihub-lint.service`) 의 `EnvironmentFile=-%h/.config/wikihub/env` 가 본 파일을 lenient 로 읽음.
-    # 운영자가 수동으로 `ANTHROPIC_API_KEY=...` 채움. install.sh 는 빈 template + 권한만 보장.
+    # default 3 키 (WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_<ENDPOINT|API_KEY|MODEL>) prefill — 운영자가 ollama_gemma 외 profile 사용 시만 편집 (cookbook 참조).
     local wh_config_dir="$HOME/.config/wikihub"
     local wh_env_file="$wh_config_dir/env"
     mkdir -p "$wh_config_dir"
     chmod 700 "$wh_config_dir"
     if [[ ! -f "$wh_env_file" ]]; then
         cat > "$wh_env_file" <<'EOF'
-# wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036).
-# graphify Pass 3 (LLM subagent semantic extraction) 의 backend 자료.
-# 운영자가 수동으로 본 파일을 채워야 graphify chain (wh-lint Step 9) 이 정상 동작.
-# 미입력 상태에서도 systemd unit start 자체는 성공 — graphify subprocess 만 fail.
+# wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036 + ADR-0038).
+# 본 파일의 자료는 graphify subprocess 호출 시점에 namespace 격리되어 explicit 주입 (Hermes parent leak 차단).
+# 추가 profile (openrouter / openai / claude / gemini / deepseek / kimi) cookbook:
+#   → docs/graphify-backend-test-reference.md §6 (Alternative profile examples)
 #
-# Hermes terminal.env_passthrough 미설정 시 graphify subprocess (hermes 가 spawn) 에 secret env
-# 가 strip 될 수 있음 → ~/.hermes/config.yaml 의 terminal.env_passthrough 에 backend env 추가
-# 또는 본 파일 + Hermes 양쪽 동시 채움 (defensive).
-#
-# 형식: KEY=VALUE (per line, 따옴표 미사용). backend 별 예시 (yaml operations.graphify_backend 정합):
-#
-# 1. Anthropic Claude (`--backend claude`):
-#    ANTHROPIC_API_KEY=sk-ant-...
-#
-# 2. OpenAI (`--backend openai`):
-#    OPENAI_API_KEY=sk-...
-#
-# 3. OpenCode-go / OpenRouter / LM Studio 등 OpenAI-compatible (`--backend ollama`):
-#    OLLAMA_BASE_URL=https://opencode.ai/zen/go/v1
-#    OLLAMA_API_KEY=<provider key>
-#    OLLAMA_MODEL=minimax-m2.5
-#
-# 4. 진짜 Ollama 로컬 (`--backend ollama`, API 비용 0):
-#    OLLAMA_BASE_URL=http://localhost:11434/v1
-#    OLLAMA_MODEL=qwen2.5-coder:7b
-#
-# 5. Claude Code 구독 활용 (`--backend claude-cli`, API key 불필요):
-#    (env var 비움 — yaml operations.graphify_backend=claude-cli + Claude CLI binary PATH 만)
-#
-# 6. Google Gemini (`--backend gemini`, OpenAI-compatible endpoint):
-#    GEMINI_API_KEY=...
-#    GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-#    GEMINI_MODEL=gemini-2.5-flash-lite
-#    # graphify Pass 3 는 content 필드 직접 파싱 → non-reasoning flash-lite 계열 필수 (260521 §F 실증).
-#
+# 명명 컨벤션: WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>
+# yaml `operations.graphify_profile` 값 (lowercase) 과 1:1 매칭.
+
+# === default active: ollama_gemma (Ollama daemon + gemma4:31b-cloud) ===
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=http://127.0.0.1:11434
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=local-daemon
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=gemma4:31b-cloud
+
 # === Alert channel — Telegram bot (ADR-0037 §D1) ===
 # wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
-# webhook 과 병행 — 양쪽 설정 시 둘 다 발송. 미설정 시 journal only.
-# bot 생성: @BotFather 에서 /newbot → token 받음 + chat_id 는 https://api.telegram.org/bot<token>/getUpdates 또는 @userinfobot 활용.
+# bot 생성: @BotFather 에서 /newbot → token 받음 + chat_id 는 @userinfobot 활용.
 #    TELEGRAM_ALERT_BOT_TOKEN=123456:ABC...
 #    TELEGRAM_ALERT_CHAT_ID=-100123456
 EOF
@@ -802,6 +779,16 @@ if "graphify_min_version" not in operations:
     flags.append("B_graphify_min_version")
 if "graphify_max_version" not in operations:
     flags.append("B_graphify_max_version")
+if "graphify_profile" not in operations:
+    flags.append("B_graphify_profile")
+
+# A4 (ADR-0038) — 기존 graphify_profile 값의 정규식 fail-fast (install-time, non-fatal warn).
+# 운영자가 yaml 편집해 invalid profile 명 (대문자/특수문자/공백) 박은 경우 install 시점 surface.
+# 값 mutation 안 함 (ADR-0031 §Note 정합) — warn 만, 운영자가 직접 수정.
+import re as _re
+_profile = operations.get("graphify_profile")
+if _profile and not _re.match(r"^[a-z][a-z0-9_]*$", str(_profile)):
+    flags.append(f"W_graphify_profile_invalid:{_profile}")
 
 # Group C — ADR-0035 폐기 field 잔존 (자동 삭제)
 _legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
@@ -813,7 +800,7 @@ for idx, v in enumerate(vaults):
         if lo in opts:
             flags.append(f"C_vaults[{idx}].options.{lo}")
 
-print(",".join(flags))
+print("\n".join(flags))   # newline separator — profile 값에 `,` 박힌 경우 robust (code review 1 §M1)
 PYEOF
 )"
 
@@ -822,8 +809,9 @@ PYEOF
     # info log 출력 — 운영자가 어떤 drift 가 감지됐는지 surface
     info "schema drift detected — auto migration (PTY-safe, idempotent):"
     local f
-    IFS=',' read -ra _flags <<< "$drift_flags"
-    for f in "${_flags[@]}"; do
+    # newline-separated flags — profile 값에 `,` 박힌 경우 안전 (code review 1 §M1)
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
         case "$f" in
             A_skill_prefix)        info "  - [ADR-0033] agent.skill_prefix \"wh:\" → \"wh-\"" ;;
             A_oneshot_legacy)      info "  - [ADR-0032] agent.oneshot_args legacy → F5 schema (`{skill}` + --yolo)" ;;
@@ -836,9 +824,11 @@ PYEOF
             B_graphify_backend)         info "  - [ADR-0036] operations.graphify_backend 부재 → \"\" 추가 (auto-detect)" ;;
             B_graphify_min_version)     info "  - [ADR-0036] operations.graphify_min_version 부재 → \"0.8.0\" 추가" ;;
             B_graphify_max_version)     info "  - [ADR-0036] operations.graphify_max_version 부재 → \"0.99.99\" 추가" ;;
+            B_graphify_profile)         info "  - [ADR-0038] operations.graphify_profile 부재 → \"ollama_gemma\" 추가" ;;
+            W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
             C_*)                        info "  - [ADR-0035] 폐기 field cleanup: ${f#C_}" ;;
         esac
-    done
+    done <<< "$drift_flags"
 
     # backup — 변경 발생 시만 (위 early return 통과한 경우)
     local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
@@ -901,6 +891,7 @@ _op_defaults = {
     "graphify_backend": "",
     "graphify_min_version": "0.8.0",
     "graphify_max_version": "0.99.99",
+    "graphify_profile": "ollama_gemma",
 }
 for k, v in _op_defaults.items():
     if k not in operations:
@@ -929,6 +920,120 @@ PYEOF
     ok "schema migration 완료 (backup: $backup)"
     info "  운영자 의도 영향 field (sync_interval_sec, lint_interval_hours 등) 의 새 default 적용은"
     info "  wikihub.yaml.example 참조 후 manual edit + install.sh 재실행 권장."
+}
+
+# 1회성 env file 마이그레이션 — ADR-0038 (v0.1.7 follow-up).
+# 기존 ~/.config/wikihub/env 의 legacy 키 (OLLAMA_*/ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_*) 삭제
+# + Telegram 값 + 운영자 custom profile (WIKIHUB_GRAPHIFY_<X>_*, ollama_gemma 외) 보존
+# + ollama_gemma default inject (부재 시만, 기존 값 보존).
+# PTY-safe + idempotent + backup (.wikihub-bak.<utc_iso>, 30일 retention).
+# `_step5_instance_dirs` 직후 호출 — fresh install 직후 호출 시 drift 0 → no-op return.
+_migrate_graphify_env() {
+    local wh_config_dir="$HOME/.config/wikihub"
+    local wh_env_file="$wh_config_dir/env"
+    [[ -f "$wh_env_file" ]] || return 0   # 부재 시 _step5_instance_dirs 가 fresh template 처리
+
+    # drift detect — legacy 잔존 OR ollama_gemma 3-키 중 1개라도 부재
+    # `|| [[ -n "$line" ]]` — env 파일 마지막 줄이 trailing newline 없는 경우도 buffer 처리 (code review 1 §H1)
+    local has_legacy=0 has_endpoint=0 has_api_key=0 has_model=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            \#*|"") continue ;;
+            OLLAMA_BASE_URL=*|OLLAMA_API_KEY=*|OLLAMA_MODEL=*) has_legacy=1 ;;
+            ANTHROPIC_API_KEY=*|OPENAI_API_KEY=*)              has_legacy=1 ;;
+            GEMINI_API_KEY=*|GEMINI_BASE_URL=*|GEMINI_MODEL=*) has_legacy=1 ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=*) has_endpoint=1 ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=*)  has_api_key=1 ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=*)    has_model=1 ;;
+        esac
+    done < "$wh_env_file"
+
+    if [[ "$has_legacy" == 0 && "$has_endpoint" == 1 && "$has_api_key" == 1 && "$has_model" == 1 ]]; then
+        return 0   # 이미 migrated — no-op
+    fi
+
+    info "env file drift detected — auto migration (PTY-safe, idempotent):"
+    [[ "$has_legacy" == 1 ]]   && info "  - [ADR-0038] legacy graphify keys (OLLAMA_*/ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_*) → 삭제"
+    [[ "$has_endpoint" == 0 ]] && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT 부재 → \"http://127.0.0.1:11434\" 추가"
+    [[ "$has_api_key" == 0 ]]  && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY 부재 → \"local-daemon\" 추가"
+    [[ "$has_model" == 0 ]]    && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL 부재 → \"gemma4:31b-cloud\" 추가"
+    info "  - 운영자 코멘트 라인은 backup 파일에서만 참조 가능 (canonical template 으로 교체)"
+
+    # backup
+    local backup="$wh_env_file.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$wh_env_file" "$backup"
+    info "backup: $backup"
+
+    # 보존 대상 추출 — `|| [[ -n "$line" ]]` 로 last-line-no-newline 안전 (code review 1 §H1)
+    local tg_lines=""
+    local custom_lines=""
+    local og_endpoint="" og_api_key="" og_model=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            \#*|"") continue ;;
+            TELEGRAM_ALERT_BOT_TOKEN=*|TELEGRAM_ALERT_CHAT_ID=*)
+                tg_lines+="${line}"$'\n' ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=*)
+                og_endpoint="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=}" ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=*)
+                og_api_key="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=}" ;;
+            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=*)
+                og_model="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=}" ;;
+            WIKIHUB_GRAPHIFY_*=*)
+                custom_lines+="${line}"$'\n' ;;
+            # 그 외 legacy 키는 drop (silently)
+        esac
+    done < "$wh_env_file"
+
+    # default fill (부재 시만 — 기존 값 보존, ADR-0031 §Note value mutation 회피)
+    : "${og_endpoint:=http://127.0.0.1:11434}"
+    : "${og_api_key:=local-daemon}"
+    : "${og_model:=gemma4:31b-cloud}"
+
+    # atomic write — tmp → rename (동일 디렉토리 → 동일 fs)
+    local tmp="$wh_env_file.tmp"
+    {
+        cat <<EOF
+# wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036 + ADR-0038).
+# 본 파일의 자료는 graphify subprocess 호출 시점에 namespace 격리되어 explicit 주입 (Hermes parent leak 차단).
+# 추가 profile (openrouter / openai / claude / gemini / deepseek / kimi) cookbook:
+#   → docs/graphify-backend-test-reference.md §6 (Alternative profile examples)
+#
+# 명명 컨벤션: WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>
+# yaml \`operations.graphify_profile\` 값 (lowercase) 과 1:1 매칭.
+
+# === default active: ollama_gemma (Ollama daemon + gemma4:31b-cloud) ===
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=${og_endpoint}
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=${og_api_key}
+WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=${og_model}
+EOF
+        if [[ -n "$custom_lines" ]]; then
+            printf '\n'
+            echo "# === 운영자 등록 추가 profile (operator custom — 자동 보존) ==="
+            printf '%s' "$custom_lines"
+        fi
+        printf '\n'
+        cat <<'EOF'
+# === Alert channel — Telegram bot (ADR-0037 §D1) ===
+# wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
+# bot 생성: @BotFather 에서 /newbot → token, chat_id 는 @userinfobot.
+EOF
+        if [[ -n "$tg_lines" ]]; then
+            printf '%s' "$tg_lines"
+        else
+            cat <<'EOF'
+#    TELEGRAM_ALERT_BOT_TOKEN=123456:ABC...
+#    TELEGRAM_ALERT_CHAT_ID=-100123456
+EOF
+        fi
+    } > "$tmp"
+    mv "$tmp" "$wh_env_file"
+    chmod 600 "$wh_env_file"
+
+    # A6 — backup 파일 30일 retention (install.sh `_patch_hermes_external_dirs` 패턴 추종)
+    find "$wh_config_dir" -maxdepth 1 -name 'env.wikihub-bak.*' -mtime +30 -delete 2>/dev/null || true
+
+    ok "env migration 완료 (backup: $backup)"
 }
 
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
@@ -1253,9 +1358,11 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   2. rclone OAuth 발급 (ADR-0035 — gws SA 폐기, rclone.conf 단일 인증 자료):
        rclone config              # remote name 은 wikihub.yaml.vaults[*].options.rclone_remote_name 정합
        chmod 0600 ~/.config/rclone/rclone.conf
-  3. graphify LLM API key 입력 (ADR-0036 — wh-lint Step 9 chain 의 Pass 3 가 요구):
+  3. graphify LLM 자료 — default (ollama_gemma + local Ollama daemon) 미사용 시 (ADR-0038):
        \$EDITOR ~/.config/wikihub/env
-       # 예: ANTHROPIC_API_KEY=sk-ant-...  (또는 OPENAI_API_KEY=...)
+       # 명명: WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>
+       # 추가 profile cookbook → docs/graphify-backend-test-reference.md §6
+       # yaml \`operations.graphify_profile\` 값 변경도 함께 (default ollama_gemma).
        # 미입력 상태에서도 systemd start 자체는 성공 — graphify subprocess 만 fail.
   4. /wh:setup --enable 호출 — drift 동기화 + systemd unit + 첫 ingest prompt:
        <agent_invocation> "/wh:setup --enable"
@@ -1806,6 +1913,7 @@ main() {
     # ADR-0035: _step4_gws 폐기 (gws CLI 단독 폐기)
     _step45_rclone
     _step5_instance_dirs    # ADR-0031: yaml 미관여 (이름 변경 + cp 삭제)
+    _migrate_graphify_env   # ADR-0038 (v0.1.7 follow-up): 기존 env 파일의 legacy 키 마이그레이션 (fresh install 직후엔 no-op)
     _step6_agent_skill
 
     [[ "$INSTALL_MODE" == "fresh" ]] && _step7_linger
