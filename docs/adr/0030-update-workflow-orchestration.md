@@ -82,6 +82,7 @@ F4 backlog 의 결함 #C·#D + R16-L2 + design review 3 round (R1·R2·R3) 의 C
   - **ADR-0010** conformance 회복 — supersede 아님. ADR-0010 §Decision 의 `latest` 절차 + `_system/VERSION` detect 가 본 ADR 의 implementation spec.
   - **ADR-0023** Note 추가 — clean wipe (`rm -rf + clone`) 은 fresh install / `--force-fresh` 명시 호출에만 한정. update path 는 본 ADR 의 fetch + reset.
   - **F5 hermes_adapter** 와 독립 — install.sh 가 systemd render 직접 수행이므로 hermes 부재·`/wh:setup` skill 미등록 상태에서도 update path full functional. `/wh:setup` 호출은 best-effort skill 메타 갱신.
+  - 2026-05-26: `install_update_hardening` (v0.1.8) 가 update flow 3 결함 fix. (1) `_system/INSTALLED_VERSIONS.json` `.gitignore` 등록 (install.sh runtime artifact 가 `git status --porcelain` 의 `??` detect 로 update guard L1439 차단됐던 결함). (2) `git reset --hard refs/tags/<ref>` 직후 `WIKIHUB_INSTALL_SELF_RESTARTED` guard + `exec "$0" "$@"` self-restart — bash 가 mid-execution 에서 disk source 변경을 reflect 안 하던 anti-pattern 정합화 (`WIKIHUB_SKILLS=` 등 module-level array 가 새 source 와 mismatch → file lookup fail → rollback 됐던 결함). (3) `_install_graphify` 진입 직후 `export PATH=$VENV_PATH/bin:$PATH` — L578 comment 와 실제 동작 불일치 fix (운영자 shell PATH 에 venv/bin 자연 없음 → `command -v graphify` fail 됐던 결함).
   - **재검토 트리거**: rclone mount 외 vault type 도입 (F6 `vault_directory`) 시 stop/start sequence 가 vault type-aware 분기 필요할 수 있음.
 
 ## Notes

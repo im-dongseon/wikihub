@@ -127,6 +127,7 @@
 - v0.2.x 검토 트리거: graphify-side token-budget / backend 통제 schema (`operations.graphify.*`), PyPI hash pin 옵션, secret material layer 통합.
 - 2026-05-25: `lint_operations_improvements` (v0.1.8) 가 graphify timeout wrapper 의 yaml expose 작업 완료. `graphify.md` Step 2 의 6 위치 hard-coded `timeout 720` 가 `timeout "$timeout_sec"` 로 변경 (yaml `operations.graphify_timeout_sec` 정본, default 900s = 15분). 운영자 backend 별 조정 가능. graphify.md:156 의 "yaml expose 는 v0.2.x deferred" 코멘트 폐기 처리.
 - 2026-05-26: `update_path_fixes` (v0.1.8, D3=B) 가 graphify hermes skill 폐기 + systemd service 격상. `wh-graphify` 폐기 (Layer 1 LLM wrapper = deterministic bash 작업의 over-engineering, `wikihub_monitor` D1 정정 정신 정합). 정본 = `scripts/wikihub_graphify.sh` (bash) + `_system/systemd/wikihub-graphify.service.template` (oneshot, timer 없음). lint Step 9 가 변경 감지 시만 `systemctl --user start wikihub-graphify.service` trigger — cost gate 보존. semantic extraction LLM 호출 (Layer 2, graphify CLI 내부 ollama_cloud 등) 유지. §D6 single-source 정신 정합 (정본 위치만 hermes skill → systemd service 로 이동).
+- 2026-05-26: `install_update_hardening` (v0.1.8) 가 `_install_graphify` 의 PATH prepend 책임 fix — 진입 직후 `export PATH=$VENV_PATH/bin:$PATH` 추가. install.sh L578 comment 의 "venv 의 bin/ 이 PATH 에 우선해야" 와 실제 동작 불일치 (운영자 shell PATH 에 venv/bin 자연 없음 → `command -v graphify` fail 됐던 결함) 정합화. install.sh process 한정 prepend — systemd unit 의 `Environment=PATH=$VENV_PATH/bin:...` 와 정책 일관, shell init 미수정.
 
 ### 재검토 트리거
 

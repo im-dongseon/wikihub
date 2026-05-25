@@ -563,6 +563,11 @@ _install_graphify() {
     # supply chain hash pin enforce 는 v0.2.x 검토 트리거.
     local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.8.0,<1.0.0}"
 
+    # install_update_hardening (v0.1.8): venv 의 bin/ 이 install-time PATH 에 우선해야
+    # `command -v graphify` check 가 정합 동작. 운영자 shell PATH 에 venv/bin 자연 없음 (OCI default)
+    # → install.sh process 한정 prepend. systemd unit 의 PATH=$VENV_PATH/bin:... 과 정책 일관.
+    export PATH="$VENV_PATH/bin:$PATH"
+
     if command -v graphify >/dev/null 2>&1; then
         local current
         current="$(graphify --version 2>/dev/null | awk '{print $NF}' || true)"
@@ -1474,6 +1479,23 @@ _step2_update() {
         err "git reset --hard 후 working tree 여전히 dirty — disk full / 디스크 오류 의심"
         err "  진단: df -h $WIKIHUB_SRC; git -C $WIKIHUB_SRC status"
         exit 2   # trap 이 rollback
+    fi
+
+    # install_update_hardening (v0.1.8): self-update anti-pattern fix —
+    # `git reset --hard` 가 disk 의 install.sh 자체를 갈아엎지만 bash 는 이미 read 한 array
+    # (WIKIHUB_SKILLS=) + 함수 body 를 유지. 새 source 의 변경 정합화 위해 self-restart.
+    # WIKIHUB_INSTALL_SELF_RESTARTED guard — 정확히 한 번만 exec. 새 process 가 같은 line
+    # 도달 시 skip (reset 은 idempotent — 같은 ref 라 noop). exec 은 PID 유지 + 인자 전파.
+    # fd 200 (install.lock) 명시 close — 새 process 가 fresh lock 잡도록 (HIGH-N4 fd
+    # inheritance 차단, `bootstrap_clone_then_exec` L161 와 동일 패턴).
+    if [[ -z "${WIKIHUB_INSTALL_SELF_RESTARTED:-}" ]]; then
+        info "install.sh self-restart with refreshed source (post-reset)"
+        export WIKIHUB_INSTALL_SELF_RESTARTED=1
+        exec 200>&- 2>/dev/null || true
+        # _step2_update() scope 안 — $@ 는 함수 인자 (empty). bootstrap_clone_then_exec
+        # L169 와 동일하게 top-level L124 의 ${ORIGINAL_ARGS[@]} 사용 → 자식 process 가
+        # 원래 호출 인자 (--version canary 등) 그대로 받음.
+        exec "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
     fi
 
     # 2e. VERSION 비교 + downgrade 분기 (R2-MED-2)
