@@ -166,3 +166,19 @@ find ~/.config/wikihub -name '*.wikihub-bak.*' -mtime +30      # 30일 만료 ba
   - ADR-0034 §"후속 영향" 에 "v0.1.8 의 `migrate_layout.sh` 삭제 — pre-v0.1.0 transition 완료 정합" 1줄
   - ADR-0036 §Note 2026-05-24 의 §Decision 7 (마이그레이션 절차) 정리 — `_migrate_graphify_env` 부분 삭제 + Rollback procedure 의 `<utc_iso>` placeholder 안내만 보존
   - ADR-0038 §"후속 영향" 에 "v0.1.8 _migrate_graphify_env 삭제 — 운영자 base 정착 정합" 1줄
+
+---
+
+## branch_strategy_formalize 산출 (2026-05-25 진행, v0.1.8 묶음)
+
+본 feature 의 design review 에서 surfacing 된 범위 외 항목 — 별도 feature 또는 운영 결정.
+
+| ID | 영역 | 항목 | 출처 | 우선순위 |
+|---|---|---|---|---|
+| BL-1 | scripts | `scripts/promote_canary.sh` / `release.sh` 헬퍼 — Step 5 5 액션 누락 방지 (메인테이너 단일 명령 wrap) | design_review_2 L5 | low (수동 절차로 충분) |
+| BL-2 | GitHub repo settings | Tag protection rule 정립 — `v*.*.*` 보호, `latest`/`canary` 는 protect 금지 (force-update 필요) | design_review_2 M2 | medium (v0.1.8 release 직전 확인 권장) |
+| BL-3 | 버전 정책 | patch 자릿수 도입 결정 (v0.X.Y.Z 토폴로지) — hotfix 빈도 증가 시 검토 | plan.md Q2 default 보류 | low (현재 미발생) |
+| BL-4 | 메소드론 | squash commit 안에 다중 feat_id 가 합쳐지는 경우의 conventional commit naming 컨벤션 | design_review_2 범위 외 5 | low (현재 1 feat = 1 squash 정합) |
+| BL-5 | 메소드론 | AGENTS.md ↔ docs/agent_dev_guide.md 정본 분리 모델 재검토 — 중복 표 (Step 5 5 액션, Tag 운영, mermaid) 를 한쪽으로 통일하고 다른 쪽은 참조 축약 | code_review_2 O2 | medium (정본 동기화 결함 재발 방지) |
+| BL-6 | 메소드론 | `git push --force-with-lease` 첫 push 동작 (lease 부재 시) — 사실상 `--force` 와 동등, race-safe 미보장. push 직전 `git fetch origin v0.X.Y` 선행 권고 메소드론 보강 | code_review_2 O3 | low (단일 maintainer 모델에서 발생 빈도 낮음) |
+| BL-7 | 버전 정책 + 거버넌스 | production OCI critical bug 시 hotfix 시나리오 — BL-3 (patch 자릿수 도입) 와 결합. v0.2.x 진입 전 결정 필수 | code_review_2 O4 + R1-H5 | medium (production 사고 시 행동 불가 위험) |

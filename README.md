@@ -146,10 +146,10 @@ curl -fsSL ... | bash -s -- --force-fresh
 | `vX.Y.Z` | annotated, immutable | 해당 release commit | release 영구 record. rollback target |
 
 검증 흐름:
-1. 메인테이너가 v0.1.X+1 dev branch 의 작업 단위마다 `git tag -f canary <commit> && git push origin canary --force`
-2. 운영자가 OCI 검증: `install.sh --branch canary`
-3. 검증 통과 → annotated `v0.1.X+1` tag 발급 + `latest` 를 그 commit 으로 force-move (canary 와 동일)
-4. canary tag 는 그대로 보존 — 다음 검증 cycle 에 force-update
+1. 메인테이너가 v0.X.Y 버전 브랜치의 매 squash merge 직후 `git tag -f canary && git push origin canary --force` (AGENTS.md §3 Step 5 액션 2)
+2. 운영자가 OCI 검증: `install.sh --update --branch canary` (표준 호출형 — `--version canary` 금지)
+3. release batch — 메인테이너가 OCI 검증 통과 판단 → `main merge --no-ff` + annotated `vX.Y.Z` tag + `latest` force-move (3 ref 동일 commit)
+4. canary tag 는 release 직전 commit 그대로 보존 — 다음 minor 첫 squash 까지 OCI trace
 
 ### 동작
 
@@ -172,14 +172,18 @@ WikiHub는 5단계 Feature-based Workflow를 따릅니다. 상세 가이드: [`A
 
 ```mermaid
 flowchart TD
-    Plan["Step 1: Plan"]
+    Plan["Step 1: Plan<br/>(타겟 버전 브랜치 결정)"]
     AD["Step 2: Analysis & Design"]
-    Impl["Step 3: Implementation"]
+    Impl["Step 3: Implementation<br/>(feature/&lt;id&gt; on v0.X.Y)"]
     Review["Step 4: Review<br/>(조건부)"]
-    Deploy["Step 5: Deployment<br/>(조건부)"]
-    Archive["Feature 종료 처리<br/>(archive 이동, 필수)"]
+    Deploy["Step 5: Deploy<br/>(squash → canary force-update)"]
+    Release{"release<br/>batch?"}
+    MainMerge["main merge --no-ff<br/>+ vX.Y.Z + latest"]
+    Archive["Feature 종료 처리"]
 
-    Plan --> AD --> Impl --> Review --> Deploy --> Archive
+    Plan --> AD --> Impl --> Review --> Deploy --> Release
+    Release -->|"중간"| Archive
+    Release -->|"버전 batch 완료"| MainMerge --> Archive
 ```
 
 ### 핵심 컨벤션
@@ -213,9 +217,9 @@ wikihub/
 
 ```
 wikihub/
-├── _system/                   # 정본 룰 + 명령어 플레이북 (deploy.sh로만 주입)
+├── _system/                   # 정본 룰 + 명령어 플레이북 (install.sh + git workflow로 주입)
 ├── scripts/                   # gdrive-sync.py, watcher 등 인프라
-├── deploy.sh                  # systemd 배포
+├── install.sh                 # systemd 배포 + canary/latest tag 흐름
 └── wikihub.yaml.example       # vault 등록 설정 예시
 
 별도 위치 (운영 시):

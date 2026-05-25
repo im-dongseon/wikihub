@@ -1459,7 +1459,8 @@ _step2_update() {
     git -C "$WIKIHUB_SRC" fetch --unshallow 2>/dev/null || true
 
     # CR2-MED-4: stderr 분리 (2>&1 제거) + CR2-HIGH-2: FETCH_FAILED export → _resolve_ref 가 path 3 skip
-    if ! git -C "$WIKIHUB_SRC" fetch origin --tags; then
+    # branch_strategy_formalize (F8): canary lightweight tag force-update 수신 필수 → --force 추가 (git 2.20+ 부터 tag fetch 가 force 없이는 clobber 거부)
+    if ! git -C "$WIKIHUB_SRC" fetch origin --tags --force; then
         warn "git fetch 실패 — local cache fallback 시도 (stale 'latest' 신뢰 안 함)"
         export FETCH_FAILED=1
     fi
