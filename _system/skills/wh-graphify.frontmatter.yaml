@@ -1,7 +1,0 @@
-name: wh-graphify
-description: wiki 의 지식 그래프 빌드 (증분/전체 rebuild). lint 가 자동 호출 가능. wikihub spec — _system/commands/graphify.md playbook.
-version: 0.1.0
-platforms: [linux]
-metadata:
-  tags: [wikihub, graph, knowledge-graph]
-  category: knowledge-management

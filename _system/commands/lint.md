@@ -214,39 +214,34 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 
-### Step 9. /wh-graphify 자동 호출
+### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
-**Toggle 확인 (v0.1.5)**:
+**책임 분리** (ADR-0036 §D6 single-source 정합):
+- **lint Step 9 책임 = trigger 만** — 변경 감지 + `systemctl --user start wikihub-graphify.service` 호출
+- **graphify CLI 호출 책임 = `wikihub-graphify.service` (정본 `scripts/wikihub_graphify.sh`)**
+- v0.1.7 era 의 `<agent_invocation> "/wh-graphify"` 표현 폐기 — hermes 의 자동 sub-skill spawn 메커니즘 부재 (Reviewer 2 hermes source 검증). graphify hermes skill 자체도 폐기 (Layer 1 LLM wrapper 가 deterministic bash 작업 over-engineering — `wikihub_monitor` 의 D1 정정 정신 정합).
+
+**조건 분기**:
 
 ```bash
 graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wikihub.yaml")"
 ```
 
-- `graphify_enabled == false` → 본 단계 skip + `_lint/report.md` 에 1줄 `graphify chain skipped (yaml toggle)`. Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작 — graph.json 갱신만 미수행 (다음 cycle 까지 graph stale).
-- `graphify_enabled == true` (default) → 아래 진행.
+1. **`graphify_enabled == false`** → skip + `_lint/report.md` 에 1줄 `graphify chain skipped (yaml toggle)`
+2. **lint cycle 변경 없음** (다음 모두 0건: Step 3 자동 stub 생성 / Step 4.5 duplicate 처리 / Step 5 index.md 변경 / Step 7 archive 이동) → skip + `_lint/report.md` 에 1줄 `graph rebuild skipped (no changes)` ← **cost gate (사용자 핵심 의도, v0.1.8 신설)**
+3. **lint cycle 변경 있음 + graphify_enabled=true** → 다음 호출 (fire-and-forget):
+   ```bash
+   systemctl --user start wikihub-graphify.service
+   ```
+   + `_lint/report.md` 에 1줄 `graphify chain triggered — see journalctl --user -u wikihub-graphify.service`
 
-lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참조: lint 후 자동 호출 = 하루 1회 자연 갱신).
+**fire-and-forget 의미**: `systemctl --user start` 가 비동기 — lint.service 즉시 종료. graphify 결과는 `wikihub-graphify.service` 의 별도 journal + `graphify-out/graph.json` 으로 surface. lint exit code 는 graphify 결과 무관.
 
-```bash
-<agent_invocation> "/wh-graphify"
-```
-
-- 성공 → `wiki/_lint/report.md`에 추가: `graph rebuilt: N nodes, M edges`
-- 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh-query·/wh-lint 정확도 저하)
-- 본 단계의 exit code는 lint의 exit code에 영향 안 줌 (graphify 실패가 lint 자체를 fail시키지 않음 — graph는 보조 자원)
-
-**graphify 호출 형태**: graphify.md Step 2 가 단일 책임 (ADR-0006 single-source + ADR-0038 namespace 격리). lint.md 는 `<agent_invocation> "/wh-graphify"` 만 호출 — backend dispatch / profile resolve / endpoint 분기 / timeout 의 detail 은 graphify.md 참조. timeout 발생 시 (exit 124, default 900s = 15분 — yaml `operations.graphify_timeout_sec`, v0.1.8 yaml expose, ADR-0036 §"후속 영향") report 에 `graph rebuild timeout` 기록 + lint 계속 (graphify partial 보호는 graphify.md Step 3 가 책임).
-
-**graphify 결과 self-check (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드)**:
-
-- graphify 호출 성공 (exit 0) 후 `graphify-out/graph.json` read → 노드 수 = `N`
-- `wiki/` 전체 페이지 수 = `M` (mechanical count — `**/*.md` 재귀 카운트, `_lint/`·`_state/` 제외)
-- `M == 0` (빈 wiki) → check skip — 정상 첫 사이클
-- `N / M < 0.5` (graph 가 wiki 의 절반 이하 표현) → **Pass 3 partial failure 의심**:
-  - report 에 `graphify partial failure 의심: N=<N>, M=<M>, ratio=<r>` 추가
-  - ops-alert 트리거 (운영자 진단 trigger — API key/quota/network 점검)
-  - 본 check 실패는 lint exit 에 영향 없음 (graph 는 보조 자원, ADR-0036 §D6 정합)
-- threshold `0.5` 는 보수적 default — wiki 규모가 작거나 entity stub 누적이 적은 초기 운영 시점에 false positive 우려 → 운영자가 yaml `operations.graphify_partial_failure_threshold` 로 override 가능 (v0.2.x 검토 트리거: 운영 데이터 surface 후 자동 ranging)
+**graphify 결과 검증 위치** (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드):
+- `scripts/wikihub_graphify.sh` 의 Step 4 (`N / M < threshold` ratio check) — 정본
+- `wikihub-graphify.service` 의 journal 에 `WARNING: graphify partial failure 의심: N=<N>, M=<M>, ratio=<r>` 출력
+- threshold = yaml `operations.graphify_partial_failure_threshold` (default 0.5)
+- 운영자 별 진단 path: `journalctl --user -u wikihub-graphify.service --since "1 day ago" | grep -E "partial|graph rebuilt"`
 
 ## 출력 산출물
 

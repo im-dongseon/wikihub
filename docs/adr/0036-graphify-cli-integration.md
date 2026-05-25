@@ -126,6 +126,7 @@
 - v0.1.0 의 graphify Pass 3 churn 운영 데이터 surface 시 D4 의 cycle 간 drift 허용 범위 재검토 트리거.
 - v0.2.x 검토 트리거: graphify-side token-budget / backend 통제 schema (`operations.graphify.*`), PyPI hash pin 옵션, secret material layer 통합.
 - 2026-05-25: `lint_operations_improvements` (v0.1.8) 가 graphify timeout wrapper 의 yaml expose 작업 완료. `graphify.md` Step 2 의 6 위치 hard-coded `timeout 720` 가 `timeout "$timeout_sec"` 로 변경 (yaml `operations.graphify_timeout_sec` 정본, default 900s = 15분). 운영자 backend 별 조정 가능. graphify.md:156 의 "yaml expose 는 v0.2.x deferred" 코멘트 폐기 처리.
+- 2026-05-26: `update_path_fixes` (v0.1.8, D3=B) 가 graphify hermes skill 폐기 + systemd service 격상. `wh-graphify` 폐기 (Layer 1 LLM wrapper = deterministic bash 작업의 over-engineering, `wikihub_monitor` D1 정정 정신 정합). 정본 = `scripts/wikihub_graphify.sh` (bash) + `_system/systemd/wikihub-graphify.service.template` (oneshot, timer 없음). lint Step 9 가 변경 감지 시만 `systemctl --user start wikihub-graphify.service` trigger — cost gate 보존. semantic extraction LLM 호출 (Layer 2, graphify CLI 내부 ollama_cloud 등) 유지. §D6 single-source 정신 정합 (정본 위치만 hermes skill → systemd service 로 이동).
 
 ### 재검토 트리거
 

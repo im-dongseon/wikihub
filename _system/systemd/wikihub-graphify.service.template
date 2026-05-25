@@ -1,0 +1,30 @@
+[Unit]
+Description=WikiHub graphify — knowledge graph build (lint Step 9 chain, v0.1.8)
+After=network-online.target
+Wants=network-online.target
+# bootstrap fail (exit 2) 시만 ops-alert 발화 — runtime fail (exit 75/124) 은 SuccessExitStatus 정합.
+OnFailure=ops-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={wikihub_home}
+ExecStartPre=/bin/mkdir -p {wikihub_home}
+Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WIKIHUB_HOME={wikihub_home}
+Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
+Environment=WIKIHUB_SRC={wikihub_src}
+# ADR-0038 — WIKIHUB_GRAPHIFY_<PROFILE>_* env namespace 격리.
+EnvironmentFile=-%h/.config/wikihub/env
+# scripts/wikihub_graphify.sh = graphify CLI 호출 정본 (ADR-0036 §D6 single-source, v0.1.8 update_path_fixes).
+ExecStart={wikihub_src}/scripts/wikihub_graphify.sh
+# Step 4 code_review_1 C1 흡수: shell `timeout` builtin 이 timeout 시 exit 124 propagate.
+# lint.service / wikihub-vault@ 는 Python wrapper 가 75 변환하지만 bash + timeout 은 변환 없음.
+# 124 미포함 시 OnFailure=ops-alert 매번 발화 위험 — 124 추가.
+SuccessExitStatus=0 75 124
+# graphify_timeout_sec (default 900s) + 300s margin (LLM cloud latency + 후처리).
+TimeoutStartSec=1200
+SyslogIdentifier=wikihub-graphify
+
+# Restart= 미설정 — oneshot, lint Step 9 가 trigger 책임 (변경 감지 시만 fire, cost gate).
+# [Timer] 미작성 — 사용자 명시 (변경 시만 cost 발생). lint Step 9 가 systemctl start trigger.
+# [Install] 미작성 — timer 없음, enable 불요.

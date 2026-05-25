@@ -131,3 +131,16 @@ ADR-0035 §Consequences 의 재검토 조건:
 | BL-N11 | lint | lint cycle 의 contradiction check (Step 6) LLM merge idempotency 가드 — concept 재등장 시 entity 본문 LLM merge 재호출 차단 (현행 lint.md Step 7 본문에 정책만, 구현 추후) | design_review_2 M5 | low |
 
 > 이전 design 의 BL-N7 (lint-apply 결과 surface), BL-N8 (lint-apply race), BL-N10 (lint-apply yaml gate cost) 는 사용자 결정 (2026-05-25) 으로 `--apply` flag 폐기 + 별도 timer 미생성 → 무효화 / 흡수. lint.timer 단일 사이클이 매 cycle 진단 + 적용 default.
+
+---
+
+## update_path_fixes 산출 (2026-05-26 진행, v0.1.8 묶음)
+
+| ID | 영역 | 항목 | 출처 | 우선순위 |
+|---|---|---|---|---|
+| BL-N12 | observability | wikihub-graphify.service bootstrap fail (exit 2) → ops-alert.service 가 last_failure.json 부재로 silent skip — wikihub_monitor 의 H2 와 같은 결함 inheritance. `scripts/wikihub_graphify.sh` 에 `_emit_bootstrap_alert` 패턴 (env token 직접 read + Telegram 발송) 또는 별도 last_failure.json write 추가 | code_review_2 C1 | medium |
+| BL-N13 | observability | wikihub_monitor 보고서에 `wikihub-graphify.service` 결과 surface — 현행 monitor 가 lint + vault 만 수집. graphify chain 의 별도 systemd unit 결과도 가시화 (`wh-graphify`) | design v2 §3 Q2 | medium |
+| BL-N14 | scripts | `scripts/wikihub_graphify.sh --rebuild` 가 systemd ExecStart 의 인자로 전달 불가 — `systemctl --user start wikihub-graphify.service --rebuild` 미지원. 운영자 manual 호출 시만 가능. helper alias 또는 별도 service `wikihub-graphify-rebuild.service` 검토 | code_review_1 M2 | low |
+| BL-N15 | install | `_migrate_agent_schema` 의 detect / write Python heredoc 2개 분리 → race window + DRY 위반. 단일 heredoc 통합 검토 | code_review_1 M3 | low |
+| BL-N16 | scripts | `wikihub_graphify.sh` 의 N/M partial failure 가드가 stderr warn 만, ops-alert trigger 안 함. 운영자 자동 인지 path 부재 | design v2 §3 Q3 | low |
+| BL-N17 | install | `_install_graphify` 가 v0.1.0 → v0.1.8 update path 의 자동 trigger 검증 — v0.1.5 도입 후 venv 에 graphifyy 부재 운영자 base 의 자동 install | code_review_2 L | low |

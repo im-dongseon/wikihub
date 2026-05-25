@@ -77,6 +77,7 @@ F5 feature 가 5건의 wikihub skill (ingest·lint·query·graphify·setup) 의 
   - **ADR-0012** §Decision 갱신 — `oneshot_args` 의 `{skill}` placeholder semantics 추가 (per-unit substitution).
   - **ADR-0006** 영향 없음 — `_system/commands/` 정본성 보존 (install-time materialization 패턴).
   - **재검토 트리거**: (1) Hermes 가 advisory lock 도입 시 sub-4 protection 강화 가능. (2) codex/gemini 등 다른 agent 의 skill 시스템 매핑 추가 시 ADR-0012 의 agent-agnostic 모델과 본 ADR 의 wire format 정합 재평가. (3) Hermes 가 `external_dirs` 의 즉시 인식 보장 (재시작 불요) 안 하면 install.sh 가 `hermes skills audit` 자동 호출 정책 추가.
+  - **v0.1.8 update_path_fixes** (2026-05-26, D3=B) — `_WIKIHUB_SKILLS` tuple = 4 skills (wh-ingest / wh-lint / wh-query / wh-setup). wh-graphify hermes skill 폐기 — graphify CLI 호출 책임이 `wikihub-graphify.service` (systemd oneshot) + `scripts/wikihub_graphify.sh` (정본) 로 격상. 본 ADR 의 hermes skill registration scope 외 (graphify 가 systemd unit 으로 격리). hermes config 의 `external_dirs` patching 도 4 skills 만 대상. 운영자 manual 호출: `hermes chat --skills wh-graphify` 폐기 → `systemctl --user start wikihub-graphify.service`.
 
 ## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
 

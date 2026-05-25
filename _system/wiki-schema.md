@@ -49,11 +49,12 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 │   ├── commands/                     #   /wh-* 명령어 playbook (ADR-0033 — wh- hyphen lock)
 │   │   └── {ingest,lint,query,graphify,setup}.md
 │   ├── skills/                       #   Hermes skill — frontmatter source + materialized SKILL.md
-│   │   ├── wh-{ingest,lint,query,graphify,setup}.frontmatter.yaml
+│   │   ├── wh-{ingest,lint,query,setup}.frontmatter.yaml   # v0.1.8 update_path_fixes — wh-graphify 폐기 (systemd 격상)
 │   │   └── _generated/wh-{cmd}/SKILL.md   # install-time materialized (.gitignore)
 │   └── systemd/                      #   systemd unit template (F4 산출물)
 │       ├── wikihub-{vault,mount}@.service.template
 │       ├── wikihub-{pending-monitor,monitor}.{service,timer}.template
+│       ├── wikihub-graphify.service.template   # v0.1.8 update_path_fixes — wh-graphify hermes skill 폐기 후 systemd 격상 (timer 없음, lint Step 9 가 trigger)
 │       ├── lint.{service,timer}.template
 │       └── ops-alert.service
 ├── scripts/                          # 인프라 스크립트
@@ -61,6 +62,7 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 │   ├── ops-alert.py
 │   ├── pending_monitor.py
 │   ├── wikihub_monitor.py            # v0.1.8 — 12hr 윈도우 운영 보고서 (Telegram + vault 안 파일)
+│   ├── wikihub_graphify.sh           # v0.1.8 update_path_fixes — graphify CLI 호출 정본 (ADR-0036 §D6 single-source)
 │   ├── lib/{config,state,telegram}.py
 │   └── _helpers/render_systemd_units.py
 ├── install.sh
@@ -191,7 +193,7 @@ type: entity                                  # 'entity' | 'concept' | 'analysis
 created: 2026-05-13
 updated: 2026-05-13
 aliases: [홍길동]                              # v0.1.8 ADR-0039 — duplicate detection 정합 + LLM 재생성 무한 loop 차단
-referenced_by:                                # /wh-lint·/wh-graphify가 갱신 — 수동 편집 금지
+referenced_by:                                # /wh-lint 가 갱신, wikihub-graphify.service 는 무관 (v0.1.8 update_path_fixes — referenced_by 는 lint Step 4 책임)
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/notes/promotion-plan
 tags: [team-lead]
@@ -229,7 +231,7 @@ updated: 2026-05-13
 sources:
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/meetings/2026-Q2.pptx
-referenced_by: []                             # /wh-graphify가 갱신
+referenced_by: []                             # /wh-lint 가 갱신 (v0.1.8 update_path_fixes — wikihub-graphify.service 는 graph 빌드만, referenced_by 미관여)
 tags: []
 ---
 
@@ -296,7 +298,7 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참�
 | `wiki/.archived/` | 미접근 | /wh-lint --apply만 이동 |
 | `_state/{vault}/*.json` | 통째 작성·갱신 (atomic) | `/wh-ingest`의 agent phase가 `pending_ingest.json` 작성·삭제 |
 | `~/.config/rclone/rclone.conf` | read-only (rclone subprocess 가 자체 refresh) | 미접근 |
-| `graphify-out/*` | 미접근 | /wh-graphify가 빌드 |
+| `graphify-out/*` | 미접근 | `wikihub-graphify.service` 가 빌드 (v0.1.8 update_path_fixes — wh-graphify hermes skill 폐기 → systemd 격상) |
 | `wikihub.yaml` | read-only | read-only |
 | `_system/*` | 미접근 | read-only |
 
@@ -338,7 +340,7 @@ vault에서 ingest되는 파일 콘텐츠는 **untrusted**. agent는 본문 내 
 | `/wh-lint` | wiki 일관성·구조 점검 + 비파괴 자동 정비 + index 재구성 + graphify | `commands/lint.md` |
 | `/wh-lint --apply` | 파괴 가능 작업까지 수행 (수동 호출) | 동일 |
 | `/wh-query <질문>` | 자연어 질의 + 합성 분석 (heuristic으로 analyses 자동 저장) | `commands/query.md` |
-| `/wh-graphify` | 지식 그래프 빌드 (수동 또는 /wh-lint 마지막 단계 자동) | `commands/graphify.md` |
+| `wikihub-graphify.service` | 지식 그래프 빌드 (수동: `systemctl --user start wikihub-graphify.service`, 자동: /wh-lint Step 9 가 변경 시만 trigger) | `_system/systemd/wikihub-graphify.service.template` + `scripts/wikihub_graphify.sh` (ADR-0036 §D6 single-source). v0.1.8 update_path_fixes — wh-graphify hermes skill 폐기 후 systemd 격상. |
 | `/wh-setup` | wikihub.yaml 검증 + systemd unit 동기화 + agent skill 메타 갱신 | `commands/setup.md` |
 
 **오케스트레이션** (ADR-0006): agent가 orchestrator. systemd timer가 `<agent_invocation> "/wh-ingest --vault <vault_id>"` 또는 `"/wh-lint"` 직접 호출.

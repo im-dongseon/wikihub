@@ -51,6 +51,7 @@ operations:
   monitor_report_subpath: project/wikihub/report   # vault mount 안의 sub-path. 최종 경로 = $WIKIHUB_HOME/vault/<vault_id>/<subpath>/YYYYMMDD__HH_mm.md (KST, 24시간제).
   # lint_operations_improvements (v0.1.8) — graphify timeout yaml expose (ADR-0036 §"후속 영향" + ADR-0039 alias frontmatter):
   graphify_timeout_sec: 900                        # graphify subprocess wrapper timeout (15분). v0.1.5~v0.1.7 era hard-coded 720s 에서 yaml expose 격상. LLM backend latency 누적 대비 default 900s. 운영자 backend 별 조정 가능.
+  graphify_partial_failure_threshold: 0.5          # graphify graph 의 N/M ratio threshold (Pass 3 silent partial failure 가드). N=graph 노드 수, M=wiki .md 페이지 수. 0.5 미만 시 _lint/report.md + journal 에 partial failure 의심 warn. 운영자 별 조정 가능 (작은 wiki 또는 entity stub 누적 적은 초기엔 보수적 default 가 false positive 가능 — 0.3 등으로 낮춤 권장). ADR-0036 §재검토 트리거.
   # ADR-0035: gws_min_version 폐기. rclone version 만 유지.
   # ADR-0025·0026 — rclone install + vfs cache 정책:
   rclone_min_version: "1.65.0"        # install.sh `_install_rclone` 의 min

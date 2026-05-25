@@ -753,7 +753,9 @@ EOF
 
 # ─── F5 ADR-0032·0033 — Hermes skill registration ────────────────────
 # WIKIHUB_SKILLS 정본 list. ADR-0032 §sub-2 (install-time materialized)
-WIKIHUB_SKILLS=(wh-ingest wh-lint wh-query wh-graphify wh-setup)
+WIKIHUB_SKILLS=(wh-ingest wh-lint wh-query wh-setup)
+# v0.1.8 update_path_fixes (D3=B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
+# graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
 # Hermes config path. operator override: $HERMES_CONFIG_HOME (테스트 용도)
 _hermes_config_path() {
@@ -767,19 +769,28 @@ _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
 
-    # drift detect — Python single-shot 으로 모든 3-group 검사 + flag 반환.
-    # 단순 grep 으로 안전한 비교가 어려운 nested key (예: vaults[].options.bootstrap_allowed)
-    # 가 있어서 yaml load + dict navigation 으로 detect.
+    # drift detect — yaml.example single source of truth 와 자동 sync (v0.1.8 update_path_fixes R2 fix).
+    # 운영자 yaml 의 operations + agent top-level field 가 yaml.example 의 default 와 비교 — 부재 시 flag.
+    # 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0). ADR-0031 §"후속 영향".
     local drift_flags
-    drift_flags="$("$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
-import sys, yaml as _yaml
+    drift_flags="$("$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
+import sys, os, yaml as _yaml
 path = sys.argv[1]
+example_path = sys.argv[2]
+
+# R2 fix: WIKIHUB_SRC env guard (Reviewer 2 M1 흡수)
+if not os.path.isfile(example_path):
+    print(f"ERROR: yaml.example 부재 — {example_path}", file=sys.stderr)
+    sys.exit(2)
+
 try:
     with open(path, encoding="utf-8") as f:
         data = _yaml.safe_load(f) or {}
-except Exception:
-    print("")
-    sys.exit(0)
+    with open(example_path, encoding="utf-8") as f:
+        example = _yaml.safe_load(f) or {}
+except Exception as e:
+    print(f"ERROR: yaml load 실패 — {e}", file=sys.stderr)
+    sys.exit(2)
 
 agent = data.get("agent") or {}
 operations = data.get("operations") or {}
@@ -787,37 +798,23 @@ vaults = data.get("vaults") or []
 
 flags = []
 
-# Group B — v0.1.5+ 신설 field 부재 (자동 추가 — 안전 default)
-if "timeout_sec" not in agent:
-    flags.append("B_agent_timeout_sec")
-if "models" not in agent:
-    flags.append("B_agent_models")
-if "pending_alert_age_sec" not in operations:
-    flags.append("B_pending_alert_age_sec")
-if "lint_contradiction_check" not in operations:
-    flags.append("B_lint_contradiction_check")
-if "graphify_enabled" not in operations:
-    flags.append("B_graphify_enabled")
-if "graphify_backend" not in operations:
-    flags.append("B_graphify_backend")
-if "graphify_min_version" not in operations:
-    flags.append("B_graphify_min_version")
-if "graphify_max_version" not in operations:
-    flags.append("B_graphify_max_version")
-if "graphify_profile" not in operations:
-    flags.append("B_graphify_profile")
-if "lint_interval_hours" not in operations:
-    flags.append("B_lint_interval_hours")
-# wikihub_monitor (v0.1.8)
-if "monitor_enabled" not in operations:
-    flags.append("B_monitor_enabled")
-if "monitor_report_vault" not in operations:
-    flags.append("B_monitor_report_vault")
-if "monitor_report_subpath" not in operations:
-    flags.append("B_monitor_report_subpath")
-# lint_operations_improvements (v0.1.8 — ADR-0036 §후속 영향 + ADR-0039)
-if "graphify_timeout_sec" not in operations:
-    flags.append("B_graphify_timeout_sec")
+# R2 fix: yaml.example 의 operations + agent top-level field 모든 default 와 자동 sync.
+# 깊이 제한: top-level dict 만 (vaults[] array 는 별도 — 배열 semantics 모호, 운영자 의존).
+# set semantics 한계: '자연 부재' (큰 jump) 와 '명시 삭제' (default 변경 의도) 구분 불가 — 본 fix scope 외.
+for top in ("operations", "agent"):
+    example_top = example.get(top, {}) or {}
+    target_top = data.get(top, {}) or {}
+    if isinstance(example_top, dict) and isinstance(target_top, dict):
+        for k in example_top:
+            if k not in target_top:
+                flags.append(f"B_sync:{top}.{k}")
+
+# Group A_yolo_missing — v0.1.4 era oneshot_args 에 --yolo 부재 detect (legacy_migration_cleanup 부분 inversion).
+# 본 fix 의 multipass v0.1.0 → v0.1.8 jump 실 surface — legacy_migration_cleanup 의 "운영자 base v0.1.4+ 가정" 위반.
+# oneshot_args list 가 명시되어 있으나 element --yolo 만 부재인 케이스 (yaml.example sync 의 list-atomic 동작 외).
+agent_args = agent.get("oneshot_args") or []
+if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
+    flags.append("A_yolo_missing")
 
 # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
 for idx, v in enumerate(vaults):
@@ -826,14 +823,12 @@ for idx, v in enumerate(vaults):
         flags.append(f"B_vault_sync_interval_sec:{vid}")
 
 # A4 (ADR-0038) — 기존 graphify_profile 값의 정규식 fail-fast (install-time, non-fatal warn).
-# 운영자가 yaml 편집해 invalid profile 명 (대문자/특수문자/공백) 박은 경우 install 시점 surface.
-# 값 mutation 안 함 (ADR-0031 §Note 정합) — warn 만, 운영자가 직접 수정.
 import re as _re
 _profile = operations.get("graphify_profile")
 if _profile and not _re.match(r"^[a-z][a-z0-9_]*$", str(_profile)):
     flags.append(f"W_graphify_profile_invalid:{_profile}")
 
-print("\n".join(flags))   # newline separator — profile 값에 `,` 박힌 경우 robust (code review 1 §M1)
+print("\n".join(flags))
 PYEOF
 )"
 
@@ -846,20 +841,9 @@ PYEOF
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            B_agent_timeout_sec)        info "  - [v0.1.5] agent.timeout_sec 부재 → 1200 추가 (DeepSeek/MiniMax latency 대응)" ;;
-            B_agent_models)             info "  - [v0.1.5] agent.models 블록 부재 → {wh-lint, wh-ingest} 추가 (per-skill --model lock)" ;;
-            B_pending_alert_age_sec)    info "  - [ADR-0037] operations.pending_alert_age_sec 부재 → 3600 추가" ;;
-            B_lint_contradiction_check) info "  - [v0.1.5] operations.lint_contradiction_check 부재 → true 추가" ;;
-            B_graphify_enabled)         info "  - [v0.1.5] operations.graphify_enabled 부재 → true 추가" ;;
-            B_graphify_backend)         info "  - [ADR-0036] operations.graphify_backend 부재 → \"\" 추가 (auto-detect)" ;;
-            B_graphify_min_version)     info "  - [ADR-0036] operations.graphify_min_version 부재 → \"0.8.0\" 추가" ;;
-            B_graphify_max_version)     info "  - [ADR-0036] operations.graphify_max_version 부재 → \"0.99.99\" 추가" ;;
-            B_graphify_profile)         info "  - [ADR-0038] operations.graphify_profile 부재 → \"ollama_gemma\" 추가" ;;
-            B_lint_interval_hours)      info "  - [v0.1.6] operations.lint_interval_hours 부재 → 3 추가 (default 3h)" ;;
-            B_monitor_enabled)          info "  - [v0.1.8] operations.monitor_enabled 부재 → true 추가 (wikihub-monitor.timer 09,21:00 KST)" ;;
-            B_monitor_report_vault)     info "  - [v0.1.8] operations.monitor_report_vault 부재 → null 추가 (첫 vault default)" ;;
-            B_monitor_report_subpath)   info "  - [v0.1.8] operations.monitor_report_subpath 부재 → \"project/wikihub/report\" 추가" ;;
-            B_graphify_timeout_sec)     info "  - [v0.1.8 ADR-0036] operations.graphify_timeout_sec 부재 → 900 추가 (graphify wrapper 15분)" ;;
+            # v0.1.8 update_path_fixes R2: yaml.example sync 일반화 (hardcoded case 폐기 — generic message)
+            B_sync:*)                   info "  - [yaml.example sync] ${f#B_sync:} 부재 → wikihub.yaml.example default 자동 추가 (운영자 명시 값은 보존)" ;;
+            A_yolo_missing)             info "  - [v0.1.4 ADR-0032] agent.oneshot_args 의 --yolo 부재 → --query 앞에 insert (hermes auto-approve 필수 — 큰 jump 운영자 대응, legacy_migration_cleanup 부분 inversion)" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
             W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
         esac
@@ -877,48 +861,42 @@ PYEOF
     # (또는 schema drift) 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec,
     # operations.lint_interval_hours).
 
-    "$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
-import sys, ruamel.yaml
+    "$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
+import sys, os, copy, ruamel.yaml
 path = sys.argv[1]
+example_path = sys.argv[2]
+
+# R2 fix: yaml.example single source of truth — 운영자 yaml 의 부재 field 자동 추가.
+# 깊이 제한: operations + agent top-level dict 만. vaults[] array 별도 (배열 semantics).
 yaml = ruamel.yaml.YAML(typ="rt")
 yaml.preserve_quotes = True
 yaml.indent(mapping=2, sequence=4, offset=2)
 with open(path, encoding="utf-8") as f:
     data = yaml.load(f)
+with open(example_path, encoding="utf-8") as f:
+    example = yaml.load(f)
 
-agent = data.setdefault("agent", {})
+# operations + agent top-level field 자동 sync (yaml.example 의 모든 default).
+# Step 4 code_review_2 H1 흡수: copy.deepcopy — ruamel CommentedMap/CommentedSeq 의 reference assignment 회피.
+# (운영자 yaml 의 dict 가 yaml.example 의 dict 와 reference 공유 시 한쪽 modify 가 다른쪽 영향)
+for top in ("operations", "agent"):
+    example_top = example.get(top, {}) or {}
+    target_top = data.setdefault(top, {})
+    if isinstance(example_top, dict) and isinstance(target_top, dict):
+        for k, default_v in example_top.items():
+            if k not in target_top:
+                target_top[k] = copy.deepcopy(default_v)
 
-# Group B — v0.1.5+ 신설 field 자동 추가 (안전 default, 부재 시만)
-if "timeout_sec" not in agent:
-    agent["timeout_sec"] = 1200
-if "models" not in agent:
-    # ruamel CommentedMap 으로 추가 — 다른 field 의 주석 보존
-    from ruamel.yaml.comments import CommentedMap
-    models = CommentedMap()
-    models["wh-lint"] = "deepseek-v4-flash"
-    models["wh-ingest"] = "deepseek-v4-pro"
-    agent["models"] = models
-
-operations = data.setdefault("operations", {})
-_op_defaults = {
-    "pending_alert_age_sec": 3600,
-    "lint_contradiction_check": True,
-    "graphify_enabled": True,
-    "graphify_backend": "",
-    "graphify_min_version": "0.8.0",
-    "graphify_max_version": "0.99.99",
-    "graphify_profile": "ollama_gemma",
-    "lint_interval_hours": 3,           # v0.1.6 default 3h (v0.1.5 era 24h 에서 변경)
-    "monitor_enabled": True,            # v0.1.8 wikihub_monitor
-    "monitor_report_vault": None,       # v0.1.8 — None = 첫 vault
-    "monitor_report_subpath": "project/wikihub/report",   # v0.1.8
-    "graphify_timeout_sec": 900,        # v0.1.8 — graphify wrapper 15분 (ADR-0036)
-}
-for k, v in _op_defaults.items():
-    if k not in operations:
-        operations[k] = v
+# Group A_yolo_missing: oneshot_args 의 --yolo element insert (legacy_migration_cleanup 부분 inversion).
+# yaml.example sync 가 list-atomic 이라 element-level 보강 안 함 — 별도 처리.
+agent = data.get("agent") or {}
+agent_args = agent.get("oneshot_args")
+if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
+    idx = agent_args.index("--query")
+    agent_args.insert(idx, "--yolo")
 
 # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
+# vaults[] array 는 top-level sync 외 별도 처리 (배열 semantics — 개수/식별자 운영자 의존).
 vaults = data.get("vaults") or []
 for v in vaults:
     if isinstance(v, dict) and "sync_interval_sec" not in v:
@@ -1170,7 +1148,7 @@ _step6_agent_skill() {
     # 5. 등록 후 검증
     _verify_hermes_skill_registration "$agent_binary"
 
-    ok "Step 6 agent skill 등록 완료 (5건 materialized + external_dirs 패치)"
+    ok "Step 6 agent skill 등록 완료 (4건 materialized + external_dirs 패치 — v0.1.8 wh-graphify skill 폐기 후 4 skills)"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1605,6 +1583,7 @@ _systemd_stop_before_update() {
     systemctl --user stop wikihub-lint.timer 2>/dev/null || true
     systemctl --user stop wikihub-pending-monitor.timer 2>/dev/null || true
     systemctl --user stop wikihub-monitor.timer 2>/dev/null || true
+    systemctl --user stop wikihub-graphify.service 2>/dev/null || true
     systemctl --user stop wikihub-pending-monitor.service 2>/dev/null || true
     # vault@.service mid-sync 대기 — 15min grace (TimeoutStartSec=15min 정합)
     # MED-N4: progress info — 운영자 visual 안심
@@ -1623,7 +1602,8 @@ _systemd_stop_before_update() {
         'wikihub-vault@*.service' 'wikihub-vault@*.timer' \
         'wikihub-lint.service' 'wikihub-lint.timer' \
         'wikihub-pending-monitor.service' 'wikihub-pending-monitor.timer' \
-        'wikihub-monitor.service' 'wikihub-monitor.timer' 2>/dev/null || true
+        'wikihub-monitor.service' 'wikihub-monitor.timer' \
+        'wikihub-graphify.service' 2>/dev/null || true
     # CRIT-N2: stop 직후 daemon-reload — Step 8 render 이전 race window 차단.
     systemctl --user daemon-reload 2>/dev/null || true
     ok "systemd stop sequence 완료"
@@ -1705,6 +1685,9 @@ _step8_systemd_render() {
     # stop/start 순서와 충돌 없음.
     systemctl --user try-restart 'wikihub-mount@*.service' \
         'wikihub-vault@*.timer' wikihub-lint.timer wikihub-pending-monitor.timer wikihub-monitor.timer 2>/dev/null || true
+    # NOTE: wikihub-graphify.service 는 try-restart 대상 외 — Type=oneshot + RemainAfterExit=no 라
+    # active state transient → try-restart no-op. lint Step 9 가 변경 시 systemctl start trigger
+    # (fire-and-forget), update 시 자동 재시작 불요 (다음 lint cycle 이 자연 재호출). (code_review_2 C2)
     ok "Step 8 systemd render + daemon-reload + try-restart 완료"
 }
 

@@ -72,3 +72,4 @@
   - ADR-0036 §D2 partially superseded — secret layer schema 재정의
   - ADR-0037 — TELEGRAM_ALERT_* env 영역 영향 없음 (v0.1.7 follow-up 의 마이그레이션 + v0.1.8 cleanup 후에도 영역 영향 없음)
 - **v0.1.8 cleanup** (2026-05-25, feature `legacy_migration_cleanup`) — `_migrate_graphify_env` 함수 삭제 (운영자 base 정착 후 영구 no-op). §Decision 3 (auto-migration) 의 1회성 본체 polish 완료. §Decision 1·2·4·5 (namespace 격리 자체 + Hermes trust 가정) 은 영구 유효 — supersede 아님.
+- **v0.1.8 update_path_fixes** (2026-05-26, D3=B) — wh-graphify hermes skill 폐기 + `wikihub-graphify.service` systemd 격상. env namespace `WIKIHUB_GRAPHIFY_<PROFILE>_*` 정합 유지 — `scripts/wikihub_graphify.sh` 가 systemd `EnvironmentFile=-%h/.config/wikihub/env` 통해 동일 env 변수 read. Hermes parent leak 차단 정신 정합 (graphify 가 별도 systemd unit 이라 hermes 와 process tree 분리).

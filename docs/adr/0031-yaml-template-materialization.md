@@ -229,6 +229,7 @@ if target.exists():
   - multi-vault·multi-instance 운영 시 derived path catalog 가 vault 별로 분기 필요. 현 catalog 는 단일 vault 가정 (v0.1.0 정합).
   - schema v2 도입 시 별도 ADR (Decision E 명시).
   - concurrent `/wh:setup` flock mutex 도입 시 본 ADR 의 §Decision A "Single concurrent writer invariant" 갱신.
+- **v0.1.8 update_path_fixes** (2026-05-26) — `_migrate_agent_schema` 의 hardcoded `_op_defaults` dict 를 `wikihub.yaml.example` read 기반 자동 sync 로 일반화. 운영자 yaml 의 부재 field 가 yaml.example 의 default 와 자동 sync (set semantics — 명시 값 보존). 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0). 큰 jump 운영자 경로 (multipass v0.1.0 → v0.1.8 실 surface) 안정성 보장. yaml.example 이 schema mutation 의 single source of truth 격상 — §Decision A "schema-only mutation" 정신 정합 + value-mutation 보수성 유지.
 
 ---
 
