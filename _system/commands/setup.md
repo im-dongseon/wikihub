@@ -94,7 +94,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 위 derived 필드 외 **모든 yaml 필드**는 maintainer-controlled — Step 0 절대 미관여. 명시 예시 (ADR-0035 정합):
 - `version`, `instance.timezone`
 - `vaults[*]`: `id`·`enabled`·`type`·`sync_interval_sec`·`options.exclude_shared_with_me`·`options.max_file_size_mb`·`options.false_delete_threshold`·`options.mount_path`·`options.rclone_remote_name`·`options.rclone_remote_path`·`options.rclone_rc_port`
-- `operations`: `lint_interval_hours`·`lint_contradiction_check`·`graphify_enabled`·`pending_alert_age_sec`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`·`graphify_min_version`·`graphify_max_version`·`graphify_backend`
+- `operations`: `lint_interval_hours`·`lint_contradiction_check`·`graphify_enabled`·`pending_alert_age_sec`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`·`graphify_min_version`·`graphify_max_version`·`graphify_backend`·`graphify_profile`·`graphify_timeout_sec`·`graphify_partial_failure_threshold`·`monitor_enabled`·`monitor_report_vault`·`monitor_report_subpath` (v0.1.7~v0.1.8 신설 field 들)
 - `agent.*` 전체 (특히 `agent.models` 의 per-skill model override — ADR-0032 §Note 2026-05-20)
 
 특히 `mount_path` 는 Path C+ default 패턴에선 `local_path` 와 동일하지만, advanced 운영자가 bind-mount / ramdisk / multi-vault layout 분리로 명시 분리 가능 (HIGH-A1 design review). Step 1 schema 검증의 soft warn 만 발생, Step 0 미관여.

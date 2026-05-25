@@ -87,7 +87,7 @@ updated: 2026-05-13
 sources:
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/meetings/2026-Q2.pptx
-referenced_by: []   # /wh-graphify가 갱신
+referenced_by: []   # /wh-lint Step 4 가 갱신 (v0.1.8 update_path_fixes — wikihub-graphify.service 는 graph.json 빌드 책임만, referenced_by 미관여)
 tags: []
 ---
 
