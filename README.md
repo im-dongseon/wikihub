@@ -2,21 +2,21 @@
 
 <div align="center">
 
-# WikiHub v0.1.7
+# WikiHub v0.1.8
 
 서버에서 다중 소스를 통합 관리하는 LLM 위키 허브
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.7%20ready-green)](features/archive/)
-[![Version](https://img.shields.io/badge/Version-0.1.7-blue)](AGENTS.md)
+[![Status](https://img.shields.io/badge/Status-v0.1.8%20ready-green)](features/archive/)
+[![Version](https://img.shields.io/badge/Version-0.1.8-blue)](AGENTS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
 ---
 
-> **개발 상태** (2026-05-24 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), **graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
+> **개발 상태** (2026-05-25 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration), **legacy migration cleanup (v0.1.8 — install.sh 의 v0.1.0~v0.1.6 era 1회성 migration 코드 (Group A skill_prefix·oneshot/Group C vaults options/WIKIHUB_HOME silent bug detect/_migrate_graphify_env) 일괄 정리 + `scripts/migrate_layout.sh` + `scripts/_helpers/hermes_config_migrate.py` 삭제, 약 700줄 감소)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
 
 ---
 
@@ -158,11 +158,11 @@ curl -fsSL ... | bash -s -- --force-fresh
 - 현재 버전 조회: `cat $WIKIHUB_SRC/_system/VERSION`.
 - Hermes skill 5건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-graphify`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list`.
 
-### Migration (pre-ADR-0034 layout 운영자 — v0.1.0 미배포 시점은 영향 0)
+### Migration (historical — v0.1.8 cleanup 완료)
 
-이전 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) 운영자는 install.sh `_step0_legacy_detect` 가 자동 detect → `scripts/migrate_layout.sh` 호출 prompt. 9-phase state machine + 부분 실패 시 resume.
+pre-v0.1.0 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) transition 의 1회성 helper (`scripts/migrate_layout.sh` 9-phase state machine + install.sh `_step0_legacy_detect`) 는 v0.1.8 cleanup (feature `legacy_migration_cleanup`, 2026-05-25) 으로 삭제. v0.1.0+ install 운영자 base 정착 정합 — 운영자 base 0건. ADR 의사결정 history 는 [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md) 의 §"후속 영향" 참조.
 
-상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md) + [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md).
+운영 흐름 (install/update) 상세: [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md).
 
 ---
 

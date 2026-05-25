@@ -95,19 +95,6 @@ if [[ -n "${WIKIHUB_INSTANCE_ROOT:-}" ]]; then
     err "  detail: docs/adr/0034-data-first-layout.md"
     exit 1
 fi
-# WIKIHUB_HOME silent bug detect: 명시 설정됐고 그 path 가 이전 의미 repo (= .git + im-dongseon/wikihub) 면 fail-fast
-# !!! v0.1.8 cleanup 예정 #P (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup 묶음") — pre-v0.1.0 layout transition 1회성 detect, 운영자 base 정착 후 영구 무용 !!!
-if [[ -d "$WIKIHUB_HOME/.git" ]] && \
-   (cd "$WIKIHUB_HOME" 2>/dev/null && git config --get remote.origin.url 2>/dev/null | grep -q "im-dongseon/wikihub"); then
-    err "WIKIHUB_HOME=$WIKIHUB_HOME 가 이전 semantic (repo dir) 로 사용됨."
-    err "ADR-0034 후 WIKIHUB_HOME 의 의미 = 운영 자산 dir (data-first)."
-    err "  마이그레이션 helper: ~/.local/share/wikihub/src/scripts/migrate_layout.sh (legacy detect 자동 진입 권장)"
-    err "  또는 운영자 명시 env 갱신:"
-    err "    export WIKIHUB_HOME=<운영 자산 dir>"
-    err "    export WIKIHUB_SRC=$WIKIHUB_HOME"
-    exit 1
-fi
-
 # R16-L2 + R2-HIGH-6 (update_mode v3): log rotation — tee fd 보존 race 회피 위해 tee 시작 전 호출.
 # 7일 또는 10MB 초과 시 rename, 7개 보관 (`tail -n +8` 의 8 = 보관수+1).
 _rotate_install_log() {
@@ -773,14 +760,9 @@ _hermes_config_path() {
     echo "${HERMES_CONFIG_HOME:-$HOME/.hermes}/config.yaml"
 }
 
-# 1회성 schema lift — operational yaml 의 schema drift fix.
-# ADR-0033 + ADR-0032 (기존: `wh:` / oneshot_args) + ADR-0032 §Note v0.1.7 (확장: v0.1.5+
-# 신설 field 자동 추가 + ADR-0035 폐기 field cleanup). PTY-safe — prompt 0, idempotent.
-#
-# !!! v0.1.8 cleanup 예정 (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup 묶음") !!!
-#   #N: Group A 삭제 (A_skill_prefix / A_oneshot_legacy / A_yolo_missing) — v0.1.0~v0.1.3 era 1회성
-#   #O: Group C 삭제 (vaults[].options.{bootstrap_allowed,credentials_path,root_folder_id,cursor_path}) — v0.1.4/v0.1.5 era 1회성
-#   보존: Group B (v0.1.5+ field auto-add, schema 보강 영구 가치) + A4 W_graphify_profile_invalid warn (운영자 mistake 대응)
+# operational yaml 의 schema 보강 — v0.1.5+ 신설 field 자동 추가 (부재 시만).
+# PTY-safe — prompt 0, idempotent. 운영자 값 보존 (ADR-0031 §Note value-mutation 회피).
+# Group B (자동 추가) + A4 (W_graphify_profile_invalid warn — 운영자 yaml 편집 mistake fail-fast surface).
 _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
@@ -804,16 +786,6 @@ operations = data.get("operations") or {}
 vaults = data.get("vaults") or []
 
 flags = []
-# Group A — ADR-0033 / ADR-0032 기존 drift
-if agent.get("skill_prefix") == "wh:":
-    flags.append("A_skill_prefix")
-oneshot = list(agent.get("oneshot_args") or [])
-has_placeholder = any("{skill}" in str(a) for a in oneshot)
-has_yolo = any(str(a) == "--yolo" for a in oneshot)
-if not has_placeholder:
-    flags.append("A_oneshot_legacy")
-elif not has_yolo:
-    flags.append("A_yolo_missing")
 
 # Group B — v0.1.5+ 신설 field 부재 (자동 추가 — 안전 default)
 if "timeout_sec" not in agent:
@@ -851,16 +823,6 @@ _profile = operations.get("graphify_profile")
 if _profile and not _re.match(r"^[a-z][a-z0-9_]*$", str(_profile)):
     flags.append(f"W_graphify_profile_invalid:{_profile}")
 
-# Group C — ADR-0035 폐기 field 잔존 (자동 삭제)
-_legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
-for idx, v in enumerate(vaults):
-    if not isinstance(v, dict):
-        continue
-    opts = v.get("options") or {}
-    for lo in _legacy_vault_opts:
-        if lo in opts:
-            flags.append(f"C_vaults[{idx}].options.{lo}")
-
 print("\n".join(flags))   # newline separator — profile 값에 `,` 박힌 경우 robust (code review 1 §M1)
 PYEOF
 )"
@@ -874,9 +836,6 @@ PYEOF
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            A_skill_prefix)        info "  - [ADR-0033] agent.skill_prefix \"wh:\" → \"wh-\"" ;;
-            A_oneshot_legacy)      info "  - [ADR-0032] agent.oneshot_args legacy → F5 schema (`{skill}` + --yolo)" ;;
-            A_yolo_missing)        info "  - [ADR-0032 §Note] agent.oneshot_args 의 --yolo 누락 → in-place 삽입" ;;
             B_agent_timeout_sec)        info "  - [v0.1.5] agent.timeout_sec 부재 → 1200 추가 (DeepSeek/MiniMax latency 대응)" ;;
             B_agent_models)             info "  - [v0.1.5] agent.models 블록 부재 → {wh-lint, wh-ingest} 추가 (per-skill --model lock)" ;;
             B_pending_alert_age_sec)    info "  - [ADR-0037] operations.pending_alert_age_sec 부재 → 3600 추가" ;;
@@ -889,7 +848,6 @@ PYEOF
             B_lint_interval_hours)      info "  - [v0.1.6] operations.lint_interval_hours 부재 → 3 추가 (default 3h)" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
             W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
-            C_*)                        info "  - [ADR-0035] 폐기 field cleanup: ${f#C_}" ;;
         esac
     done <<< "$drift_flags"
 
@@ -901,9 +859,9 @@ PYEOF
     # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY
     # 환경에서 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 →
     # v0.1.4 cycle 의 root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety
-    # net — 운영자가 의도와 다르면 cp 1회로 즉시 복원. v0.1.7 §Note — 자동 추가 (Group B) +
-    # 폐기 cleanup (Group C) 확장. **값 변경은 자동 회피** — 운영자 의도 (또는 schema drift)
-    # 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec, operations.lint_interval_hours).
+    # net — 운영자가 의도와 다르면 cp 1회로 즉시 복원. **값 변경은 자동 회피** — 운영자 의도
+    # (또는 schema drift) 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec,
+    # operations.lint_interval_hours).
 
     "$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
 import sys, ruamel.yaml
@@ -914,26 +872,7 @@ yaml.indent(mapping=2, sequence=4, offset=2)
 with open(path, encoding="utf-8") as f:
     data = yaml.load(f)
 
-# Group A — ADR-0033 / ADR-0032
 agent = data.setdefault("agent", {})
-if agent.get("skill_prefix") == "wh:":
-    agent["skill_prefix"] = "wh-"
-oneshot = list(agent.get("oneshot_args") or [])
-has_placeholder = any("{skill}" in str(a) for a in oneshot)
-has_yolo = any(str(a) == "--yolo" for a in oneshot)
-if not has_placeholder:
-    agent["oneshot_args"] = ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]
-elif not has_yolo:
-    new_args = []
-    inserted = False
-    for arg in oneshot:
-        if str(arg) == "--query" and not inserted:
-            new_args.append("--yolo")
-            inserted = True
-        new_args.append(arg)
-    if not inserted:
-        new_args.append("--yolo")
-    agent["oneshot_args"] = new_args
 
 # Group B — v0.1.5+ 신설 field 자동 추가 (안전 default, 부재 시만)
 if "timeout_sec" not in agent:
@@ -967,18 +906,6 @@ for v in vaults:
     if isinstance(v, dict) and "sync_interval_sec" not in v:
         v["sync_interval_sec"] = 3600
 
-# Group C — ADR-0035 폐기 field cleanup
-_legacy_vault_opts = ("bootstrap_allowed", "credentials_path", "root_folder_id", "cursor_path")
-for v in vaults:
-    if not isinstance(v, dict):
-        continue
-    opts = v.get("options")
-    if not isinstance(opts, dict):
-        continue
-    for lo in _legacy_vault_opts:
-        if lo in opts:
-            del opts[lo]
-
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     yaml.dump(data, f)
@@ -989,121 +916,6 @@ PYEOF
     ok "schema migration 완료 (backup: $backup)"
     info "  운영자 의도 영향 field (sync_interval_sec, lint_interval_hours 등) 의 새 default 적용은"
     info "  wikihub.yaml.example 참조 후 manual edit + install.sh 재실행 권장."
-}
-
-# 1회성 env file 마이그레이션 — ADR-0038 (v0.1.7 follow-up).
-# !!! v0.1.8 에서 본 함수 + main flow 의 호출 라인 삭제 예정 (features/backlog.md "graphify_profile_namespace 산출 §v0.1.8 cleanup #M" 참조) !!!
-# 기존 ~/.config/wikihub/env 의 legacy 키 (OLLAMA_*/ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_*) 삭제
-# + Telegram 값 + 운영자 custom profile (WIKIHUB_GRAPHIFY_<X>_*, ollama_gemma 외) 보존
-# + ollama_gemma default inject (부재 시만, 기존 값 보존).
-# PTY-safe + idempotent + backup (.wikihub-bak.<utc_iso>, 30일 retention).
-# `_step5_instance_dirs` 직후 호출 — fresh install 직후 호출 시 drift 0 → no-op return.
-_migrate_graphify_env() {
-    local wh_config_dir="$HOME/.config/wikihub"
-    local wh_env_file="$wh_config_dir/env"
-    [[ -f "$wh_env_file" ]] || return 0   # 부재 시 _step5_instance_dirs 가 fresh template 처리
-
-    # drift detect — legacy 잔존 OR ollama_gemma 3-키 중 1개라도 부재
-    # `|| [[ -n "$line" ]]` — env 파일 마지막 줄이 trailing newline 없는 경우도 buffer 처리 (code review 1 §H1)
-    local has_legacy=0 has_endpoint=0 has_api_key=0 has_model=0
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        case "$line" in
-            \#*|"") continue ;;
-            OLLAMA_BASE_URL=*|OLLAMA_API_KEY=*|OLLAMA_MODEL=*) has_legacy=1 ;;
-            ANTHROPIC_API_KEY=*|OPENAI_API_KEY=*)              has_legacy=1 ;;
-            GEMINI_API_KEY=*|GEMINI_BASE_URL=*|GEMINI_MODEL=*) has_legacy=1 ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=*) has_endpoint=1 ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=*)  has_api_key=1 ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=*)    has_model=1 ;;
-        esac
-    done < "$wh_env_file"
-
-    if [[ "$has_legacy" == 0 && "$has_endpoint" == 1 && "$has_api_key" == 1 && "$has_model" == 1 ]]; then
-        return 0   # 이미 migrated — no-op
-    fi
-
-    info "env file drift detected — auto migration (PTY-safe, idempotent):"
-    [[ "$has_legacy" == 1 ]]   && info "  - [ADR-0038] legacy graphify keys (OLLAMA_*/ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_*) → 삭제"
-    [[ "$has_endpoint" == 0 ]] && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT 부재 → \"http://127.0.0.1:11434\" 추가"
-    [[ "$has_api_key" == 0 ]]  && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY 부재 → \"local-daemon\" 추가"
-    [[ "$has_model" == 0 ]]    && info "  - [ADR-0038] WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL 부재 → \"gemma4:31b-cloud\" 추가"
-    info "  - 운영자 코멘트 라인은 backup 파일에서만 참조 가능 (canonical template 으로 교체)"
-
-    # backup
-    local backup="$wh_env_file.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
-    cp -p "$wh_env_file" "$backup"
-    info "backup: $backup"
-
-    # 보존 대상 추출 — `|| [[ -n "$line" ]]` 로 last-line-no-newline 안전 (code review 1 §H1)
-    local tg_lines=""
-    local custom_lines=""
-    local og_endpoint="" og_api_key="" og_model=""
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        case "$line" in
-            \#*|"") continue ;;
-            TELEGRAM_ALERT_BOT_TOKEN=*|TELEGRAM_ALERT_CHAT_ID=*)
-                tg_lines+="${line}"$'\n' ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=*)
-                og_endpoint="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=}" ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=*)
-                og_api_key="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=}" ;;
-            WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=*)
-                og_model="${line#WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=}" ;;
-            WIKIHUB_GRAPHIFY_*=*)
-                custom_lines+="${line}"$'\n' ;;
-            # 그 외 legacy 키는 drop (silently)
-        esac
-    done < "$wh_env_file"
-
-    # default fill (부재 시만 — 기존 값 보존, ADR-0031 §Note value mutation 회피)
-    : "${og_endpoint:=http://127.0.0.1:11434}"
-    : "${og_api_key:=local-daemon}"
-    : "${og_model:=gemma4:31b-cloud}"
-
-    # atomic write — tmp → rename (동일 디렉토리 → 동일 fs)
-    local tmp="$wh_env_file.tmp"
-    {
-        cat <<EOF
-# wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036 + ADR-0038).
-# 본 파일의 자료는 graphify subprocess 호출 시점에 namespace 격리되어 explicit 주입 (Hermes parent leak 차단).
-# 추가 profile (openrouter / openai / claude / gemini / deepseek / kimi) cookbook:
-#   → docs/graphify-backend-test-reference.md §6 (Alternative profile examples)
-#
-# 명명 컨벤션: WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>
-# yaml \`operations.graphify_profile\` 값 (lowercase) 과 1:1 매칭.
-
-# === default active: ollama_gemma (Ollama daemon + gemma4:31b-cloud) ===
-WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=${og_endpoint}
-WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=${og_api_key}
-WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=${og_model}
-EOF
-        if [[ -n "$custom_lines" ]]; then
-            printf '\n'
-            echo "# === 운영자 등록 추가 profile (operator custom — 자동 보존) ==="
-            printf '%s' "$custom_lines"
-        fi
-        printf '\n'
-        cat <<'EOF'
-# === Alert channel — Telegram bot (ADR-0037 §D1) ===
-# wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
-# bot 생성: @BotFather 에서 /newbot → token, chat_id 는 @userinfobot.
-EOF
-        if [[ -n "$tg_lines" ]]; then
-            printf '%s' "$tg_lines"
-        else
-            cat <<'EOF'
-#    TELEGRAM_ALERT_BOT_TOKEN=123456:ABC...
-#    TELEGRAM_ALERT_CHAT_ID=-100123456
-EOF
-        fi
-    } > "$tmp"
-    mv "$tmp" "$wh_env_file"
-    chmod 600 "$wh_env_file"
-
-    # A6 — backup 파일 30일 retention (install.sh `_patch_hermes_external_dirs` 패턴 추종)
-    find "$wh_config_dir" -maxdepth 1 -name 'env.wikihub-bak.*' -mtime +30 -delete 2>/dev/null || true
-
-    ok "env migration 완료 (backup: $backup)"
 }
 
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
@@ -1328,7 +1140,7 @@ _step6_agent_skill() {
         return 0
     fi
 
-    # 2. 운영자 yaml schema 1회성 lift (ADR-0033 — wh:/-z 잔존 detect + patch)
+    # 2. 운영자 yaml schema 보강 (Group B v0.1.5+ field auto-add + A4 W_graphify_profile_invalid warn — ADR-0031 §Note schema-only mutation)
     _migrate_agent_schema || return 2
 
     # 3. SKILL.md materialize (ADR-0032 §sub-2 β)
@@ -1983,7 +1795,6 @@ main() {
     # ADR-0035: _step4_gws 폐기 (gws CLI 단독 폐기)
     _step45_rclone
     _step5_instance_dirs    # ADR-0031: yaml 미관여 (이름 변경 + cp 삭제)
-    _migrate_graphify_env   # ADR-0038 (v0.1.7 follow-up): 기존 env 파일의 legacy 키 마이그레이션 (fresh install 직후엔 no-op)
     _step6_agent_skill
 
     [[ "$INSTALL_MODE" == "fresh" ]] && _step7_linger

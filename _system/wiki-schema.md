@@ -58,8 +58,8 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 ├── scripts/                          # 인프라 스크립트
 │   ├── vault-fetch.py
 │   ├── ops-alert.py
-│   ├── migrate_layout.sh             #   ADR-0034 layout migration helper
-│   └── _helpers/{render_systemd_units,hermes_config_migrate}.py
+│   ├── pending_monitor.py
+│   └── _helpers/render_systemd_units.py
 ├── install.sh
 ├── wikihub.yaml.example              # /wh-setup 의 read-only template (ADR-0031)
 └── .venv_path                        # venv path sidecar (ADR-0020)

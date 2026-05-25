@@ -94,13 +94,9 @@ ADR-0034 data-first layout invert 후 본 ADR §Decision 의 path 변경:
 - **sub-3 (marker comment + realpath 비교 idempotent guard)**: install.sh `_step6_agent_skill _patch_hermes_external_dirs` 가 realpath 비교 — path 만 변경되면 자동 detect. migration helper (`scripts/_helpers/hermes_config_migrate.py`) 가 stale entry (이전 `$WIKIHUB_HOME/_system/skills/_generated/`) 제거 + 신규 entry 추가 (marker comment 검증으로 wikihub-managed 만 영향, 운영자 등록 entry 보존).
 - **sub-4 (flock + backup + sha256 + retention)**: 정책 유지. migration helper 도 동일 safety 패턴.
 
-### migration 자동화 (ADR-0034 §sub-3 정합)
+### migration 자동화 (historical — v0.1.8 cleanup 완료)
 
-`scripts/migrate_layout.sh` 의 Step 5 가 `scripts/_helpers/hermes_config_migrate.py` 호출:
-- `--remove-stale "$LEGACY_REPO/_system/skills/_generated"`
-- `--add-new "$NEW_SRC/_system/skills/_generated"`
-
-운영자가 직접 등록한 marker 부재 entry 는 보존 (CR2-HIGH-1 정합).
+본 절은 pre-v0.1.0 → v0.1.0 layout transition (ADR-0034) 의 1회성 helper chain — `scripts/migrate_layout.sh` 의 Step 5 가 `scripts/_helpers/hermes_config_migrate.py` 호출하는 구조였음. v0.1.8 cleanup (feature `legacy_migration_cleanup`, 2026-05-25) 으로 helper chain 동반 삭제 (운영자 base v0.1.7+ 정착 정합). 의사결정 history 는 ADR-0034 §"후속 영향" 참조.
 
 Status 변경 없음. path + migration 자동화 추가.
 
