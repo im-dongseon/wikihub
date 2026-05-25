@@ -36,14 +36,16 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 ```mermaid
 flowchart TD
-    Plan["Step 1: Plan"]
+    Plan["Step 1: Plan<br/>(타겟 버전 브랜치 결정)"]
     AD["Step 2: Analysis & Design"]
     Review2["리뷰어/사용자 검토"]
-    Impl["Step 3: Implementation"]
-    Review4["Step 4: Review<br/>(조건부 생략)"]
-    Deploy["Step 5: Deployment<br/>(조건부 생략)"]
-    Close["Feature 종료 처리<br/>(archive 이동, 필수)"]
-    NewF["새 Feature"]
+    Impl["Step 3: Implementation<br/>(feature/&lt;id&gt; on v0.X.Y)"]
+    Review4["Step 4: Code Review<br/>(조건부 생략)"]
+    Deploy["Step 5: Deploy<br/>(1) squash → v0.X.Y<br/>(2) canary force-update<br/>(3) feature 브랜치/worktree 정리"]
+    Release{"release<br/>batch?"}
+    MainMerge["(4) main merge --no-ff<br/>(5) vX.Y.Z annotated + latest force-update"]
+    Close["Feature 종료 처리<br/>(archive 이동 + 브랜치 정리 확인)"]
+    NewF["새 Feature<br/>(revert squash 또는 신규)"]
 
     Plan --> AD
     AD --> Review2
@@ -53,10 +55,13 @@ flowchart TD
     Review4 -.->|"범위 내 결함:<br/>Step 2/3 복귀"| AD
     Review4 -.->|"범위 초과 결함"| NewF
     Review4 -->|결함 없음| Deploy
-    Deploy --> Close
+    Deploy --> Release
+    Release -->|"중간 feature<br/>(OCI 검증 trace)"| Close
+    Release -->|"버전 batch 완료<br/>+ OCI 검증 통과"| MainMerge --> Close
+    Deploy -.->|"squash 후 결함 발견"| NewF
 ```
 
-> Worktree 사용 시 Step 3~4는 feature 브랜치 worktree에서, Step 5는 main에서 머지·배포.
+> **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/v0.X.Y`, main 직접 분기·commit 금지. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
 
 > **Step 4(검토)와 Step 5(배포)는 조건부 생략 가능**합니다. 생략 결정은 Step 1 `plan.md`에 미리 선언하고 사유를 기록합니다 — 사후 누락이 아니라 계획상의 결정으로 추적합니다.
 
@@ -80,6 +85,7 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 필수 포함 항목:
 - 작업 분류 (기능 / 리팩토링 / 버그 / 문서 / 운영)
+- **타겟 버전 브랜치** — 본 feature 가 머지될 버전 브랜치 (예: `v0.1.8`). 사후 변경 시 plan.md `## v2` 섹션에 사유 기록.
 - 적용 단계 선언 (Step 4 검토, Step 5 배포의 수행 여부 + 사유)
 - 예상 영향 범위 (대상 파일 또는 디렉토리 수준)
 - 메소드론 적용 여부 (오타·1줄 수정 등 trivial 변경은 본 절차 자체를 생략 — plan.md조차 만들지 않음)
@@ -186,19 +192,45 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 ### Step 5: Deployment (배포) — 조건부 생략 가능
 
-**도구**: 배포 스크립트
+**도구**: git + install.sh (배포는 git workflow 로 수행, deploy 스크립트 없음)
 **진입 조건**: Step 4 DoD 전항목 충족 (Step 4 생략 시 Step 3 자가 검증 + 사용자 승인으로 대체) + 사용자 최종 승인 (`"배포 진행해줘"` 또는 `"Step 5 시작해줘"`)
-**산출물**: `features/HISTORY.md` — 배포 후 에이전트가 자동으로 항목 append (파일 없으면 생성)
+**산출물**: `features/HISTORY.md` — release(액션 4~5) 시점에 한 번 append
 
 **생략 가능 조건** (어느 하나라도 해당):
 
 | 항목 | 조건 |
 |---|---|
-| 변경 대상 | `_system/` + 인프라 스크립트(`scripts/`, `deploy.sh`) 둘 다 미변경 |
+| 변경 대상 | `_system/` + 인프라 스크립트(`scripts/`, `install.sh`) 둘 다 미변경 |
 | 변경 성격 | 메인테이너 가이드(`AGENTS.md`, `docs/`)만 변경 |
 | 운영 환경 | 운영 시스템에 미반영해도 무방한 변경 (개발 단계 문서 등) |
 
 생략 결정은 Step 1 plan.md에 미리 선언한다. 생략 시 HISTORY.md 항목 추가도 함께 생략한다.
+
+**5 액션 git workflow** (메인테이너가 squash 직후 즉시 수동 실행):
+
+| # | 액션 | 명령 | 예외 처리 |
+|---|---|---|---|
+| 1 | feature → 버전 브랜치 squash merge | `git checkout v0.X.Y && git merge --squash feature/<id> && git commit -m "<type>(<feat_id>): ... (vX.Y.Z)"` <br/>※ `--squash` 가 implicit no-commit | conflict 시 해결 후 commit, 또는 `git reset --hard HEAD` |
+| 2 | 버전 브랜치 push + canary tag force-update | `git push origin v0.X.Y --force-with-lease` ← 브랜치 lease-protected push <br/>`git tag -f canary` ← local tag move (HEAD = squash commit) <br/>`git push origin canary --force` ← tag force-push <br/>※ 세 줄로 분리 실행 — 중간 fail 시 silent divergent 방지 | force-push fail 시 GitHub Tag protection rule 확인 |
+| 3 | feature 브랜치/worktree 정리 | `git -C ../wikihub-feat/<id> status --porcelain` ← 출력 확인 (비어있어야 정상) <br/>`git worktree remove ../wikihub-feat/<id>` ← dirty 시 git 자체가 거부 <br/>`git branch -D feature/<id>` ← squash 는 fully-merged 인식 안 함 → `-D` 강제 | dirty 잔존은 squash 누락분 — 새 micro feature 로 별도 squash 권장 |
+| 4 | (release 시점) 버전 브랜치 → main `merge --no-ff` | `git status` ← working tree clean 확인 (dirty 시 stash) <br/>`git checkout main && git merge --no-ff v0.X.Y` | conflict 시 해결 후 commit. **main 직접 commit 금지** |
+| 5 | annotated version tag + latest force-update + push | `git tag -a v0.X.Y -m "v0.X.Y — <description>" <merge_sha>`<br/>`git tag -f latest <merge_sha>`<br/>`git push origin main v0.X.Y`<br/>`git push origin latest --force` | annotated tag 는 immutable — force 금지 |
+
+> 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치 누적 commit + OCI canary 검증 통과 후.
+
+**release 후 ref 상태**:
+- `main HEAD = refs/tags/vX.Y.Z = refs/tags/latest` (= 동일 merge commit M)
+- `refs/heads/v0.X.Y` = M.parents[1] (release 직전 commit, **hotfix base 후보로 보존**)
+- `refs/tags/canary` = release 직전 commit (다음 minor 첫 squash 까지 OCI trace 보존)
+
+**canary 사고 시 rollback**:
+```bash
+git reflog show canary       # 직전 sha 확인
+git tag -f canary <prev_sha>
+git push origin canary --force
+```
+
+**hotfix 흐름**: production critical bug 발견 시 → 현 minor 의 버전 브랜치에서 hotfix feature 진행 → 다음 minor 의 첫 feature 로 흡수. patch 자릿수 도입 (v0.X.Y.Z) 은 별도 결정.
 
 **수행 시 HISTORY.md 항목 형식**:
 ```markdown
@@ -214,6 +246,39 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 > 결정 이유의 상세는 ADR로 옮겨갔으므로 HISTORY 항목은 "생성 ADR" 한 줄로 참조한다. ADR이 없는 단순 운영성 feature는 이 줄을 생략한다.
 
+### 배포 채널 — `canary` tag 운영 SOP
+
+운영 server (OCI) 에서 main merge 전 검증 trace 를 위해 **`canary` tag** 운용 (Step 5 액션 2 의 매 feature 반복).
+
+**메인테이너 측** (Step 5 액션 2 동등):
+```bash
+# 버전 브랜치 HEAD 가 canary 후보 — squash 직후 force-update
+git tag -f canary
+git push origin canary --force
+```
+
+**운영자 측** (OCI):
+```bash
+# 표준 호출형 — --branch canary
+~/.local/share/wikihub/src/install.sh --update --branch canary
+# 또는 fresh:
+# curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/canary/install.sh | bash -s -- --branch canary
+
+# 검증
+journalctl --user -u wikihub-lint.service -n 50
+systemctl --user list-timers
+```
+
+**Tag 운영 의미** (정본은 AGENTS.md §8 — 동기화 유지):
+
+| Tag | 성격 | 가리키는 commit | 운영 의미 |
+|---|---|---|---|
+| `vX.Y.Z` | **annotated**, immutable | main 의 merge commit M | release 영구 record. force-push 금지. |
+| `latest` | lightweight, force-move | 가장 최근 release commit | production default |
+| `canary` | lightweight, force-update | 버전 브랜치 HEAD | pre-production 검증 trace. **fetch 시 `--force` 필요** (git 2.20+) — install.sh 가 자동 처리. |
+
+> install.sh `_step2_update` 는 `git fetch origin --tags --force` 로 force-updated lightweight tag 자동 수신 (ADR-0030 의 `_resolve_ref` path 2 + `--branch canary` 호출과 정합).
+
 ### Feature 종료 처리 (필수)
 
 feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 후), 다음을 수행한다.
@@ -223,6 +288,7 @@ feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 
 3. **Archive 이동**: `git mv features/[YYYYMMDD]_[기능개발주제명] features/archive/[YYYYMMDD]_[기능개발주제명]`
    - features/ 루트에는 **진행 중 feature만** 남는다.
    - archive 위치 자체가 "완료" 표시 — 별도 종료 마커는 두지 않는다.
+4. **feature 브랜치/worktree 정리 확인**: Step 5 액션 (3) 에서 이미 정리됐어야 함. `git branch --list 'feature/<id>'` + `git worktree list` 로 잔존 여부 점검. 미정리 시 본 단계에서 강제(`git worktree remove --force` + `git branch -D`).
 
 종료 처리는 사용자 선언 (`"feature 종료해줘"` 또는 `"archive로 이동해줘"`)으로 트리거한다.
 
@@ -327,14 +393,19 @@ gh copilot suggest -t shell "review_context.md 기반으로 코드 리뷰해줘"
 > - 서브에이전트 리뷰를 자동화할 때 (Claude Agent tool 활용 시)
 
 ### 기본 개념
-feature 브랜치를 별도 디렉토리로 체크아웃해 브랜치 전환 없이 여러 작업을 동시에 진행한다.
+feature 브랜치를 별도 디렉토리로 체크아웃해 브랜치 전환 없이 여러 작업을 동시에 진행한다. **분기 base 는 항상 타겟 버전 브랜치(`origin/v0.X.Y`)** — main 직접 분기 금지.
 
 ```bash
-# feature worktree 생성 (레포 루트 기준 상대경로)
-git worktree add ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] feature/[기능개발주제명]
+# 1. 최신 버전 브랜치 fetch (필수 — stale base 면 다른 feature squash 와 충돌)
+git fetch origin
 
-# 작업 완료 후 제거
-git worktree remove ../[repo]-feat/[YYYYMMDD]_[기능개발주제명]
+# 2. feature worktree 생성 — base 는 origin/v0.X.Y
+git worktree add ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] -b feature/[기능개발주제명] origin/v0.X.Y
+
+# 3. Step 5 액션 (3) — squash merge 직후 제거
+git -C ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] status --porcelain   # 출력이 비어있어야 정상
+git worktree remove ../[repo]-feat/[YYYYMMDD]_[기능개발주제명]         # dirty 시 git 자체가 거부
+git branch -D feature/[기능개발주제명]
 ```
 
 ### cmux 패널 구성
@@ -349,27 +420,31 @@ git worktree remove ../[repo]-feat/[YYYYMMDD]_[기능개발주제명]
 |---|---|---|
 | Implementation | feature worktree | 격리된 환경에서 개발 |
 | Review | main worktree | main 기준 diff로 변경사항 검토 |
-| Deployment | main worktree | merge 후 deploy.sh 실행 |
+| Deployment | main worktree | 5 액션 git workflow 실행 (위 §Step 5 참조) |
 
 ### Claude Code Agent tool 연동
-Agent tool의 `isolation: "worktree"` 옵션을 사용하면 서브에이전트가 자동으로 임시 worktree를 생성해 작업 후 결과만 반환한다.
+Agent tool의 `isolation: "worktree"` 옵션을 사용하면 서브에이전트가 **임시 검토/탐색용 worktree** 를 HEAD 기준으로 자동 생성·제거한다.
 
 ```
 "worktree 격리해서 리뷰해줘"
 → Agent tool이 임시 worktree 생성 → 리뷰 → 메인 컨텍스트로 결과 반환
 ```
 
+> **주의**: 본 §"분기 base 는 origin/v0.X.Y" 규칙은 **영구 feature 브랜치에만** 적용. Agent tool 임시 worktree 는 일회용이라 규칙 외.
+
 수동(cmux) 방식과 자동(Agent tool) 방식 모두 worktree와 자연스럽게 연결된다.
 
 ### Worktree 미사용 기본 경로
 
-Worktree 없이 진행할 때는 feature 브랜치에서 Step 1~4를 진행하고 Step 5에서 PR 생성 후 main으로 머지한다.
+Worktree 없이 진행할 때는 feature 브랜치에서 Step 1~4를 진행하고 Step 5에서 squash merge → 버전 브랜치로 통합한다.
 
 ```bash
-git checkout -b feature/[기능개발주제명]
-# Step 1~4 진행
+# 분기 base = origin/v0.X.Y
+git fetch origin
+git checkout -b feature/[기능개발주제명] origin/v0.X.Y
+# Step 1~4 진행 + push
 git push origin feature/[기능개발주제명]
-# PR 생성 → 머지
+# Step 5 액션 (1)~(3) 으로 squash merge → 버전 브랜치 (위 §"5 액션 git workflow" 참조)
 ```
 
 ---
@@ -423,7 +498,7 @@ docs/adr/
 - archive로 이동돼도 ADR은 `docs/adr/` 그대로 유지 (feature와 분리된 영속 기록).
 - 결정 변경 시 기존 ADR Status를 `Superseded`로 바꾸고 신규 ADR에 `Supersedes: ADR-NNNN` 명시. 기존 ADR은 **삭제하지 않는다.**
 
-**Worktree 사용 시**: Step 3~4는 feature 브랜치 worktree에서 진행하고, Step 5에서 main으로 머지한다.
+**Worktree 사용 시**: Step 3~4는 feature 브랜치 worktree에서 진행하고, Step 5 액션 (1)~(3) 에서 버전 브랜치로 squash merge — release batch 시점에만 main 으로 `merge --no-ff` (액션 4~5).
 **git 관리**: `features/` 전체를 커밋해 히스토리를 보존한다.
 
 - `[YYYYMMDD]`: 작업 시작일 (KST)

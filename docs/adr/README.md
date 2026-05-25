@@ -92,6 +92,8 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0035](0035-rclone-only-unified-oauth.md) | rclone 단독 + OAuth 단일 인증 — gws CLI 폐기 + SA 폐기. lsjson full snapshot + file_map(source_id 키) diff + false-delete 가드. **Supersedes ADR-0014/0015/0017/0027/0029** | Accepted | 2026-05-19 | `20260519_oauth_unify_rclone_only` |
 | [ADR-0036](0036-graphify-cli-integration.md) | graphify CLI 통합 — PyPI 패키지 `graphifyy` install.sh 책임 + `~/.config/wikihub/env` (EnvironmentFile) API key + Pass 3 non-deterministic 가정 + `wiki/.graphifyignore` 정책 + 운영 비용 모델 (timer 주기 통제) | Accepted | 2026-05-19 | `20260519_graphify_integration` |
 | [ADR-0037](0037-alert-pipeline-architecture.md) | Alert pipeline architecture — multi-channel dispatch (webhook + Telegram 병행) + wikihub-pending-monitor systemd unit (age-based trigger) + `operations.pending_alert_age_sec` + ops-alert.service `EnvironmentFile=` 추가. **ADR-0024 complement**. | Accepted | 2026-05-20 | `20260520_alert_pipeline_overhaul` |
+| [ADR-0038](0038-graphify-env-namespace-isolation.md) | graphify env namespace isolation — `WIKIHUB_GRAPHIFY_<PROFILE>_*` 명명규칙 + Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration | Accepted | 2026-05-24 | `20260524_graphify_profile_namespace` |
+| [ADR-0039](0039-entity-concept-alias-frontmatter.md) | entity/concept alias frontmatter — duplicate detection 정합 + LLM 재생성 무한 loop 방지. `aliases: [<canonical>, ...]` 필드. case-variant + cross-category duplicate alias 셋 비교. lint Step 4.5 auto-migration. | Accepted | 2026-05-25 | `20260525_lint_operations_improvements` |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

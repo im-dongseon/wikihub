@@ -125,6 +125,9 @@
 - install.sh INSTALLED_VERSIONS.json schema 갱신 (graphify key).
 - v0.1.0 의 graphify Pass 3 churn 운영 데이터 surface 시 D4 의 cycle 간 drift 허용 범위 재검토 트리거.
 - v0.2.x 검토 트리거: graphify-side token-budget / backend 통제 schema (`operations.graphify.*`), PyPI hash pin 옵션, secret material layer 통합.
+- 2026-05-25: `lint_operations_improvements` (v0.1.8) 가 graphify timeout wrapper 의 yaml expose 작업 완료. `graphify.md` Step 2 의 6 위치 hard-coded `timeout 720` 가 `timeout "$timeout_sec"` 로 변경 (yaml `operations.graphify_timeout_sec` 정본, default 900s = 15분). 운영자 backend 별 조정 가능. graphify.md:156 의 "yaml expose 는 v0.2.x deferred" 코멘트 폐기 처리.
+- 2026-05-26: `update_path_fixes` (v0.1.8, D3=B) 가 graphify hermes skill 폐기 + systemd service 격상. `wh-graphify` 폐기 (Layer 1 LLM wrapper = deterministic bash 작업의 over-engineering, `wikihub_monitor` D1 정정 정신 정합). 정본 = `scripts/wikihub_graphify.sh` (bash) + `_system/systemd/wikihub-graphify.service.template` (oneshot, timer 없음). lint Step 9 가 변경 감지 시만 `systemctl --user start wikihub-graphify.service` trigger — cost gate 보존. semantic extraction LLM 호출 (Layer 2, graphify CLI 내부 ollama_cloud 등) 유지. §D6 single-source 정신 정합 (정본 위치만 hermes skill → systemd service 로 이동).
+- 2026-05-26: `install_update_hardening` (v0.1.8) 가 `_install_graphify` 의 PATH prepend 책임 fix — 진입 직후 `export PATH=$VENV_PATH/bin:$PATH` 추가. install.sh L578 comment 의 "venv 의 bin/ 이 PATH 에 우선해야" 와 실제 동작 불일치 (운영자 shell PATH 에 venv/bin 자연 없음 → `command -v graphify` fail 됐던 결함) 정합화. install.sh process 한정 prepend — systemd unit 의 `Environment=PATH=$VENV_PATH/bin:...` 와 정책 일관, shell init 미수정.
 
 ### 재검토 트리거
 
@@ -299,44 +302,12 @@ OCI 검증 (2026-05-24) 결과 — 3 시나리오 (graph.json 미존재 / extrac
 - `jq 'keys' graph.json` fail → graph.json 이 invalid JSON 또는 partial write (timeout 도중 kill) → **삭제 + exit 1** (force clean). 다음 호출이 fresh state 로 시작.
 - pass → `jq '.nodes | length'` + `jq '.links | length'` 로 node/edge 수 출력. **edges 는 `.links` 위치** — NetworkX node-link format 정합 (`docs/graphify-backend-test-reference.md` §1 검증).
 
-### Rollback procedure
-
-`install.sh --update` 후 문제 발생 시 운영자 복원 절차:
-
-```bash
-# 1. backup 위치 확인 (.wikihub-bak.<utc_iso>)
-ls -la ~/.config/wikihub/env.wikihub-bak.*
-ls -la ~/wikihub/wikihub.yaml.wikihub-bak.*
-
-# 2. env 복원
-cp ~/.config/wikihub/env.wikihub-bak.<utc_iso> ~/.config/wikihub/env
-chmod 600 ~/.config/wikihub/env
-
-# 3. yaml 복원
-cp ~/wikihub/wikihub.yaml.wikihub-bak.<utc_iso> ~/wikihub/wikihub.yaml
-
-# 4. (선택) 즉시 적용 — 다음 timer fire 도 자동 적용
-sudo -u <wikihub_user> systemctl --user restart wikihub-lint.service
-
-# 5. install.sh 재실행 금지 — drift detect 가 다시 migration 시도
-```
-
-backup 파일은 30일 retention (install.sh `_migrate_graphify_env` 의 A6 정책). 30일 이내 복원 가능.
-
-### 배포 Gap window 분석
-
-systemd `EnvironmentFile=-%h/.config/wikihub/env` 는 **service start 시점 1회 read** semantics. install.sh 가 running service 중 env 파일을 rewrite 해도:
-- 호출 시점 ≤ install.sh start: graphify 이미 old env 받음 → 그 호출은 old 상태로 완료. Safe.
-- 호출 시점 > install.sh end: new env 로 동작. Safe.
-- install.sh 시간 동안: graphify subprocess 이미 받은 env, mv 의 inode swap 은 in-memory env 에 영향 없음. Safe.
-
-→ **실 race window = 0**. 운영자가 즉시 검증하고 싶을 때만 `systemctl --user restart wikihub-lint.service`.
-
 ### Cross-references 갱신
 
 - ADR-0006 unified orchestration: 본 patch 의 lint.md Step 9 단순화 (`<agent_invocation> "/wh-graphify"` 1줄) 정합 — "각 skill 이 자기 unified 경로" 의 strict 해석. backend dispatch 의 single source 가 graphify.md.
 - ADR-0031 §Note (v0.1.7): `_migrate_*` 함수의 schema vs value mutation boundary — 본 §Note 의 모든 마이그레이션 (env legacy 키 삭제, yaml graphify_profile 자동 추가, profile 값 invalid warn-but-no-mutate) 이 정합.
 - ADR-0038 (신규): namespace 격리 — 본 §Note 의 §D2 partial supersede.
+- **v0.1.8 cleanup** (2026-05-25, feature `legacy_migration_cleanup`) — 본 §Note 의 §Rollback procedure + §배포 Gap window 분석 두 절은 `_migrate_graphify_env` referent 였음. cleanup 으로 함수 삭제 → 두 절도 동시 삭제 (dead text). §결정 A~F (CLI v8 sync 본체) 는 실 code 정본이므로 그대로 유지.
 
 ### 본 §Note 의 분석 정본
 

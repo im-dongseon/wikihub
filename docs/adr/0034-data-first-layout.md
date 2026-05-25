@@ -92,7 +92,7 @@ multi-instance: `WIKIHUB_HOME=/var/wikihub-prod WIKIHUB_SRC=/var/wikihub-src/pro
 ### 추가: rclone FUSE unmount + hermes config migration
 
 - rclone FUSE mount busy detect → retry × 6 × 10s + lazy fallback (`fusermount3 -uz`).
-- ~/.hermes/config.yaml 의 external_dirs migration: stale entry 제거 (marker 검증 — wikihub-managed 만, 운영자 등록 entry 보존) + 신규 entry 추가. helper 별도 (`scripts/_helpers/hermes_config_migrate.py`).
+- ~/.hermes/config.yaml 의 external_dirs migration: stale entry 제거 (marker 검증 — wikihub-managed 만, 운영자 등록 entry 보존) + 신규 entry 추가. (helper `scripts/_helpers/hermes_config_migrate.py` 는 v0.1.8 cleanup 으로 삭제 — pre-v0.1.0 transition 1회성, §"후속 영향" cleanup bullet 참조).
 
 ## Consequences
 
@@ -119,3 +119,4 @@ multi-instance: `WIKIHUB_HOME=/var/wikihub-prod WIKIHUB_SRC=/var/wikihub-src/pro
   - **ADR-0031** (yaml materialization) — §Decision 갱신. `instance.root` default = `~/wikihub`. derived 4필드 값 변경.
   - **ADR-0032** (Hermes skill registration) — §Decision 갱신. external_dirs path = `$WIKIHUB_SRC/_system/skills/_generated`. migration helper 가 stale entry 자동 제거 (marker 검증).
   - **재검토 트리거**: (1) multi-instance 운영자 base 증가 시 `WIKIHUB_SRC` 의 per-instance vs 공유 default 재검토. (2) cross-fs mv 의 ENOSPC 빈도 surface 시 backup 정책 재검토 (현 mv-only).
+  - **v0.1.8 cleanup** (2026-05-25, feature `legacy_migration_cleanup`) — `scripts/migrate_layout.sh` (313줄, 9-phase state machine) + `scripts/_helpers/hermes_config_migrate.py` (helper, migrate_layout.sh 의 유일 caller 부재로 orphan) + install.sh `WIKIHUB_HOME` silent bug detect block + ADR-0032 §sub-3 의 migration 자동화 절차 안내 dead reference 정리 — 모두 pre-v0.1.0 → v0.1.0 transition 의 1회성 자산. 운영자 base (v0.1.7+) 정착으로 영구 무용 → atomic refactor. ADR 본문 결정 (data-first layout) 자체는 history record 로 그대로 보존.

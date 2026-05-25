@@ -5,13 +5,13 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 ## 호출
 
 ```
-<agent_invocation> "/wh-lint"            # 기본 모드: 비파괴 작업만 (timer 자동 호출)
-<agent_invocation> "/wh-lint --apply"    # 파괴 가능 작업까지 수행 (메인테이너 수동 호출)
+<agent_invocation> "/wh-lint"            # 진단 + 적용 (timer 자동 호출 + 메인테이너 수동 호출 동일 동작)
 ```
 
-- **트리거 (기본)**: systemd timer (3시간 1회, v0.1.5 default `wikihub.yaml.operations.lint_interval_hours: 3`. 24h 이전 default 에서 변경 — graphify chain 의 cost 8배 증가하나 wiki 위생 사이클 빠른 surface 가치 우선)
-- **트리거 (`--apply`)**: 메인테이너가 `wiki/_lint/report.md` read 후 의도적 수동 호출
+- **트리거 (자동)**: systemd timer (3시간 1회, v0.1.5 default `wikihub.yaml.operations.lint_interval_hours: 3`. 24h 이전 default 에서 변경 — graphify chain 의 cost 8배 증가하나 wiki 위생 사이클 빠른 surface 가치 우선)
+- **트리거 (수동)**: 메인테이너가 `wiki/_lint/report.md` 즉시 확인 + 변경 적용 의도 시
 - **vault 무관 (wiki-wide)**: 단일 명령으로 전체 wiki 점검
+- **v0.1.8 ADR-0039 정합**: `--apply` flag 폐기 — wikihub `wiki/` 는 sources (vault, immutable) 의 LLM derivative 라 원본 변경 0. 매 cycle 진단 + 적용 default. 별도 dry-run 모드 필요 시 v0.2.x 검토.
 
 ## 사전 조건
 
@@ -31,9 +31,21 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 ## 절차
 
+### Step 0. wiki-wide flock 가드 (v0.1.8 — race 가드)
+
+lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wh-lint` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
+
+```bash
+exec 200>"$WIKIHUB_HOME/.wh-lint.lock"
+flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
+# lock 은 process 종료 시 자동 해제 (kernel-managed)
+```
+
+`flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 fire 자연 재시도). race window 0% 회피.
+
 ### Step 1. 디렉토리 구조 검증 (자동)
 
-- `wiki/` 직속 파일 중 `index.md` 외 페이지 → `_lint/report.md`에 보고 (이동은 `--apply` 시)
+- `wiki/` 직속 파일 중 `index.md` 외 페이지 → `_lint/report.md`에 보고 (이동은 Step 7 에서 자동)
 - 4 카테고리·`_lint/`·vault별 `sources/{vault}/` 디렉토리 부재 시 생성
 
 ### Step 2. ADR-0001 link 규약 검증 (자동, 보고만)
@@ -52,15 +64,37 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 - **고아 페이지** (인바운드 엣지 0건):
   - source 페이지: 보고만 (사용자가 직접 본문 읽고 자료로 활용 중일 수 있음)
-  - entities/concepts: 보고. `--apply` 시 `.archived/` 이동 후보
+  - entities/concepts: 보고 + Step 7 에서 `.archived/` 자동 이동
 - **dangling 엣지** (존재하지 않는 노드 가리킴): Step 2와 중복 가능. 통합 보고
 - **언급된 개념의 페이지 부재**: source 본문에서 LLM이 식별한 entity·concept 중 `wiki/entities/`·`wiki/concepts/`에 페이지 없음 → **자동 stub 생성** (frontmatter + 1줄 LLM 요약 + `referenced_by`)
+  - **alias 인식 (v0.1.8 — ADR-0039)**: stub 생성 전 wiki/entities/ + wiki/concepts/ 의 기존 page frontmatter `aliases` 셋을 lowercase 로 normalize 한 후, 본문 form 의 lowercase 가 그 셋에 포함되면 stub 생성 **skip** (LLM 재생성 무한 loop 차단). 기존 page 의 referenced_by 만 갱신.
 
 ### Step 4. 자동 cross-ref 추가 (자동)
 
 - 각 source의 본문에서 entity·concept 언급 식별
 - 해당 entity·concept 페이지의 `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
 - 추가 외에 본문·다른 frontmatter 필드는 수정 안 함
+
+### Step 4.5. Duplicate detection (자동, 보고만 — v0.1.8 ADR-0039)
+
+wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 탐지. **alias 기반 인식** — 단순 lowercase 비교가 아닌 frontmatter `aliases` 셋 비교 (ADR-0039 정합).
+
+**Alias migration** (idempotent, 매 cycle):
+- 각 entity/concept page 의 frontmatter `aliases` 부재 시 — `aliases: [<canonical>]` 자동 추가 (canonical = 페이지 파일명 base).
+- 빈 `aliases: []` 도 동일 처리.
+- **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (ingest.md:152) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
+- **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
+
+**Case-variant duplicate** (같은 카테고리):
+- entity 또는 concept 각각의 page list — `aliases` 셋을 lowercase 로 normalize 한 셋끼리 비교.
+- 2+ page 의 normalize 셋이 1+ 공통 form 보유 + 다른 page → duplicate 보고.
+- 공통 form 없으면 정합 (단일 page 의 변형 alias 들이 다른 page 와 분리).
+
+**Cross-category duplicate** (entity ↔ concept):
+- entity 의 normalize 셋 ∩ concept 의 normalize 셋 = 비공집합 페어 → duplicate 보고.
+- 예: entities/Docker (aliases [Docker, docker]) + concepts/Docker (aliases [Docker]) → 공통 `docker` lowercase → duplicate.
+
+→ `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 보고. Step 7 에서 자동 처리.
 
 ### Step 5. wiki/index.md 재구성 (자동)
 
@@ -111,18 +145,31 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 - 더 최신 source로 무효화 가능성 있는 내용
 - 본문에 언급되지만 entity·concept 페이지가 없는 항목 (Step 3에서 자동 생성됐어야 하나 누락 케이스)
 
-→ `_lint/report.md`에 보고. `--apply` 시 본문 갱신 (위험: 정보 손실 가능).
+→ `_lint/report.md`에 보고 + Step 7 에서 LLM 본문 갱신 자동. wikihub `wiki/` = LLM derivative 라 원본 변경 0 (ADR-0039 정합).
 
-### Step 7. `--apply` 작업 (수동 호출 시에만)
+### Step 7. 적용 작업 (매 cycle 자동, v0.1.8 ADR-0039 정합)
 
-기본 모드에서는 skip. `--apply` 플래그 있을 때:
+`--apply` flag 폐기 — wikihub 데이터 모델상 wiki/ 가 sources 의 LLM derivative 라 원본 변경 0. 매 lint cycle 의 default 동작에 흡수.
 
-- dangling link 제거 (Step 2 보고 항목 중 사용자가 수정·제거 표시한 것)
+매 cycle 진행:
+
+- dangling link 제거 (Step 2 보고 항목)
 - `referenced_by` 0건 entity·concept → `wiki/.archived/<category>/<name>-<utc_iso>.md` 이동
 - 폴더 위반 페이지 → 적절한 카테고리 이동 (단 vault prefix 필요한 sources는 메인테이너 명시 매핑)
-- 모순 클레임 본문 갱신
+- 모순 클레임 본문 갱신 (Step 6 보고 항목)
+- **case-variant duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
+  - canonical 선택: alias 셋의 첫 form (또는 운영자 `canonical: <name>` frontmatter 명시 시 그것). 보존.
+  - 다른 form 의 page → `.archived/<category>/<name>-<utc_iso>.md` 이동
+  - canonical page 의 alias 셋 ∪ archive 된 page 의 alias 셋 — 합집합 frontmatter 갱신
+  - canonical page 의 referenced_by ∪ archive 된 page 의 referenced_by — 합집합
+  - wiki/ 전체 sed 치환: 변형 form 의 link `[[<variant>]]` → `[[<canonical>]]` (명시적 카테고리 prefix link 만 매칭. 단축형 `[[<name>]]` 은 link resolver 가 새 page 위치 자동 인식)
+  - **idempotency**: archive 후 같은 form 의 page 가 ingest 사이클에서 재생성되지 않도록 ingest.md alias 인식 (Step 4) 정합 — 같은 alias 보유 시 stub 생성 skip
+- **cross-category duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
+  - entity 우선 — concept 페이지의 본문 + referenced_by + alias 셋을 entity 페이지로 LLM merge
+  - concept 페이지를 `.archived/concepts/<name>-<utc_iso>.md` 이동
+  - **idempotency gate**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시에도 entity 본문 LLM merge 재호출 안 함 — concept 본문 + referenced_by 만 합집합 추가. entity 본문 git history churn 차단.
 
-**v0.1.0 정책 (확정)**: `--apply` 호출 시 **일괄 적용** (interactive per-item confirm 없음). 메인테이너는 `_lint/report.md` read → 의도 확인 → `<agent_invocation> "/wh-lint --apply"` 1회 호출로 모든 위험 작업 적용. interactive 세분화는 v0.2.x 후속 ADR 후보.
+**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wh-lint`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` 또는 wikihub_monitor 보고서 read.
 
 ### Step 8. log 작성
 
@@ -131,7 +178,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 ```markdown
 # Lint Report — 2026-05-13 03:00 KST
 
-- **Mode**: auto (--apply 미사용)
+- **Mode**: auto (매 cycle 진단 + 적용 — v0.1.8 ADR-0039)
 - **Duration**: 12.3s
 
 ## 자동 수정 완료
@@ -140,7 +187,15 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 - cross-ref 추가: 18건 (entities 12 + concepts 6)
 - 카테고리 디렉토리 생성: wiki/_lint/
 
-## 보고 (--apply 필요)
+## Duplicates (case-variant) — v0.1.8 ADR-0039
+- `Claude-Code` / `claude-code` (entity) → Step 7 에서 canonical 보존 + alias 합집합
+- ...
+
+## Duplicates (cross-category) — v0.1.8 ADR-0039
+- `Docker` (entity + concept) → Step 7 에서 entity 보존, concept 본문 LLM merge + archive
+- ...
+
+## 보고 (Step 7 에서 자동 처리됨)
 ### Dangling links (3건)
 - [[gdrive/old/archive]] — referenced from sources/gdrive/notes/idea.md:23
 - ...
@@ -159,39 +214,34 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 
-### Step 9. /wh-graphify 자동 호출
+### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
-**Toggle 확인 (v0.1.5)**:
+**책임 분리** (ADR-0036 §D6 single-source 정합):
+- **lint Step 9 책임 = trigger 만** — 변경 감지 + `systemctl --user start wikihub-graphify.service` 호출
+- **graphify CLI 호출 책임 = `wikihub-graphify.service` (정본 `scripts/wikihub_graphify.sh`)**
+- v0.1.7 era 의 `<agent_invocation> "/wh-graphify"` 표현 폐기 — hermes 의 자동 sub-skill spawn 메커니즘 부재 (Reviewer 2 hermes source 검증). graphify hermes skill 자체도 폐기 (Layer 1 LLM wrapper 가 deterministic bash 작업 over-engineering — `wikihub_monitor` 의 D1 정정 정신 정합).
+
+**조건 분기**:
 
 ```bash
 graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wikihub.yaml")"
 ```
 
-- `graphify_enabled == false` → 본 단계 skip + `_lint/report.md` 에 1줄 `graphify chain skipped (yaml toggle)`. Step 3 의 wiki 순회 fallback 으로 lint 본체 정상 동작 — graph.json 갱신만 미수행 (다음 cycle 까지 graph stale).
-- `graphify_enabled == true` (default) → 아래 진행.
+1. **`graphify_enabled == false`** → skip + `_lint/report.md` 에 1줄 `graphify chain skipped (yaml toggle)`
+2. **lint cycle 변경 없음** (다음 모두 0건: Step 3 자동 stub 생성 / Step 4.5 duplicate 처리 / Step 5 index.md 변경 / Step 7 archive 이동) → skip + `_lint/report.md` 에 1줄 `graph rebuild skipped (no changes)` ← **cost gate (사용자 핵심 의도, v0.1.8 신설)**
+3. **lint cycle 변경 있음 + graphify_enabled=true** → 다음 호출 (fire-and-forget):
+   ```bash
+   systemctl --user start wikihub-graphify.service
+   ```
+   + `_lint/report.md` 에 1줄 `graphify chain triggered — see journalctl --user -u wikihub-graphify.service`
 
-lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참조: lint 후 자동 호출 = 하루 1회 자연 갱신).
+**fire-and-forget 의미**: `systemctl --user start` 가 비동기 — lint.service 즉시 종료. graphify 결과는 `wikihub-graphify.service` 의 별도 journal + `graphify-out/graph.json` 으로 surface. lint exit code 는 graphify 결과 무관.
 
-```bash
-<agent_invocation> "/wh-graphify"
-```
-
-- 성공 → `wiki/_lint/report.md`에 추가: `graph rebuilt: N nodes, M edges`
-- 실패 → report에 `graph rebuild failed: <reason>` + ops-alert 트리거 (graph 없으면 다음 사이클 /wh-query·/wh-lint 정확도 저하)
-- 본 단계의 exit code는 lint의 exit code에 영향 안 줌 (graphify 실패가 lint 자체를 fail시키지 않음 — graph는 보조 자원)
-
-**graphify 호출 형태**: graphify.md Step 2 가 단일 책임 (ADR-0006 single-source + ADR-0038 namespace 격리). lint.md 는 `<agent_invocation> "/wh-graphify"` 만 호출 — backend dispatch / profile resolve / endpoint 분기 / timeout 의 detail 은 graphify.md 참조. timeout 발생 시 (exit 124) report 에 `graph rebuild timeout` 기록 + lint 계속 (graphify partial 보호는 graphify.md Step 3 가 책임).
-
-**graphify 결과 self-check (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드)**:
-
-- graphify 호출 성공 (exit 0) 후 `graphify-out/graph.json` read → 노드 수 = `N`
-- `wiki/` 전체 페이지 수 = `M` (mechanical count — `**/*.md` 재귀 카운트, `_lint/`·`_state/` 제외)
-- `M == 0` (빈 wiki) → check skip — 정상 첫 사이클
-- `N / M < 0.5` (graph 가 wiki 의 절반 이하 표현) → **Pass 3 partial failure 의심**:
-  - report 에 `graphify partial failure 의심: N=<N>, M=<M>, ratio=<r>` 추가
-  - ops-alert 트리거 (운영자 진단 trigger — API key/quota/network 점검)
-  - 본 check 실패는 lint exit 에 영향 없음 (graph 는 보조 자원, ADR-0036 §D6 정합)
-- threshold `0.5` 는 보수적 default — wiki 규모가 작거나 entity stub 누적이 적은 초기 운영 시점에 false positive 우려 → 운영자가 yaml `operations.graphify_partial_failure_threshold` 로 override 가능 (v0.2.x 검토 트리거: 운영 데이터 surface 후 자동 ranging)
+**graphify 결과 검증 위치** (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드):
+- `scripts/wikihub_graphify.sh` 의 Step 4 (`N / M < threshold` ratio check) — 정본
+- `wikihub-graphify.service` 의 journal 에 `WARNING: graphify partial failure 의심: N=<N>, M=<M>, ratio=<r>` 출력
+- threshold = yaml `operations.graphify_partial_failure_threshold` (default 0.5)
+- 운영자 별 진단 path: `journalctl --user -u wikihub-graphify.service --since "1 day ago" | grep -E "partial|graph rebuilt"`
 
 ## 출력 산출물
 
@@ -203,7 +253,7 @@ lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참�
 | 기존 entities·concepts `referenced_by` | 자동 | 추가만 |
 | `wiki/_lint/report.md` | 자동 | overwrite |
 | 카테고리 디렉토리 (없으면) | 자동 | mkdir |
-| dangling link 제거·entity archive·본문 갱신 | `--apply` | 정보 손실 가능 |
+| dangling link 제거·entity archive·본문 갱신 | 매 cycle 자동 (v0.1.8 ADR-0039) | wiki/ = LLM derivative, 원본 변경 0 |
 
 ## 실패 처리
 
@@ -225,5 +275,5 @@ lint 사이클 마지막에 graphify 갱신을 자동 호출 (graphify spec 참�
 
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지 (Step 2 검증)
 - ADR-0005 wiki/index.md 갱신 책임 (Step 5)
-- ADR-0008 `/wh-lint` 권한 분류 (자동/`--apply`)
+- ADR-0008 `/wh-lint` 권한 분류 (v0.1.0 era — 자동/`--apply` 구분, v0.1.8 ADR-0039 에서 폐기)
 - ADR-0009 `/wh-setup`이 lint.timer 주기를 wikihub.yaml에서 동기화

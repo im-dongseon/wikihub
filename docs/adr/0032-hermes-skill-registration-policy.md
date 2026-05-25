@@ -77,6 +77,7 @@ F5 feature 가 5건의 wikihub skill (ingest·lint·query·graphify·setup) 의 
   - **ADR-0012** §Decision 갱신 — `oneshot_args` 의 `{skill}` placeholder semantics 추가 (per-unit substitution).
   - **ADR-0006** 영향 없음 — `_system/commands/` 정본성 보존 (install-time materialization 패턴).
   - **재검토 트리거**: (1) Hermes 가 advisory lock 도입 시 sub-4 protection 강화 가능. (2) codex/gemini 등 다른 agent 의 skill 시스템 매핑 추가 시 ADR-0012 의 agent-agnostic 모델과 본 ADR 의 wire format 정합 재평가. (3) Hermes 가 `external_dirs` 의 즉시 인식 보장 (재시작 불요) 안 하면 install.sh 가 `hermes skills audit` 자동 호출 정책 추가.
+  - **v0.1.8 update_path_fixes** (2026-05-26, D3=B) — `_WIKIHUB_SKILLS` tuple = 4 skills (wh-ingest / wh-lint / wh-query / wh-setup). wh-graphify hermes skill 폐기 — graphify CLI 호출 책임이 `wikihub-graphify.service` (systemd oneshot) + `scripts/wikihub_graphify.sh` (정본) 로 격상. 본 ADR 의 hermes skill registration scope 외 (graphify 가 systemd unit 으로 격리). hermes config 의 `external_dirs` patching 도 4 skills 만 대상. 운영자 manual 호출: `hermes chat --skills wh-graphify` 폐기 → `systemctl --user start wikihub-graphify.service`.
 
 ## Note (2026-05-19, feature `dir_layout_refactor`) — §Decision 갱신 (ADR-0034)
 
@@ -94,13 +95,9 @@ ADR-0034 data-first layout invert 후 본 ADR §Decision 의 path 변경:
 - **sub-3 (marker comment + realpath 비교 idempotent guard)**: install.sh `_step6_agent_skill _patch_hermes_external_dirs` 가 realpath 비교 — path 만 변경되면 자동 detect. migration helper (`scripts/_helpers/hermes_config_migrate.py`) 가 stale entry (이전 `$WIKIHUB_HOME/_system/skills/_generated/`) 제거 + 신규 entry 추가 (marker comment 검증으로 wikihub-managed 만 영향, 운영자 등록 entry 보존).
 - **sub-4 (flock + backup + sha256 + retention)**: 정책 유지. migration helper 도 동일 safety 패턴.
 
-### migration 자동화 (ADR-0034 §sub-3 정합)
+### migration 자동화 (historical — v0.1.8 cleanup 완료)
 
-`scripts/migrate_layout.sh` 의 Step 5 가 `scripts/_helpers/hermes_config_migrate.py` 호출:
-- `--remove-stale "$LEGACY_REPO/_system/skills/_generated"`
-- `--add-new "$NEW_SRC/_system/skills/_generated"`
-
-운영자가 직접 등록한 marker 부재 entry 는 보존 (CR2-HIGH-1 정합).
+본 절은 pre-v0.1.0 → v0.1.0 layout transition (ADR-0034) 의 1회성 helper chain — `scripts/migrate_layout.sh` 의 Step 5 가 `scripts/_helpers/hermes_config_migrate.py` 호출하는 구조였음. v0.1.8 cleanup (feature `legacy_migration_cleanup`, 2026-05-25) 으로 helper chain 동반 삭제 (운영자 base v0.1.7+ 정착 정합). 의사결정 history 는 ADR-0034 §"후속 영향" 참조.
 
 Status 변경 없음. path + migration 자동화 추가.
 

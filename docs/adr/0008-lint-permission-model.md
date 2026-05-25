@@ -79,3 +79,4 @@ wikihub v0.1.0은 다음 두 가지 변화로 권한 재검토 필요:
   - F2 wikihub.yaml schema: `operations.lint_interval_hours`(기본 24) 키 추가 가정 명시 (정본은 F4 yaml.example)
   - F4(systemd_orchestrator): `lint.timer`(단일, vault-agnostic) + `lint.service` unit. `ExecStart=hermes -z "/lint"`. `--apply`는 timer 호출 안 함
   - **재검토 트리거**: 운영 중 (1) stub noise가 심하면 자동 stub을 `--apply` 영역으로 격상, (2) report 미점검이 빈번하면 push 알림 정책 추가, (3) 데이터 증가로 lint 시간이 timer 주기 초과 시 주기 조정
+  - 2026-05-25 (v0.1.8 `lint_operations_improvements`): **`--apply` flag 폐기 결정** — wikihub 데이터 모델 (sources = immutable, wiki/ = LLM derivative) 정합 정리로 "파괴 가능" 가정 자체가 약해짐 (LLM 본문 reword 도 원본 변경 0). lint = 매 cycle 진단 + 적용 default. 본 ADR 의 분류 매트릭스 (자동 vs `--apply`) 폐기. lint.md Step 7 표현 갱신 + `ADR-0039` (entity/concept alias frontmatter) 가 LLM 재생성 무한 loop 차단 추가. 본 ADR Status 는 보존 (historical record).

@@ -116,3 +116,4 @@ F5가 작성해야 할 prompt invariant:
   - **F2 wiki-schema.md**: entities/concepts 카테고리 설명에 본 ADR 참조 한 줄
   - **F5(hermes_adapter)**: LLM prompt template 작성 시 본 ADR §4 invariant 5건 enforce. agent별 prompt engineering은 F5 책임
   - **재검토 트리거**: 운영 중 (1) 동의어로 인한 entity·concept 분리 빈발, (2) 잘못 분류된 stub noise 누적, (3) LLM이 외부 지식 generation 시도하는 경우 발견 시 별도 ADR로 alias·classifier 보강
+  - 2026-05-25 (v0.1.8 `lint_operations_improvements`): **alias 처리 future ADR 발의** → [ADR-0039](0039-entity-concept-alias-frontmatter.md). entity/concept page frontmatter 에 `aliases: [<canonical>, ...]` 필드 추가 — case-variant (`MiniMax` / `minimax`) + cross-category (entity `Docker` + concept `Docker`) duplicate alias 셋 비교로 인식. ingest 가 stub 생성 시 본문 form alias 명시 → LLM 재생성 cycle 무한 loop 차단. 본 ADR §Decision 4 의 "동의어는 가장 자주 쓰인 표기 1개만 (alias 정책은 future ADR)" 정책이 ADR-0039 로 superseded.

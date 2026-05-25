@@ -145,10 +145,11 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
    - 둘 다 아니면 추출 안 함 (false positive < false negative)
    - 본문 1회 이상 명시 언급 (passing mention 제외)
    - 1줄 요약은 **본문 발췌만** — 외부 지식 generation 금지 (신뢰 경계, ADR-0013 §3)
-   - 동의어는 가장 자주 쓰인 표기 1개만 (alias 정책은 future ADR)
+   - 동의어 처리는 frontmatter `aliases` 필드 — ADR-0039 (v0.1.8 신설)
 3. 각 entity·concept에 대해:
-   - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
-   - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + 본문은 1줄 요약, `referenced_by: [<source>]`)
+   - **alias 인식 (ADR-0039)**: 본문 form 의 lowercase 가 기존 page 의 frontmatter `aliases` 셋 (lowercase normalize) 1+ 공통 → 기존 page 로 간주. `referenced_by` 만 추가 (alias 셋 미변경, stub 생성 skip — LLM 재생성 무한 loop 차단)
+   - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 (위 alias 인식 포함) → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
+   - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + `aliases: [<본문 form>]` + 본문은 1줄 요약, `referenced_by: [<source>]`)
 4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
 5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wh-lint`가 책임 (--apply 시 archive)
 

@@ -25,6 +25,9 @@ Thumbs.db
 # Hermes skill install artifacts (F5 — install.sh _step6_agent_skill materialized, ADR-0032)
 _system/skills/_generated/
 
+# install.sh runtime artifact — Step 4.5 가 매 호출마다 작성 (rclone/graphify/uv/wikihub 버전 fact)
+_system/INSTALLED_VERSIONS.json
+
 # Python
 __pycache__/
 *.py[cod]

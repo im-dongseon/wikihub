@@ -1,0 +1,25 @@
+[Unit]
+Description=WikiHub monitor — 12hr 운영 보고서 (wikihub_monitor v0.1.8)
+After=network-online.target
+Wants=network-online.target
+# branch_strategy_formalize follow-up (wikihub_monitor):
+# bootstrap fail (exit 2) 만 ops-alert 발화. runtime fail (exit 75) 은 SuccessExitStatus 정합 → 미발화 (12hr 후 자연 재시도).
+OnFailure=ops-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={wikihub_home}
+ExecStartPre=/bin/mkdir -p {wikihub_home}
+Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WIKIHUB_HOME={wikihub_home}
+Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
+Environment=WIKIHUB_SRC={wikihub_src}
+# ADR-0037 §D1 — TELEGRAM_MONITOR_BOT_TOKEN + TELEGRAM_MONITOR_CHAT_ID 재사용 (ops-alert 와 같은 채널)
+EnvironmentFile=-%h/.config/wikihub/env
+ExecStart={venv_path}/bin/python {wikihub_src}/scripts/wikihub_monitor.py
+SuccessExitStatus=0 75
+TimeoutStartSec=60
+SyslogIdentifier=wikihub-monitor
+
+# Restart= 미설정 — oneshot, timer 책임.
+# [Install] 미작성 — timer 가 trigger.

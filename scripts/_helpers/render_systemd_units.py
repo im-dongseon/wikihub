@@ -138,7 +138,9 @@ def _instance_root(cfg: dict) -> Path:
 
 
 # ── F5 (ADR-0032·0033): wikihub skill 5건 — per-skill substitution ────
-_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-graphify", "wh-setup")
+_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-setup")
+# v0.1.8 update_path_fixes (B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
+# graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
 
 def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
@@ -215,7 +217,7 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
         "rclone_config_path": rclone_config_path,
         "rclone_bin": rclone_bin,
         "vfs_cache_max_size": str(ops.get("vfs_cache_max_size", "10G")),
-        "lint_interval_hours": str(ops.get("lint_interval_hours", 24)),
+        "lint_interval_hours": str(ops.get("lint_interval_hours", 3)),   # v0.1.6 default (was 24 — v0.1.0 era stale)
         "agent_invocation": agent_invocation,
         "skill_prefix": agent.get("skill_prefix", "wh-"),
         # F5 — yaml.agent.timeout_sec ↔ systemd TimeoutStartSec sync (R3-CR3-2 B-HIGH-2)
@@ -251,7 +253,7 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
     ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
     """
     return {
-        "sync_interval_sec": str(vault.get("sync_interval_sec", 600)),
+        "sync_interval_sec": str(vault.get("sync_interval_sec", 3600)),   # v0.1.6 default 1h (was 600 — v0.1.5 era stale)
     }
 
 

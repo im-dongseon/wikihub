@@ -2,21 +2,21 @@
 
 <div align="center">
 
-# WikiHub v0.1.7
+# WikiHub v0.1.8
 
 서버에서 다중 소스를 통합 관리하는 LLM 위키 허브
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.7%20ready-green)](features/archive/)
-[![Version](https://img.shields.io/badge/Version-0.1.7-blue)](AGENTS.md)
+[![Status](https://img.shields.io/badge/Status-v0.1.8%20ready-green)](features/archive/)
+[![Version](https://img.shields.io/badge/Version-0.1.8-blue)](AGENTS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
 ---
 
-> **개발 상태** (2026-05-24 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), **graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration)**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
+> **개발 상태** (2026-05-25 기준): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration), **legacy migration cleanup (v0.1.8 — install.sh 의 v0.1.0~v0.1.6 era 1회성 migration 코드 (Group A skill_prefix·oneshot/Group C vaults options/WIKIHUB_HOME silent bug detect/_migrate_graphify_env) 일괄 정리 + `scripts/migrate_layout.sh` + `scripts/_helpers/hermes_config_migrate.py` 삭제, 약 700줄 감소)**, **branch strategy formalize (v0.1.8 — main→v0.X.Y→feature 5 액션 git workflow 메소드론 정립 + install.sh F8 fetch --force)**, **wikihub-monitor (v0.1.8 — 12hr 윈도우 운영 보고서 systemd timer, 매일 09:00/21:00 KST, Telegram 발송 + vault 안 보고서 파일 저장)**, **lint operations improvements (v0.1.8 — ADR-0039 entity/concept alias frontmatter 신설로 LLM 재생성 무한 loop + product noun case 손상 차단, graphify timeout yaml expose `operations.graphify_timeout_sec` default 900s, lint `--apply` flag 폐기 + 매 cycle 진단+적용 default — wikihub `wiki/` 가 sources 의 LLM derivative 라 원본 변경 0)**, **update path fixes (v0.1.8 — multipass v0.1.0→v0.1.8 큰 jump test 에서 surface 한 2 결함 fix: (1) graphify hermes skill 폐기 + `wikihub-graphify.service` systemd 격상 + lint Step 9 cost gate (변경 시만 trigger), (2) `_migrate_agent_schema` 의 `wikihub.yaml.example` single source 자동 sync + `A_yolo_missing` 복원)**, **install_update_hardening (v0.1.8 — v0.1.8 canary 검증 중 surface 한 install.sh update flow 3 결함 fix: (1) `_system/INSTALLED_VERSIONS.json` `.gitignore` 등록 (untracked artifact 가 update guard 차단했던 결함), (2) `git reset --hard` 직후 `exec "$0" "$@"` self-restart + guard (bash mid-execution 의 module-level array stale → new source 와 mismatch 됐던 anti-pattern), (3) `_install_graphify` 진입 직후 `export PATH=$VENV_PATH/bin:$PATH` (`command -v graphify` PATH detect fail 됐던 결함))**. v0.2.x 후속은 [`features/backlog.md`](features/backlog.md) 참조. macOS 로컬 환경의 선행 시스템은 [WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate).
 
 ---
 
@@ -123,29 +123,48 @@ multi-instance: 두 env 모두 override 가능 (`WIKIHUB_HOME=/var/wikihub-prod 
 ### 호출
 
 ```bash
-# 표준 — install / update 공용
+# 표준 — install / update 공용 (production: 검증된 stable)
 curl -fsSL --proto '=https' --tlsv1.2 \
   https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
 
 # 특정 tag 명시 (rollback 포함)
 curl -fsSL ... | bash -s -- --version v0.1.0
 
+# 검증 채널 (canary tag — release 전 OCI 사전 검증)
+curl -fsSL ... | bash -s -- --branch canary
+
 # 명시적 destructive 재설치 (5초 confirm + safety guard 4중) — WIKIHUB_SRC 만 wipe, WIKIHUB_HOME 안전
 curl -fsSL ... | bash -s -- --force-fresh
 ```
+
+### 배포 채널 (tag 운영)
+
+| Tag | 성격 | 가리키는 commit | 운영 의미 |
+|---|---|---|---|
+| `latest` | lightweight, force-move | 가장 최근 release commit (= 가장 최신 `vX.Y.Z` tag 와 동일) | **production default**. 검증된 stable 만 promote |
+| `canary` | lightweight, force-move | release 전 검증 trace commit | **pre-production 검증**. v0.1.X+1 작업 중 OCI 검증 trace — 통과 시 `latest` 로 promote |
+| `vX.Y.Z` | annotated, immutable | 해당 release commit | release 영구 record. rollback target |
+
+검증 흐름:
+1. 메인테이너가 v0.X.Y 버전 브랜치의 매 squash merge 직후 `git tag -f canary && git push origin canary --force` (AGENTS.md §3 Step 5 액션 2)
+2. 운영자가 OCI 검증: `install.sh --version canary` — canary 는 lightweight tag 라 `_resolve_ref` path 1 (tag) 으로 resolve. `--branch canary` 는 path 2 가 `origin/canary` 시도해서 unknown revision fail. `--update` 옵션은 없음 — update mode 는 `$WIKIHUB_SRC/_system/VERSION + .git` 존재 자동 detect.
+3. release batch — 메인테이너가 OCI 검증 통과 판단 → `main merge --no-ff` + annotated `vX.Y.Z` tag + `latest` force-move (3 ref 동일 commit)
+4. canary tag 는 release 직전 commit 그대로 보존 — 다음 minor 첫 squash 까지 OCI trace
 
 ### 동작
 
 - **fresh install** (`$WIKIHUB_SRC/_system/VERSION` 부재): `git clone` → `$WIKIHUB_SRC` + venv + skill materialize + `~/.hermes/config.yaml` 패치 + systemd render + 운영자 안내.
 - **update** (`$WIKIHUB_SRC/_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → skill 재materialize + schema migration (필요시) → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
 - 현재 버전 조회: `cat $WIKIHUB_SRC/_system/VERSION`.
-- Hermes skill 5건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-graphify`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list`.
+- Hermes skill 4건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list`. (v0.1.8 update_path_fixes: `wh-graphify` hermes skill 폐기 → `wikihub-graphify.service` systemd 격상, lint Step 9 가 변경 시만 trigger)
+- **wikihub-monitor** (v0.1.8): 매일 09:00 / 21:00 KST 에 12hr 윈도우 운영 보고서 자동 발송. `wikihub-vault@*` (ingest) + `wikihub-lint.service` (lint + graphify chain) journal 정적 파싱 → Telegram (`TELEGRAM_MONITOR_BOT_TOKEN` / `TELEGRAM_MONITOR_CHAT_ID` ops-alert 와 같은 채널) + 보고서 파일 `$WIKIHUB_HOME/vault/<vid>/project/wikihub/report/YYYYMMDD__HH_mm.md` 저장. 비활성화: yaml `operations.monitor_enabled: false`.
+- **lint cycle 자동 적용** (v0.1.8 ADR-0039): `wh-lint` 가 매 cycle (3h timer + 메인테이너 수동 호출) 진단 + 적용 default. `--apply` flag 폐기 — wikihub `wiki/` 가 sources (vault, immutable) 의 LLM derivative 라 원본 변경 0. case-variant duplicates (`MiniMax` / `minimax`) + cross-category duplicates (entity `Docker` + concept `Docker`) 는 entity/concept page frontmatter `aliases` 필드로 인식 → LLM 재생성 무한 loop 차단. graphify wrapper timeout yaml `operations.graphify_timeout_sec` (default 900s = 15분) 로 운영자 backend 별 조정 가능.
 
-### Migration (pre-ADR-0034 layout 운영자 — v0.1.0 미배포 시점은 영향 0)
+### Migration (historical — v0.1.8 cleanup 완료)
 
-이전 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) 운영자는 install.sh `_step0_legacy_detect` 가 자동 detect → `scripts/migrate_layout.sh` 호출 prompt. 9-phase state machine + 부분 실패 시 resume.
+pre-v0.1.0 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) transition 의 1회성 helper (`scripts/migrate_layout.sh` 9-phase state machine + install.sh `_step0_legacy_detect`) 는 v0.1.8 cleanup (feature `legacy_migration_cleanup`, 2026-05-25) 으로 삭제. v0.1.0+ install 운영자 base 정착 정합 — 운영자 base 0건. ADR 의사결정 history 는 [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md) 의 §"후속 영향" 참조.
 
-상세는 [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md) + [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md).
+운영 흐름 (install/update) 상세: [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md).
 
 ---
 
@@ -155,14 +174,18 @@ WikiHub는 5단계 Feature-based Workflow를 따릅니다. 상세 가이드: [`A
 
 ```mermaid
 flowchart TD
-    Plan["Step 1: Plan"]
+    Plan["Step 1: Plan<br/>(타겟 버전 브랜치 결정)"]
     AD["Step 2: Analysis & Design"]
-    Impl["Step 3: Implementation"]
+    Impl["Step 3: Implementation<br/>(feature/&lt;id&gt; on v0.X.Y)"]
     Review["Step 4: Review<br/>(조건부)"]
-    Deploy["Step 5: Deployment<br/>(조건부)"]
-    Archive["Feature 종료 처리<br/>(archive 이동, 필수)"]
+    Deploy["Step 5: Deploy<br/>(squash → canary force-update)"]
+    Release{"release<br/>batch?"}
+    MainMerge["main merge --no-ff<br/>+ vX.Y.Z + latest"]
+    Archive["Feature 종료 처리"]
 
-    Plan --> AD --> Impl --> Review --> Deploy --> Archive
+    Plan --> AD --> Impl --> Review --> Deploy --> Release
+    Release -->|"중간"| Archive
+    Release -->|"버전 batch 완료"| MainMerge --> Archive
 ```
 
 ### 핵심 컨벤션
@@ -196,9 +219,9 @@ wikihub/
 
 ```
 wikihub/
-├── _system/                   # 정본 룰 + 명령어 플레이북 (deploy.sh로만 주입)
+├── _system/                   # 정본 룰 + 명령어 플레이북 (install.sh + git workflow로 주입)
 ├── scripts/                   # gdrive-sync.py, watcher 등 인프라
-├── deploy.sh                  # systemd 배포
+├── install.sh                 # systemd 배포 + canary/latest tag 흐름
 └── wikihub.yaml.example       # vault 등록 설정 예시
 
 별도 위치 (운영 시):
