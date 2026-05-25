@@ -117,3 +117,17 @@ ADR-0035 §Consequences 의 재검토 조건:
 | BL-N4 | observability | monitor self-health surface — 12hr 윈도우 monitor 가 silent fail 시 운영자 인지 경로 부재. pending-monitor 가 monitor 의 마지막 성공 시점 검사 또는 별도 self-health endpoint | code_review_2 L9 | medium (가시성 layer 의 가시성) |
 | BL-N5 | systemd | timer enable catalog 정비 — lint.timer / pending-monitor.timer / monitor.timer 모두 install.sh 가 start 만, explicit enable 없음. reboot 후 자동 start 미보장 | code_review_2 M1 | medium (reboot 후 silent break) |
 | BL-N6 | security | subprocess env scrub — monitor.py / ops-alert.py 가 journalctl subprocess 호출 시 TELEGRAM_MONITOR_BOT_TOKEN 전파. `env={"PATH": ...}` explicit scrub 권장 | code_review_2 M4 | low (single-user OCI 모델에선 race window 좁음) |
+
+---
+
+## lint_operations_improvements 산출 (2026-05-25 진행, v0.1.8 묶음)
+
+| ID | 영역 | 항목 | 출처 | 우선순위 |
+|---|---|---|---|---|
+| BL-N7 | graphify | `--api-timeout` (600s) vs wrapper `graphify_timeout_sec` (900s) 의 운영 정합 검증 — backend 별 LLM latency 누적 실측 | design_review_1 M1 | low |
+| BL-N8 | graphify | graphify_timeout_sec 의 backend 별 toggle (`operations.graphify_profile.<profile>.timeout_sec`) — ollama vs cloud 별도 적정값 | design_review_2 H3 | low |
+| BL-N9 | data model | wiki link resolver 의 alias 인식 — `[[mini-max]]` 가 `MiniMax` page 로 자동 해석. 현행 sed 치환으로 link 정합. resolver layer 통합 시 별도 ADR | ADR-0039 §"재검토 트리거" | low |
+| BL-N10 | lint | lint Step 4.5 의 alias 비교 알고리즘 deterministic Python helper 분리 — 현행 LLM 책임, daily token cost 누적. subprocess 로 token 0 화 | design_review_2 M4 | low |
+| BL-N11 | lint | lint cycle 의 contradiction check (Step 6) LLM merge idempotency 가드 — concept 재등장 시 entity 본문 LLM merge 재호출 차단 (현행 lint.md Step 7 본문에 정책만, 구현 추후) | design_review_2 M5 | low |
+
+> 이전 design 의 BL-N7 (lint-apply 결과 surface), BL-N8 (lint-apply race), BL-N10 (lint-apply yaml gate cost) 는 사용자 결정 (2026-05-25) 으로 `--apply` flag 폐기 + 별도 timer 미생성 → 무효화 / 흡수. lint.timer 단일 사이클이 매 cycle 진단 + 적용 default.

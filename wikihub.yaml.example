@@ -49,6 +49,8 @@ operations:
   monitor_enabled: true               # false 시 wikihub-monitor.service 가 즉시 exit 0 (timer 자체는 enable 되지만 no-op). Telegram channel = ops-alert 와 동일 (TELEGRAM_MONITOR_BOT_TOKEN/CHAT_ID 재사용).
   monitor_report_vault: null          # 보고서 파일 저장 대상 vault id. null = 첫 enabled vault. 명시 시 vaults[<id>] 와 일치해야 함.
   monitor_report_subpath: project/wikihub/report   # vault mount 안의 sub-path. 최종 경로 = $WIKIHUB_HOME/vault/<vault_id>/<subpath>/YYYYMMDD__HH_mm.md (KST, 24시간제).
+  # lint_operations_improvements (v0.1.8) — graphify timeout yaml expose (ADR-0036 §"후속 영향" + ADR-0039 alias frontmatter):
+  graphify_timeout_sec: 900                        # graphify subprocess wrapper timeout (15분). v0.1.5~v0.1.7 era hard-coded 720s 에서 yaml expose 격상. LLM backend latency 누적 대비 default 900s. 운영자 backend 별 조정 가능.
   # ADR-0035: gws_min_version 폐기. rclone version 만 유지.
   # ADR-0025·0026 — rclone install + vfs cache 정책:
   rclone_min_version: "1.65.0"        # install.sh `_install_rclone` 의 min

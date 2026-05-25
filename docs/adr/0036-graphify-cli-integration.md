@@ -125,6 +125,7 @@
 - install.sh INSTALLED_VERSIONS.json schema 갱신 (graphify key).
 - v0.1.0 의 graphify Pass 3 churn 운영 데이터 surface 시 D4 의 cycle 간 drift 허용 범위 재검토 트리거.
 - v0.2.x 검토 트리거: graphify-side token-budget / backend 통제 schema (`operations.graphify.*`), PyPI hash pin 옵션, secret material layer 통합.
+- 2026-05-25: `lint_operations_improvements` (v0.1.8) 가 graphify timeout wrapper 의 yaml expose 작업 완료. `graphify.md` Step 2 의 6 위치 hard-coded `timeout 720` 가 `timeout "$timeout_sec"` 로 변경 (yaml `operations.graphify_timeout_sec` 정본, default 900s = 15분). 운영자 backend 별 조정 가능. graphify.md:156 의 "yaml expose 는 v0.2.x deferred" 코멘트 폐기 처리.
 
 ### 재검토 트리거
 

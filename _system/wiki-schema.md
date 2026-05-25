@@ -190,6 +190,7 @@ title: 홍길동
 type: entity                                  # 'entity' | 'concept' | 'analysis'
 created: 2026-05-13
 updated: 2026-05-13
+aliases: [홍길동]                              # v0.1.8 ADR-0039 — duplicate detection 정합 + LLM 재생성 무한 loop 차단
 referenced_by:                                # /wh-lint·/wh-graphify가 갱신 — 수동 편집 금지
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/notes/promotion-plan
@@ -204,6 +205,16 @@ tags: [team-lead]
 ```
 
 `concepts/<name>.md`는 동일 형식, `type: concept`.
+
+#### `aliases` 필드 (v0.1.8 ADR-0039)
+
+| 의미 | 규칙 |
+|---|---|
+| 같은 entity/concept 로 인식할 form list | 첫 alias = canonical (페이지 파일명 base). 추가 alias = 변형 (lowercase form, hyphen variant, abbreviation 등). 빈 list 불가 — `aliases: []` 또는 부재 시 lint Step 4.5 가 자동 보강 (`[<canonical>]`). |
+| 비교 방식 | **lowercase 무시** — `MiniMax` 와 `minimax` 의 alias 셋이 같은 lowercase form 1+ 공유 시 같은 entity. |
+| LLM 재생성 무한 loop 차단 | ingest 스킬 + lint Step 3 가 stub 생성 전 기존 page 의 aliases 확인. 본문 form 의 lowercase 가 기존 셋과 겹치면 stub 생성 skip + referenced_by 만 갱신. |
+| duplicate detection | lint Step 4.5 가 case-variant + cross-category duplicate 를 alias 셋 비교로 식별. `--apply` 시 canonical 보존 + alias 합집합 + 다른 form page archive. |
+| cross-category 정책 (v0.1.8) | entity vs concept 동명 + alias 공유 시 — entity 우선 merge (concept 본문 LLM merge → entity, concept page archive). 운영자 정책 override 는 v0.2.x 검토. |
 
 ### `analyses/<slug>.md` (agent 작성, /wh-query 자동 저장)
 

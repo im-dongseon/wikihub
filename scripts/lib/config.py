@@ -62,6 +62,8 @@ class OperationsConfig:
     monitor_enabled: bool = True
     monitor_report_vault: str | None = None   # None = 첫 vault. 명시 시 yaml.vaults 의 id 와 일치
     monitor_report_subpath: str = "project/wikihub/report"
+    # lint_operations_improvements (v0.1.8) — graphify timeout yaml expose
+    graphify_timeout_sec: int = 900    # graphify subprocess wrapper timeout (15분 = 900s default, D4)
 
 
 @dataclass
@@ -167,6 +169,8 @@ def _parse_operations(ocfg: dict[str, Any]) -> OperationsConfig:
         monitor_enabled=bool(ocfg.get("monitor_enabled", True)),
         monitor_report_vault=ocfg.get("monitor_report_vault"),
         monitor_report_subpath=str(ocfg.get("monitor_report_subpath", "project/wikihub/report")),
+        # lint_operations_improvements (v0.1.8)
+        graphify_timeout_sec=int(ocfg.get("graphify_timeout_sec", 900)),
     )
 
 

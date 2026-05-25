@@ -815,6 +815,9 @@ if "monitor_report_vault" not in operations:
     flags.append("B_monitor_report_vault")
 if "monitor_report_subpath" not in operations:
     flags.append("B_monitor_report_subpath")
+# lint_operations_improvements (v0.1.8 — ADR-0036 §후속 영향 + ADR-0039)
+if "graphify_timeout_sec" not in operations:
+    flags.append("B_graphify_timeout_sec")
 
 # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
 for idx, v in enumerate(vaults):
@@ -856,6 +859,7 @@ PYEOF
             B_monitor_enabled)          info "  - [v0.1.8] operations.monitor_enabled 부재 → true 추가 (wikihub-monitor.timer 09,21:00 KST)" ;;
             B_monitor_report_vault)     info "  - [v0.1.8] operations.monitor_report_vault 부재 → null 추가 (첫 vault default)" ;;
             B_monitor_report_subpath)   info "  - [v0.1.8] operations.monitor_report_subpath 부재 → \"project/wikihub/report\" 추가" ;;
+            B_graphify_timeout_sec)     info "  - [v0.1.8 ADR-0036] operations.graphify_timeout_sec 부재 → 900 추가 (graphify wrapper 15분)" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
             W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
         esac
@@ -908,6 +912,7 @@ _op_defaults = {
     "monitor_enabled": True,            # v0.1.8 wikihub_monitor
     "monitor_report_vault": None,       # v0.1.8 — None = 첫 vault
     "monitor_report_subpath": "project/wikihub/report",   # v0.1.8
+    "graphify_timeout_sec": 900,        # v0.1.8 — graphify wrapper 15분 (ADR-0036)
 }
 for k, v in _op_defaults.items():
     if k not in operations:

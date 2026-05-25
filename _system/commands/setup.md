@@ -150,7 +150,7 @@ agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh-setup은 그 
 ### Step 4. systemd 반영 (v0.1.0 v5 — ADR-0022 흐름 역전 정합)
 
 - `systemctl --user daemon-reload`
-- `--enable` 플래그 시: `lint.timer` (+ 조건부 `disk-watch.timer`) **만** `enable --now`. **vault-ingest.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
+- `--enable` 플래그 시: `lint.timer`, `wikihub-pending-monitor.timer` (ADR-0037 v0.1.5), `wikihub-monitor.timer` (v0.1.8) (+ 조건부 `disk-watch.timer`) **만** `enable --now`. **vault-ingest.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
 - 미플래그 시: 권장 액션 출력만.
 
 ### Step 5. 보고

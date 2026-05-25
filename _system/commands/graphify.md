@@ -107,9 +107,12 @@ fi
 **Backend dispatch** (`env <BACKEND_ENV>=<value>` 로 explicit 주입 — Hermes parent leak 차단):
 
 ```bash
+# v0.1.8 — yaml `operations.graphify_timeout_sec` 정본 (default 900s, ADR-0036 §"후속 영향" 참조)
+timeout_sec="$(yq '.operations.graphify_timeout_sec // 900' "$WIKIHUB_HOME/wikihub.yaml")"
+
 case "$backend" in
     ollama)
-        timeout 720 env \
+        timeout "$timeout_sec" env \
             "$ollama_env_name=$endpoint" \
             OLLAMA_API_KEY="${api_key:-local-daemon}" \
             graphify extract "$WIKIHUB_HOME/wiki" \
@@ -117,31 +120,31 @@ case "$backend" in
                 --max-concurrency "$concurrency" --out "$WIKIHUB_HOME"
         ;;
     openai)
-        timeout 720 env OPENAI_API_KEY="$api_key" \
+        timeout "$timeout_sec" env OPENAI_API_KEY="$api_key" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend openai --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
         ;;
     claude)
-        timeout 720 env ANTHROPIC_API_KEY="$api_key" \
+        timeout "$timeout_sec" env ANTHROPIC_API_KEY="$api_key" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend claude --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
         ;;
     gemini)
-        timeout 720 env GEMINI_API_KEY="$api_key" \
+        timeout "$timeout_sec" env GEMINI_API_KEY="$api_key" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend gemini --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
         ;;
     deepseek)
-        timeout 720 env DEEPSEEK_API_KEY="$api_key" \
+        timeout "$timeout_sec" env DEEPSEEK_API_KEY="$api_key" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend deepseek --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
         ;;
     kimi)
-        timeout 720 env MOONSHOT_API_KEY="$api_key" \
+        timeout "$timeout_sec" env MOONSHOT_API_KEY="$api_key" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend kimi --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
@@ -153,7 +156,7 @@ case "$backend" in
 esac
 ```
 
-- `timeout 720`: graphify 의 `--api-timeout` default 600s + LLM 호출 누적 대비 wrapper 보호 margin. yaml expose 는 v0.2.x deferred.
+- `timeout "$timeout_sec"`: yaml `operations.graphify_timeout_sec` 정본 (default 900s = 15분, v0.1.8 yaml expose — ADR-0036 §"후속 영향"). graphify 의 `--api-timeout` (default 600s) + LLM 호출 누적 대비 wrapper 보호 margin. 운영자가 yaml 조정 가능.
 - `${api_key:-local-daemon}`: local Ollama 의 `OLLAMA_API_KEY` warning 회피 dummy (test reference §3 검증).
 - `--out "$WIKIHUB_HOME"` → graphify 가 `$WIKIHUB_HOME/graphify-out/` 에 graph.json + GRAPH_REPORT.md 생성.
 
