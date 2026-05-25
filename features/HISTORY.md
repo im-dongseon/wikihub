@@ -219,3 +219,79 @@
   - ADR 본문 (v0.1.0~v0.1.6 era 결정 기록) 은 그대로 — history record 보존. cleanup 은 §"후속 영향" 절에만 명시.
 - **결론**: install.sh ~195줄 감소 + `scripts/migrate_layout.sh` 313줄 + `scripts/_helpers/hermes_config_migrate.py` 191줄 파일 삭제 = **약 700줄 감소** (전체 diff stat: 12 files, 42 insertions / 757 deletions). VERSION 0.1.7 → 0.1.8. canary tag 검증 cycle (`docs/agent_dev_guide.md §Step 5 "배포 채널 — canary tag 활용"`) 의 첫 dogfooding — canary 부여 → OCI 검증 → 통과 시 latest promote. v0.1.8 release 진입의 첫 atomic feature. bash syntax 검증 (`bash -n install.sh` pass) + 4 PYEOF Python heredoc ast.parse 통과 + `_migrate_agent_schema` 의 Group B (v0.1.5+ field 자동 추가) + A4 (W_invalid warn) 보존 동작 확인. Step 4 (Review) 멀티 reviewer 수행 — code_review_1 (H1 README §Migration dead reference + M1 wiki-schema tree + M2 caller 주석 stale) + code_review_2 (H1 hermes_config_migrate.py orphan + H2 install.sh:1143 stale + M1 줄수 313 정정 + M2/M3 ADR refs) 모두 흡수. OCI batch 검증은 추후 운영자가 일괄 진행.
 - **참조**: features/archive/20260525_legacy_migration_cleanup/
+
+---
+
+## [2026-05-25] canary_channel (v0.1.8 docs)
+
+- **목적**: release 전 OCI 사전 검증 trace 위한 `canary` lightweight tag 운영 절차를 README + agent_dev_guide 에 정본화. v0.1.7 era 까지 latest tag 직행 배포의 risk surface 후 도입.
+- **로직**: README §"호출" 의 curl 예시에 `--branch canary` 추가 + §"배포 채널 (tag 운영)" 표 신설 (latest/canary/vX.Y.Z 의미 분리). `docs/agent_dev_guide.md` §Step 5 (Deployment) 끝에 "배포 채널 — canary tag 활용" 절 추가 — 검증 → tag promote → main merge 흐름 5-step 명시.
+- **생성 ADR**: 없음 (docs).
+- **트레이드오프**: 없음.
+- **결론**: docs 단독 commit (79b7a4e). 후속 `branch_strategy_formalize` 의 5-액션 git workflow 메소드론 정립의 base. 첫 dogfooding = `legacy_migration_cleanup` (위 항목).
+- **참조**: commit 79b7a4e (archive 없음 — docs 단독).
+
+---
+
+## [2026-05-25] branch_strategy_formalize (v0.1.8)
+
+- **목적**: v0.1.7~v0.1.8 진행 중 main 직접 push + revert 사고 (`4f5f206` + `4b90fc0`) 의 root cause = "버전 단위 통합 지점 미명시 → feature commit 이 곧장 main 으로 흘러감". `main → v0.X.Y → feature` 3-layer branch model + 5-액션 squash workflow 메소드론 정본화. 본 feature 가 본 메소드론의 첫 자기적용.
+- **로직**: `CLAUDE.md` §3 Step 5 (Deploy) 와 §6 (Git Worktree) 에 5 액션 표 신설 + `docs/agent_dev_guide.md` §Step 5 본문 갱신. install.sh `F8` fetch 책임에 `--force` 추가 (git 2.20+ 부터 lightweight tag (canary) fetch force 없이는 clobber 거부 — canary force-update 후 운영자 update 시 stale local tag 잔존 risk 차단).
+- **생성 ADR**: 없음 (governance 메소드론). 본 메소드론이 v0.1.8 의 모든 후속 feature (wikihub_monitor / lint_operations_improvements / update_path_fixes / install_update_hardening) 의 squash 흐름 base.
+- **트레이드오프**: feature 별 worktree 분기 부담 — 단일 에이전트 작업 시 worktree 미사용 허용 (CLAUDE.md §6 의 worktree 필수 조건 = 멀티 패널/서브에이전트). main 직접 commit 금지 → release batch 까지 cumulative trace 가 길어짐 (v0.1.8 = 10 commit).
+- **결론**: CLAUDE.md / docs/agent_dev_guide.md / install.sh 3 파일. canary force-update 정합 + 5-액션 squash workflow 운영. v0.1.8 의 모든 후속 feature 가 본 메소드론 첫 dogfooding.
+- **참조**: features/archive/20260525_branch_strategy_formalize/
+
+---
+
+## [2026-05-25] wikihub_monitor (v0.1.8)
+
+- **목적**: 운영 OCI 의 12hr 윈도우 종합 진단 보고서 자동 발송 — 운영자가 ssh 없이 매일 09:00 / 21:00 KST 에 Telegram + vault 안 보고서 파일로 ingest/lint cycle 통계 + 결함 surface 받음. 기존 ops-alert.service (fatal trigger) + pending_monitor (age-based stuck detect) 의 보완 layer (정상 cycle 운영 진단).
+- **로직**: `scripts/wikihub_monitor.py` 신설 (Python, ~400줄) — systemd journal 정적 파싱 (`journalctl --user -u wikihub-vault@* --since "12 hours ago"` + lint) → success/fail 통계 + error excerpt 추출 + Telegram 발송 (`TELEGRAM_MONITOR_BOT_TOKEN` / `TELEGRAM_MONITOR_CHAT_ID`, ops-alert 와 동일 채널) + 보고서 파일 저장 (`$WIKIHUB_HOME/vault/<vid>/<subpath>/YYYYMMDD__HH_mm.md`, KST). `_system/systemd/wikihub-monitor.{service,timer}.template` 신설 (OnCalendar=`*-*-* 09,21:00:00 Asia/Seoul`, Type=oneshot). yaml `operations.monitor_enabled` / `monitor_report_vault` / `monitor_report_subpath` 3 fields 신설. install.sh systemd unit list 에 wikihub-monitor 추가. D1 정정 (Hermes 스킬 → Python 직접 — `wikihub_monitor` 의 deterministic 통계 작업은 LLM 부적합).
+- **생성 ADR**: 없음 (operational layer 확장 — ADR-0037 의 pending_monitor 패턴 follow-up).
+- **트레이드오프**: 추가 systemd unit 2건 (service + timer) — render dry-run 검증으로 부담 acceptable. Telegram channel 이 ops-alert 와 동일 → 정상 cycle 보고서 + critical alert 가 한 channel 에 섞임 (운영자 prefix 로 분리 인지). vault 안 보고서 파일 = vault 의 LLM derivative 추가 — graphify wiki 와 다른 카테고리 (운영 메타) 라 카테고리 cross-contamination 없음.
+- **결론**: scripts/wikihub_monitor.py 신설 + systemd unit 2건 + yaml 3 fields + install.sh systemd 통합. multipass 검증 — 보고서 파일 정합 + Telegram 발송 정합. 사용자 정책 (test 인스턴스 = mount only) 정합 — monitor.timer enable 안 함 default.
+- **참조**: features/archive/20260525_wikihub_monitor/
+
+---
+
+## [2026-05-25] lint_operations_improvements (v0.1.8)
+
+- **목적**: wh-lint cycle 의 운영 안정성 3건 통합 — (I1) timeout 종료 결함 + wh-ingest timeout 정책 검토, (I2) lint report 의 case-variant (`MiniMax` / `minimax`) + cross-category duplicates (entity `Docker` + concept `Docker`) 정책 결정 + 자동 처리, (I3) wh-lint `--apply` 자동 실행 패턴.
+- **로직**: 
+  1. **ADR-0039 신설 (alias frontmatter)**: entity/concept page frontmatter 에 `aliases: [...]` 필드 신설. case-variant + cross-category 의 LLM 인식 layer — 운영자 manual edit 없이도 lint LLM 이 alias 합쳐서 인지 → 재생성 무한 loop + product noun case 손상 차단.
+  2. **`--apply` flag 폐기**: wh-lint 매 cycle (3h timer + 메인테이너 수동 호출) 진단 + 적용 default. wikihub `wiki/` 가 sources (vault, immutable) 의 LLM derivative 라 원본 변경 0 — 자동 적용 risk 무시 가능.
+  3. **graphify timeout yaml expose**: `operations.graphify_timeout_sec` 신설 (default 900s = 15분). v0.1.5~v0.1.7 era hard-coded `timeout 720` 을 yaml 으로 격상. 운영자 backend 별 조정 가능.
+- **생성 ADR**: ADR-0039 (entity/concept alias frontmatter).
+- **트레이드오프**: alias frontmatter 가 entity/concept 페이지의 schema 확장 — 기존 wiki 의 alias 미존재 페이지는 lint cycle 자동 보강 (graphify 가 detect → next lint cycle 에서 page 갱신). `--apply` 폐기 → 운영자가 staging review 안 함 (자동 적용). wikihub 의 자기상태 (`wiki/` = sources derivative) 가정 정합 — risk null.
+- **결론**: ADR-0039 신설 + lint.md spec 갱신 (`--apply` 분기 폐기 + alias section) + wikihub.yaml.example operations 1 field + install.sh `_migrate_agent_schema` 자동 추가. multipass 검증 — lint cycle 자동 적용 + alias 동작 정합.
+- **참조**: features/archive/20260525_lint_operations_improvements/
+
+---
+
+## [2026-05-25] update_path_fixes (v0.1.8)
+
+- **목적**: multipass `wikihub-test` 의 v0.1.0 → v0.1.8 큰 jump test 에서 surface 한 2 결함 fix. R1 = wh-lint Step 9 의 `<agent_invocation> "/wh-graphify"` 가 silent skip (LLM hallucination — fake `proc_xxx` 응답). R2 = `_migrate_agent_schema` 가 큰 jump 시 yaml 신설 fields 자동 추가 안 됨 (특히 `--yolo` 부재 → hermes dangerous command Denied stuck).
+- **로직**: 
+  1. **D3 (B) — wh-graphify hermes skill 폐기 + systemd 격상**: Layer 1 LLM wrapper (`wh-graphify` hermes skill) 는 deterministic bash 작업의 over-engineering. `scripts/wikihub_graphify.sh` (bash, backend dispatch 6 case + N/M partial failure 가드) + `wikihub-graphify.service` (Type=oneshot, timer 없음, lint Step 9 trigger) 격상. lint Step 9 가 변경 감지 분기 (Step 3/4.5/5/7 archive 0건이면 skip) → `systemctl --user start wikihub-graphify.service` (fire-and-forget) — cost gate 보존 (변경 없을 때 graphify 실행 안 함). Layer 2 semantic extraction LLM (graphify CLI 내부 ollama_cloud) 유지.
+  2. **R2 — `_migrate_agent_schema` yaml.example single-source sync**: 신설 fields 자동 추가 일반화 (yaml.example 의 operations/agent top key 순회 → 운영 yaml 에 부재 키 자동 추가, 운영자 명시 값 보존). `A_yolo_missing` 복원 (oneshot_args 에 `--yolo` 없으면 자동 insert).
+- **생성 ADR**: 없음. ADR-0036 §"후속 영향" + ADR-0038 §"후속 영향" 에 cross-link 1줄씩.
+- **트레이드오프**: wh-graphify hermes skill 5건 → 4건 (skill 폐기 정합). yaml.example sync 가 set semantics 한계 — `if k not in target` 가 자연 부재 vs 명시 삭제 구분 불가 (운영자가 의도적으로 삭제한 field 도 자동 복원 가능). 단 v0.1.8 의 신설 fields scope 에선 risk 무시 가능.
+- **결론**: scripts/wikihub_graphify.sh 신설 (~150줄) + wikihub-graphify.service.template 신설 + lint.md Step 9 spec 변경 + graphify.md spec 격하 (skill 폐기 명시) + install.sh `_migrate_agent_schema` 일반화. multipass 검증 — full cycle (ingest → lint → graphify.service trigger) 정합. release transition 정합 (cecf651 squash + a9f971e docs cleanup).
+- **참조**: features/archive/20260525_update_path_fixes/
+
+---
+
+## [2026-05-26] install_update_hardening (v0.1.8)
+
+- **목적**: v0.1.8 canary 검증 (multipass `wikihub-test`) 의 `install.sh --version canary` 가 3회 fix evolution 거쳐 회피 없이 통과. 운영 OCI 첫 update / fresh install 시점에 동일 surface 가능 → release 전 흡수.
+- **로직**: install.sh update flow 5 결함 fix.
+  1. `.gitignore` 에 `_system/INSTALLED_VERSIONS.json` 추가 (install.sh runtime artifact 가 untracked → update guard L1439 `git status --porcelain` 차단됐던 결함).
+  2. `git reset --hard refs/tags/<ref>` 직후 `WIKIHUB_INSTALL_SELF_RESTARTED` guard + `exec "$0" "$@"` self-restart 추가 (bash mid-execution 의 module-level array stale → new source 와 mismatch 됐던 anti-pattern).
+  3. `_install_graphify` 진입 직후 `export PATH=$VENV_PATH/bin:$PATH` 추가 (L578 comment 와 실제 동작 불일치 — `command -v graphify` PATH detect fail 됐던 결함).
+  4. self-restart 직전 `exec 200>&-` 추가 (lockfix — exec 자식 process 가 부모 fd 200 inherited → `_acquire_install_lock` flock fail).
+  5. self-restart 의 `$@` → `${ORIGINAL_ARGS[@]}` (argsfix — `_step2_update()` 함수 scope 에서 `$@` empty → `--version canary` 손실 → latest fallback downgrade).
+- **생성 ADR**: 없음. ADR-0030 §"후속 영향" + ADR-0036 §"후속 영향" 에 cross-link 1줄씩.
+- **트레이드오프**: self-update anti-pattern fix 의 chicken-and-egg 본질적 한계 — fix 가 deploy 되어도 첫 호출은 부모 process 의 이전 source 동작이 결정. 정합 동작은 다음 호출부터. 운영자 release transition 시 1회 transient fail (rollback) 가능 — 즉시 재호출로 정합화.
+- **결론**: install.sh + .gitignore + README + ADR-0030/0036 cross-link. multipass 검증 — 회피 없이 install.sh 통과 + idempotent re-run 정합. canary force-update 4회 거쳐 정합 단일 squash commit (a748d19) 으로 통합.
+- **참조**: features/archive/20260526_install_update_hardening/
