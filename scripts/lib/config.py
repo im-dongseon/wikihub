@@ -58,6 +58,10 @@ class OperationsConfig:
     vfs_refresh_mode: str = "recursive"  # recursive | per-file | none — K1·K2·K3
     # ADR-0037 §D3 (v0.1.5) — alert pipeline 의 age-based monitor threshold
     pending_alert_age_sec: int = 3600   # vault pending_ingest.json 이 N초 이상 stuck 시 alert
+    # wikihub_monitor (v0.1.8) — 12hr 윈도우 운영 보고서 (wikihub-monitor.timer 09,21:00 KST)
+    monitor_enabled: bool = True
+    monitor_report_vault: str | None = None   # None = 첫 vault. 명시 시 yaml.vaults 의 id 와 일치
+    monitor_report_subpath: str = "project/wikihub/report"
 
 
 @dataclass
@@ -159,6 +163,10 @@ def _parse_operations(ocfg: dict[str, Any]) -> OperationsConfig:
         vfs_refresh_mode=str(ocfg.get("vfs_refresh_mode", "recursive")),
         # ADR-0037 §D3
         pending_alert_age_sec=int(ocfg.get("pending_alert_age_sec", 3600)),
+        # wikihub_monitor (v0.1.8)
+        monitor_enabled=bool(ocfg.get("monitor_enabled", True)),
+        monitor_report_vault=ocfg.get("monitor_report_vault"),
+        monitor_report_subpath=str(ocfg.get("monitor_report_subpath", "project/wikihub/report")),
     )
 
 

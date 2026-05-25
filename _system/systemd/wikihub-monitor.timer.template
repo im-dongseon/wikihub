@@ -1,0 +1,15 @@
+[Unit]
+Description=WikiHub monitor timer — 매일 09:00, 21:00 KST
+
+[Timer]
+Unit=wikihub-monitor.service
+# OnCalendar TZ suffix (systemd 242+) — Asia/Seoul = KST (DST 없음).
+# 09,21:00:00 comma syntax = 매일 2회 fire.
+OnCalendar=*-*-* 09,21:00:00 Asia/Seoul
+# 시스템 휴면/재부팅 시 마지막 fire 시점 보존 — 누락된 fire 즉시 catch-up.
+Persistent=true
+# 09:00 ± 1min / 21:00 ± 1min 범위 (lint timer 의 15min 보다 빡빡).
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -109,6 +109,8 @@ ADR-0024 §Note 1줄 — "v0.1.5 에 multi-channel + periodic monitor 추가됨 
 - `_system/commands/setup.md` maintainer catalog 갱신.
 - install.sh env template + start/stop sequence + render + try-restart + step8_guide 모두 갱신.
 - pending_monitor.py 가 lint 의 last_failure age 검사 까지 확장 가능 — v0.1.5 minimal scope 에선 vault pending 만. 운영 후 surface 시 추가.
+- 2026-05-25: `wikihub_monitor` (v0.1.8) 추가 — 12hr 윈도우 운영 보고서 (매일 09:00 / 21:00 KST). ops-alert.py 의 `send_telegram` / `format_telegram_alert_message` 가 `scripts/lib/telegram.py` 로 추출됨 (parse_mode 옵션화: ops-alert = `"HTML"`, monitor = `None`).
+- 2026-05-25 (v0.1.8 follow-up): env key 의미 명확화 — `TELEGRAM_ALERT_BOT_TOKEN` / `TELEGRAM_ALERT_CHAT_ID` → **`TELEGRAM_MONITOR_BOT_TOKEN` / `TELEGRAM_MONITOR_CHAT_ID`** 일괄 rename. ops-alert (fatal alert) + wikihub_monitor (12hr 보고서) 둘 다 운영 "모니터링" 채널이라는 의미 통일. 본문의 historical Decision (D1/D4) 표현은 보존 (당시 결정 시점 사실). 운영자는 `~/.config/wikihub/env` 의 키 이름 갱신 필요 — install.sh `_step5_instance_dirs` env template 이 새 키 이름으로 안내.
 
 ### 재검토 트리거
 

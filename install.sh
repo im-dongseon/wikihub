@@ -739,8 +739,8 @@ WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=gemma4:31b-cloud
 # === Alert channel — Telegram bot (ADR-0037 §D1) ===
 # wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
 # bot 생성: @BotFather 에서 /newbot → token 받음 + chat_id 는 @userinfobot 활용.
-#    TELEGRAM_ALERT_BOT_TOKEN=123456:ABC...
-#    TELEGRAM_ALERT_CHAT_ID=-100123456
+#    TELEGRAM_MONITOR_BOT_TOKEN=123456:ABC...
+#    TELEGRAM_MONITOR_CHAT_ID=-100123456
 EOF
     fi
     chmod 600 "$wh_env_file"
@@ -808,6 +808,13 @@ if "graphify_profile" not in operations:
     flags.append("B_graphify_profile")
 if "lint_interval_hours" not in operations:
     flags.append("B_lint_interval_hours")
+# wikihub_monitor (v0.1.8)
+if "monitor_enabled" not in operations:
+    flags.append("B_monitor_enabled")
+if "monitor_report_vault" not in operations:
+    flags.append("B_monitor_report_vault")
+if "monitor_report_subpath" not in operations:
+    flags.append("B_monitor_report_subpath")
 
 # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
 for idx, v in enumerate(vaults):
@@ -846,6 +853,9 @@ PYEOF
             B_graphify_max_version)     info "  - [ADR-0036] operations.graphify_max_version 부재 → \"0.99.99\" 추가" ;;
             B_graphify_profile)         info "  - [ADR-0038] operations.graphify_profile 부재 → \"ollama_gemma\" 추가" ;;
             B_lint_interval_hours)      info "  - [v0.1.6] operations.lint_interval_hours 부재 → 3 추가 (default 3h)" ;;
+            B_monitor_enabled)          info "  - [v0.1.8] operations.monitor_enabled 부재 → true 추가 (wikihub-monitor.timer 09,21:00 KST)" ;;
+            B_monitor_report_vault)     info "  - [v0.1.8] operations.monitor_report_vault 부재 → null 추가 (첫 vault default)" ;;
+            B_monitor_report_subpath)   info "  - [v0.1.8] operations.monitor_report_subpath 부재 → \"project/wikihub/report\" 추가" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
             W_graphify_profile_invalid:*) warn "  - [ADR-0038] operations.graphify_profile=\"${f#W_graphify_profile_invalid:}\" 가 정규식 (^[a-z][a-z0-9_]*$) fail — 운영자 yaml 수정 권장 (자동 변경 안 함)" ;;
         esac
@@ -895,6 +905,9 @@ _op_defaults = {
     "graphify_max_version": "0.99.99",
     "graphify_profile": "ollama_gemma",
     "lint_interval_hours": 3,           # v0.1.6 default 3h (v0.1.5 era 24h 에서 변경)
+    "monitor_enabled": True,            # v0.1.8 wikihub_monitor
+    "monitor_report_vault": None,       # v0.1.8 — None = 첫 vault
+    "monitor_report_subpath": "project/wikihub/report",   # v0.1.8
 }
 for k, v in _op_defaults.items():
     if k not in operations:
@@ -1586,6 +1599,7 @@ _systemd_stop_before_update() {
     done
     systemctl --user stop wikihub-lint.timer 2>/dev/null || true
     systemctl --user stop wikihub-pending-monitor.timer 2>/dev/null || true
+    systemctl --user stop wikihub-monitor.timer 2>/dev/null || true
     systemctl --user stop wikihub-pending-monitor.service 2>/dev/null || true
     # vault@.service mid-sync 대기 — 15min grace (TimeoutStartSec=15min 정합)
     # MED-N4: progress info — 운영자 visual 안심
@@ -1603,7 +1617,8 @@ _systemd_stop_before_update() {
     systemctl --user reset-failed 'wikihub-mount@*.service' \
         'wikihub-vault@*.service' 'wikihub-vault@*.timer' \
         'wikihub-lint.service' 'wikihub-lint.timer' \
-        'wikihub-pending-monitor.service' 'wikihub-pending-monitor.timer' 2>/dev/null || true
+        'wikihub-pending-monitor.service' 'wikihub-pending-monitor.timer' \
+        'wikihub-monitor.service' 'wikihub-monitor.timer' 2>/dev/null || true
     # CRIT-N2: stop 직후 daemon-reload — Step 8 render 이전 race window 차단.
     systemctl --user daemon-reload 2>/dev/null || true
     ok "systemd stop sequence 완료"
@@ -1637,6 +1652,8 @@ _systemd_start_after_update() {
     systemctl --user start wikihub-lint.timer 2>/dev/null || warn "lint.timer start 실패"
     # ADR-0037 §D2 (v0.1.5) — pending_ingest age monitor
     systemctl --user start wikihub-pending-monitor.timer 2>/dev/null || warn "pending-monitor.timer start 실패"
+    # wikihub_monitor (v0.1.8) — 12hr 윈도우 운영 보고서
+    systemctl --user start wikihub-monitor.timer 2>/dev/null || warn "monitor.timer start 실패"
     ok "systemd start sequence 완료"
 }
 
@@ -1682,7 +1699,7 @@ _step8_systemd_render() {
     # 이 무력화되는 결함 closure. `try-restart` 는 inactive unit 에 no-op — update path 의
     # stop/start 순서와 충돌 없음.
     systemctl --user try-restart 'wikihub-mount@*.service' \
-        'wikihub-vault@*.timer' wikihub-lint.timer wikihub-pending-monitor.timer 2>/dev/null || true
+        'wikihub-vault@*.timer' wikihub-lint.timer wikihub-pending-monitor.timer wikihub-monitor.timer 2>/dev/null || true
     ok "Step 8 systemd render + daemon-reload + try-restart 완료"
 }
 

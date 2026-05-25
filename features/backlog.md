@@ -102,3 +102,18 @@ ADR-0035 §Consequences 의 재검토 조건:
 | BL-5 | 메소드론 | AGENTS.md ↔ docs/agent_dev_guide.md 정본 분리 모델 재검토 — 중복 표 (Step 5 5 액션, Tag 운영, mermaid) 를 한쪽으로 통일하고 다른 쪽은 참조 축약 | code_review_2 O2 | medium (정본 동기화 결함 재발 방지) |
 | BL-6 | 메소드론 | `git push --force-with-lease` 첫 push 동작 (lease 부재 시) — 사실상 `--force` 와 동등, race-safe 미보장. push 직전 `git fetch origin v0.X.Y` 선행 권고 메소드론 보강 | code_review_2 O3 | low (단일 maintainer 모델에서 발생 빈도 낮음) |
 | BL-7 | 버전 정책 + 거버넌스 | production OCI critical bug 시 hotfix 시나리오 — BL-3 (patch 자릿수 도입) 와 결합. v0.2.x 진입 전 결정 필수 | code_review_2 O4 + R1-H5 | medium (production 사고 시 행동 불가 위험) |
+
+---
+
+## wikihub_monitor 산출 (2026-05-25 진행, v0.1.8 묶음)
+
+본 feature 의 design review 에서 surfacing 된 범위 외 항목.
+
+| ID | 영역 | 항목 | 출처 | 우선순위 |
+|---|---|---|---|---|
+| BL-N1 | scripts | Telegram message 4000 chars cap 초과 시 multi-message 분할 — 현행 truncate 만, marker 명시. 보고서 폭증 시 운영자가 일부만 수신 | design_review_1 H1 + design_review_2 M5 | low (현재 단일 vault 가정에서 도달 가능성 낮음) |
+| BL-N2 | retention | `$WIKIHUB_HOME/vault/<vid>/<subpath>/YYYYMMDD__HH_mm.md` 누적 — 90일 이상 보고서 자동 cleanup (운영자 수동 또는 monitor 가 cleanup) | 사용자 §2.3 권고 | low (gdrive 자체 retention 또는 운영자 책임) |
+| BL-N3 | parse | lint.service 가 running 중일 때 monitor fire 시 진행 중 entries 처리 — 현행 종료 entry (MESSAGE_ID / EXIT_STATUS) 부재 entry skip. "1회 진행 중" 라인 surface 권고 | design_review_2 O5 | low (race window 좁음) |
+| BL-N4 | observability | monitor self-health surface — 12hr 윈도우 monitor 가 silent fail 시 운영자 인지 경로 부재. pending-monitor 가 monitor 의 마지막 성공 시점 검사 또는 별도 self-health endpoint | code_review_2 L9 | medium (가시성 layer 의 가시성) |
+| BL-N5 | systemd | timer enable catalog 정비 — lint.timer / pending-monitor.timer / monitor.timer 모두 install.sh 가 start 만, explicit enable 없음. reboot 후 자동 start 미보장 | code_review_2 M1 | medium (reboot 후 silent break) |
+| BL-N6 | security | subprocess env scrub — monitor.py / ops-alert.py 가 journalctl subprocess 호출 시 TELEGRAM_MONITOR_BOT_TOKEN 전파. `env={"PATH": ...}` explicit scrub 권장 | code_review_2 M4 | low (single-user OCI 모델에선 race window 좁음) |

@@ -53,12 +53,15 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 │   │   └── _generated/wh-{cmd}/SKILL.md   # install-time materialized (.gitignore)
 │   └── systemd/                      #   systemd unit template (F4 산출물)
 │       ├── wikihub-{vault,mount}@.service.template
+│       ├── wikihub-{pending-monitor,monitor}.{service,timer}.template
 │       ├── lint.{service,timer}.template
 │       └── ops-alert.service
 ├── scripts/                          # 인프라 스크립트
 │   ├── vault-fetch.py
 │   ├── ops-alert.py
 │   ├── pending_monitor.py
+│   ├── wikihub_monitor.py            # v0.1.8 — 12hr 윈도우 운영 보고서 (Telegram + vault 안 파일)
+│   ├── lib/{config,state,telegram}.py
 │   └── _helpers/render_systemd_units.py
 ├── install.sh
 ├── wikihub.yaml.example              # /wh-setup 의 read-only template (ADR-0031)

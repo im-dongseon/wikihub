@@ -44,7 +44,11 @@ operations:
   fatal_webhook_timeout_sec: 10
   instance_label: null                # R10 MED-3 + R16-L6: webhook payload 의 wikihub_instance 식별자. 미설정 시 socket.gethostname() 사용 — OCI internal hostname (예: inst-2x4-arm-ubuntu) 외부 SaaS (Slack/Discord) leak 회피 위해 운영자 명시 alias 권장. 권장 형식: "wikihub-prod-ap1" / "wikihub-staging".
   # ADR-0037 §D2 (v0.1.5) — alert pipeline age-based monitor:
-  pending_alert_age_sec: 3600         # vault pending_ingest.json 이 N초 이상 stuck 시 alert (default 1h). wikihub-pending-monitor.timer (30분 주기) 가 검사 + last_failure.json 갱신 → ops-alert.service trigger. Telegram channel 은 ~/.config/wikihub/env 의 TELEGRAM_ALERT_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID 로 설정.
+  pending_alert_age_sec: 3600         # vault pending_ingest.json 이 N초 이상 stuck 시 alert (default 1h). wikihub-pending-monitor.timer (30분 주기) 가 검사 + last_failure.json 갱신 → ops-alert.service trigger. Telegram channel 은 ~/.config/wikihub/env 의 TELEGRAM_MONITOR_BOT_TOKEN + TELEGRAM_MONITOR_CHAT_ID 로 설정.
+  # wikihub_monitor (v0.1.8) — 12hr 윈도우 운영 보고서 (wikihub-monitor.timer, 매일 09:00 / 21:00 KST):
+  monitor_enabled: true               # false 시 wikihub-monitor.service 가 즉시 exit 0 (timer 자체는 enable 되지만 no-op). Telegram channel = ops-alert 와 동일 (TELEGRAM_MONITOR_BOT_TOKEN/CHAT_ID 재사용).
+  monitor_report_vault: null          # 보고서 파일 저장 대상 vault id. null = 첫 enabled vault. 명시 시 vaults[<id>] 와 일치해야 함.
+  monitor_report_subpath: project/wikihub/report   # vault mount 안의 sub-path. 최종 경로 = $WIKIHUB_HOME/vault/<vault_id>/<subpath>/YYYYMMDD__HH_mm.md (KST, 24시간제).
   # ADR-0035: gws_min_version 폐기. rclone version 만 유지.
   # ADR-0025·0026 — rclone install + vfs cache 정책:
   rclone_min_version: "1.65.0"        # install.sh `_install_rclone` 의 min

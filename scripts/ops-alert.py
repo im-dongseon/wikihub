@@ -34,6 +34,10 @@ from lib.state import (  # noqa: E402
     read_last_failure,
     utc_now_iso,
 )
+from lib.telegram import (  # noqa: E402
+    format_telegram_alert_message,
+    send_telegram,
+)
 
 
 log = logging.getLogger("ops-alert")
@@ -182,48 +186,9 @@ def post_webhook(url: str, payload: dict[str, Any], timeout_sec: int) -> bool:
         socket.setdefaulttimeout(None)
 
 
-def send_telegram(bot_token: str, chat_id: str, text: str, timeout_sec: int = 10) -> bool:
-    """Telegram bot 으로 message 전송. 성공 시 True.
-
-    ADR-0037 §D1 — webhook 과 병행 channel. env: TELEGRAM_ALERT_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID
-    (Hermes 의 OCI 패치 정본화, 2026-05-20).
-    """
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = json.dumps({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-    }).encode("utf-8")
-    socket.setdefaulttimeout(timeout_sec)
-    try:
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-            return 200 <= resp.status < 300
-    except (urllib.error.URLError, socket.timeout, OSError) as e:
-        log.warning("telegram 전송 실패: %s", e)
-        return False
-    finally:
-        socket.setdefaulttimeout(None)
-
-
-def format_telegram_message(instance: str, alerts: list[dict[str, Any]]) -> str:
-    """알림 목록을 Telegram HTML 메시지 포맷으로 변환 (ADR-0037 §D1)."""
-    lines = ["🚨 <b>Wikihub Alert</b>", f"Instance: {instance}", ""]
-    for a in alerts:
-        lines.append(f"• <b>{a.get('vault_id', 'unknown')}</b>")
-        lines.append(f"  Scope: {a.get('scope', 'unknown')}")
-        lines.append(f"  Severity: {a.get('severity', 'unknown')}")
-        reason = str(a.get("reason", "unknown"))
-        lines.append(f"  Reason: {reason[:200]}")
-        if a.get("failed_count"):
-            lines.append(f"  Failed count: {a['failed_count']}")
-        lines.append("")
-    return "\n".join(lines)
+# branch_strategy_formalize follow-up (wikihub_monitor, v0.1.8):
+# send_telegram / format_telegram_message 가 scripts/lib/telegram.py 로 추출됨.
+# 본 모듈은 caller — parse_mode="HTML" 명시 호출 (format_telegram_alert_message 가 HTML 태그 사용).
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -253,15 +218,15 @@ def main(argv: list[str] | None = None) -> int:
 
     webhook_url = cfg.operations.fatal_webhook_url
     # ADR-0037 §D1 — Telegram channel (env). webhook 과 병행 발송.
-    tg_bot_token = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "").strip()
-    tg_chat_id = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "").strip()
+    tg_bot_token = os.environ.get("TELEGRAM_MONITOR_BOT_TOKEN", "").strip()
+    tg_chat_id = os.environ.get("TELEGRAM_MONITOR_CHAT_ID", "").strip()
 
     total_pending = len(to_send) + len(mount_fallbacks)
     if not webhook_url and not (tg_bot_token and tg_chat_id):
         # R10 HIGH-2: 운영자 visibility — channel 미설정 + pending alert 가 있는 상태
         log.warning(
             "fatal_webhook_url + TELEGRAM_ALERT_* 미설정 — %d 건의 fatal 알림이 journal 에만 기록됩니다 "
-            "(yaml `operations.fatal_webhook_url` 또는 ~/.config/wikihub/env 의 TELEGRAM_ALERT_BOT_TOKEN/CHAT_ID 설정 권장)",
+            "(yaml `operations.fatal_webhook_url` 또는 ~/.config/wikihub/env 의 TELEGRAM_MONITOR_BOT_TOKEN/CHAT_ID 설정 권장)",
             total_pending,
         )
         for _, f in to_send:
@@ -322,8 +287,14 @@ def main(argv: list[str] | None = None) -> int:
                 webhook_url, cfg.operations.fatal_webhook_timeout_sec,
             )
     if tg_bot_token and tg_chat_id:
-        tg_msg = format_telegram_message(instance_identifier, alerts)
-        ok = send_telegram(tg_bot_token, tg_chat_id, tg_msg, cfg.operations.fatal_webhook_timeout_sec)
+        tg_msg = format_telegram_alert_message(instance_identifier, alerts)
+        ok = send_telegram(
+            tg_bot_token,
+            tg_chat_id,
+            tg_msg,
+            parse_mode="HTML",
+            timeout_sec=cfg.operations.fatal_webhook_timeout_sec,
+        )
         if ok:
             sent = True
             log.info("Telegram 발송 완료: %d failure(s)", len(to_send))
