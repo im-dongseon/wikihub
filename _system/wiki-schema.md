@@ -52,18 +52,16 @@ ${WIKIHUB_SRC}/                       시스템 코드 (default ~/.local/share/w
 │   │   ├── wh-{ingest,lint,query,setup}.frontmatter.yaml   # v0.1.8 update_path_fixes — wh-graphify 폐기 (systemd 격상)
 │   │   └── _generated/wh-{cmd}/SKILL.md   # install-time materialized (.gitignore)
 │   └── systemd/                      #   systemd unit template (F4 산출물)
-│       ├── wikihub-{vault,mount}@.service.template
-│       ├── wikihub-{pending-monitor,monitor}.{service,timer}.template
+│       ├── wikihub-mount@.service.template
+│       ├── wikihub-ingest@.{service,timer}.template
+│       ├── wikihub-lint.{service,timer}.template
 │       ├── wikihub-graphify.service.template   # v0.1.8 update_path_fixes — wh-graphify hermes skill 폐기 후 systemd 격상 (timer 없음, lint Step 9 가 trigger)
-│       ├── lint.{service,timer}.template
 │       └── ops-alert.service
 ├── scripts/                          # 인프라 스크립트
 │   ├── vault-fetch.py
-│   ├── ops-alert.py
-│   ├── pending_monitor.py
-│   ├── wikihub_monitor.py            # v0.1.8 — 12hr 윈도우 운영 보고서 (Telegram + vault 안 파일)
+│   ├── ops-alert.py                  # ADR-0040 — fatal alert dispatcher (Telegram + webhook inline)
 │   ├── wikihub_graphify.sh           # v0.1.8 update_path_fixes — graphify CLI 호출 정본 (ADR-0036 §D6 single-source)
-│   ├── lib/{config,state,telegram}.py
+│   ├── lib/{config,state}.py
 │   └── _helpers/render_systemd_units.py
 ├── install.sh
 ├── wikihub.yaml.example              # /wh-setup 의 read-only template (ADR-0031)

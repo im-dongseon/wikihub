@@ -11,13 +11,12 @@
 >
 > **hermes skill `wh-graphify` 폐기 이유**:
 > - Layer 1 LLM wrapper (deterministic bash 작업의 LLM wrapping) = over-engineering
-> - `wikihub_monitor` 의 D1 정정 (Hermes 스킬 → Python 직접) 과 같은 정신
 > - semantic extraction 의 LLM 호출은 graphify CLI 내부 (Layer 2, ollama_cloud 등) 유지 — 정합
 
 ## 호출 흐름
 
 ```
-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
+wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
    ├─ Step 1~8: lint cycle 본체 (LLM 작업)
    └─ Step 9: 변경 감지 분기 (cost gate)
        ├─ 변경 없음 → skip + report.md "graph rebuild skipped (no changes)"
@@ -52,7 +51,7 @@ lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 
 ## 운영 흐름
 
-- **timer 자동**: lint cycle 의 Step 9 가 trigger 책임. lint cycle 자체가 lint.timer (3h 주기) 로 fire — graphify chain 은 변경 시만 fire (cost gate).
+- **timer 자동**: lint cycle 의 Step 9 가 trigger 책임. lint cycle 자체가 wikihub-lint.timer (3h 주기) 로 fire — graphify chain 은 변경 시만 fire (cost gate).
 - **메인테이너 수동**: `systemctl --user start wikihub-graphify.service` — 즉시 graph 갱신 필요 시. 또는 `WIKIHUB_HOME=... WIKIHUB_YAML=... scripts/wikihub_graphify.sh --rebuild` (force full rebuild).
 
 ## 산출물

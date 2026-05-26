@@ -18,7 +18,7 @@ EnvironmentFile=-%h/.config/wikihub/env
 # scripts/wikihub_graphify.sh = graphify CLI 호출 정본 (ADR-0036 §D6 single-source, v0.1.8 update_path_fixes).
 ExecStart={wikihub_src}/scripts/wikihub_graphify.sh
 # Step 4 code_review_1 C1 흡수: shell `timeout` builtin 이 timeout 시 exit 124 propagate.
-# lint.service / wikihub-vault@ 는 Python wrapper 가 75 변환하지만 bash + timeout 은 변환 없음.
+# wikihub-lint.service / wikihub-ingest@ 는 Python wrapper 가 75 변환하지만 bash + timeout 은 변환 없음.
 # 124 미포함 시 OnFailure=ops-alert 매번 발화 위험 — 124 추가.
 SuccessExitStatus=0 75 124
 # graphify_timeout_sec (default 900s) + 300s margin (LLM cloud latency + 후처리).

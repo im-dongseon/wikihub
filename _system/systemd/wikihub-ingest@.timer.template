@@ -11,7 +11,7 @@ Description=WikiHub vault ingest timer — %i
 # Persistent=true 제거 (2026-05-19) — systemd 문서상 OnCalendar= 전용. monotonic timer
 #   (OnBootSec/OnActiveSec/OnUnitInactiveSec) 에선 no-op 였음. dead config 정리.
 [Timer]
-Unit=wikihub-vault@%i.service
+Unit=wikihub-ingest@%i.service
 OnBootSec=2min
 OnActiveSec=2min
 OnUnitInactiveSec={sync_interval_sec}s

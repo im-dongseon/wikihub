@@ -17,7 +17,8 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 - `wikihub.yaml` 존재
 - wiki/ 디렉토리 + 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` 존재 (없으면 생성 — 본 명령이 자동)
-- (선택) `graphify-out/graph.json` — 있으면 그래프 기반 점검, 없으면 wiki 순회
+- (선택) `$WIKIHUB_HOME/graphify-out/graph.json` — 있으면 그래프 기반 점검, 없으면 wiki 순회. **절대 경로 사용 필수** — wh-lint skill (LLM) 의 CWD context 가 wiki/ 로 implicit drift 가능 → 상대 경로 시 stale `wiki/graphify-out/` 읽기 회귀 위험. 자세한 분석 + 진단 가이드: [docs/references/graph-path-resolution.md](../../docs/references/graph-path-resolution.md).
+- **stale 감지**: `$WIKIHUB_HOME/wiki/graphify-out/` 존재 시 (legacy v0.1.7 이전 또는 잘못된 `graphify --out` 호출 잔존) → Step 7 가 cleanup, Step 8 가 보고. 본 디렉토리는 Step 3 graph source 로 절대 read 안 함.
 
 ## 출력 언어 정책 (LLM 호출 step 들 공통)
 
@@ -33,7 +34,7 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 ### Step 0. wiki-wide flock 가드 (v0.1.8 — race 가드)
 
-lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wh-lint` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
+wikihub-lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wh-lint` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
 
 ```bash
 exec 200>"$WIKIHUB_HOME/.wh-lint.lock"
@@ -60,7 +61,11 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 
 ### Step 3. 그래프 기반 점검 (자동)
 
-`graphify-out/graph.json` 있으면 사용, 없으면 wiki 순회로 폴백:
+`$WIKIHUB_HOME/graphify-out/graph.json` (**절대 경로 필수** — CWD-independent resolution) 있으면 사용, 없으면 wiki 순회로 폴백.
+
+**graphify schema 호환 (v0.7 → v0.8+ migration)**: graph.json 의 edge 키가 v0.7 = `edges`, v0.8+ = `links` 로 변경됨. parsing 시 `d.get('links', d.get('edges', []))` 패턴으로 양쪽 호환 (graphify CLI 버전 transition 중 silent break 회피).
+
+진단 항목:
 
 - **고아 페이지** (인바운드 엣지 0건):
   - source 페이지: 보고만 (사용자가 직접 본문 읽고 자료로 활용 중일 수 있음)
@@ -169,7 +174,12 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - concept 페이지를 `.archived/concepts/<name>-<utc_iso>.md` 이동
   - **idempotency gate**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시에도 entity 본문 LLM merge 재호출 안 함 — concept 본문 + referenced_by 만 합집합 추가. entity 본문 git history churn 차단.
 
-**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wh-lint`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` 또는 wikihub_monitor 보고서 read.
+- **stale `wiki/graphify-out/` cleanup (v0.1.10 — graphify_path_absolute)**:
+  - `$WIKIHUB_HOME/wiki/graphify-out/` 존재 감지 시 → `$WIKIHUB_HOME/graphify-out/.archived/wiki-graphify-out-<utc_iso>/` 로 이동 (recoverable archive — `rm -rf` 절대 금지, `mv` 만).
+  - 본 디렉토리는 pre-v0.1.8 era graphify 호출 또는 잘못된 `graphify --out` 인자 잔존물. 정상 graphify (`scripts/wikihub_graphify.sh` 가 `--out "$WIKIHUB_HOME"` 명시) 는 `wiki/graphify-out/` 미생성.
+  - archive 후 lint 가 다시 stale 을 graph source 로 읽지 않음 + Step 3 의 절대 경로 정합으로 회귀 차단.
+
+**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wh-lint`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` read.
 
 ### Step 8. log 작성
 
@@ -186,6 +196,9 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 - 신규 stub 생성: entities/김철수 (1 source 참조), concepts/CRM (2 source)
 - cross-ref 추가: 18건 (entities 12 + concepts 6)
 - 카테고리 디렉토리 생성: wiki/_lint/
+
+## Stale cleanup (v0.1.10 — graphify_path_absolute, 해당 시만)
+- `wiki/graphify-out/` (934 nodes, 826 edges, 2026-05-24 생성, 4.6MB) → `graphify-out/.archived/wiki-graphify-out-20260526T093000Z/` 이동 (recoverable archive)
 
 ## Duplicates (case-variant) — v0.1.8 ADR-0039
 - `Claude-Code` / `claude-code` (entity) → Step 7 에서 canonical 보존 + alias 합집합
@@ -219,7 +232,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 **책임 분리** (ADR-0036 §D6 single-source 정합):
 - **lint Step 9 책임 = trigger 만** — 변경 감지 + `systemctl --user start wikihub-graphify.service` 호출
 - **graphify CLI 호출 책임 = `wikihub-graphify.service` (정본 `scripts/wikihub_graphify.sh`)**
-- v0.1.7 era 의 `<agent_invocation> "/wh-graphify"` 표현 폐기 — hermes 의 자동 sub-skill spawn 메커니즘 부재 (Reviewer 2 hermes source 검증). graphify hermes skill 자체도 폐기 (Layer 1 LLM wrapper 가 deterministic bash 작업 over-engineering — `wikihub_monitor` 의 D1 정정 정신 정합).
+- v0.1.7 era 의 `<agent_invocation> "/wh-graphify"` 표현 폐기 — hermes 의 자동 sub-skill spawn 메커니즘 부재 (Reviewer 2 hermes source 검증). graphify hermes skill 자체도 폐기 (Layer 1 LLM wrapper 가 deterministic bash 작업의 over-engineering).
 
 **조건 분기**:
 
@@ -235,7 +248,7 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
    ```
    + `_lint/report.md` 에 1줄 `graphify chain triggered — see journalctl --user -u wikihub-graphify.service`
 
-**fire-and-forget 의미**: `systemctl --user start` 가 비동기 — lint.service 즉시 종료. graphify 결과는 `wikihub-graphify.service` 의 별도 journal + `graphify-out/graph.json` 으로 surface. lint exit code 는 graphify 결과 무관.
+**fire-and-forget 의미**: `systemctl --user start` 가 비동기 — wikihub-lint.service 즉시 종료. graphify 결과는 `wikihub-graphify.service` 의 별도 journal + `$WIKIHUB_HOME/graphify-out/graph.json` 으로 surface. lint exit code 는 graphify 결과 무관.
 
 **graphify 결과 검증 위치** (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure 가드):
 - `scripts/wikihub_graphify.sh` 의 Step 4 (`N / M < threshold` ratio check) — 정본
@@ -276,4 +289,4 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지 (Step 2 검증)
 - ADR-0005 wiki/index.md 갱신 책임 (Step 5)
 - ADR-0008 `/wh-lint` 권한 분류 (v0.1.0 era — 자동/`--apply` 구분, v0.1.8 ADR-0039 에서 폐기)
-- ADR-0009 `/wh-setup`이 lint.timer 주기를 wikihub.yaml에서 동기화
+- ADR-0009 `/wh-setup`이 wikihub-lint.timer 주기를 wikihub.yaml에서 동기화

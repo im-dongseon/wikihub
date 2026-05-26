@@ -19,7 +19,7 @@ Environment=RCLONE_RC_ADDR=127.0.0.1:{rc_port_for_%i}
 ExecStart={agent_invocation_for_wh_ingest} "/wh-ingest --vault %i"
 SuccessExitStatus=0 75
 TimeoutStartSec={timeout_start_sec}sec
-SyslogIdentifier=wikihub-vault-%i
+SyslogIdentifier=wikihub-ingest-%i
 
 # v7~v9 (ADR-0025·0026·0027 — Path C+ rclone mount 도입):
 # After/Requires=wikihub-mount@%i.service — mount 가 active 상태에서만 vault@ fire.

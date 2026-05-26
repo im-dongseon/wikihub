@@ -295,3 +295,79 @@
 - **트레이드오프**: self-update anti-pattern fix 의 chicken-and-egg 본질적 한계 — fix 가 deploy 되어도 첫 호출은 부모 process 의 이전 source 동작이 결정. 정합 동작은 다음 호출부터. 운영자 release transition 시 1회 transient fail (rollback) 가능 — 즉시 재호출로 정합화.
 - **결론**: install.sh + .gitignore + README + ADR-0030/0036 cross-link. multipass 검증 — 회피 없이 install.sh 통과 + idempotent re-run 정합. canary force-update 4회 거쳐 정합 단일 squash commit (a748d19) 으로 통합.
 - **참조**: features/archive/20260526_install_update_hardening/
+
+---
+
+## [2026-05-26] v018-fix (v0.1.9)
+
+- **목적**: v0.1.8 lesson-driven fixes + OCI 운영 중 발견된 sync passthrough 결함 fix.
+- **로직**:
+  1. **fix(sync)**: `_read_from_mount()` else 브랜치에서 binary MIME(`application/octet-stream`)으로 식별된 text 파일(.md, .txt, .json 등)을 확장자로 판별하여 UTF-8 직접 디코딩 후 passthrough 처리. 디코딩 실패 시에만 extract()로 fallback.
+  2. **fix(config)**: `config.py` `lint_interval_hours` 기본값 24→3 (yaml.example 정합)
+  3. **fix(review)**: `test_config.py` fixture 24→3, install.sh 들여쓰기 수정
+  4. **docs**: v0.1.8 lesson report + OPS 검증 체크리스트 + 멀티모델 리뷰 (MiniMax M2.5, Kimi K2.6, Qwen3.6 plus)
+- **생성 ADR**: 없음.
+- **트레이드오프**: passthrough는 확장자 heuristic + UTF-8 only (기존 `is_text_mime` 브랜치와 동일한 encoding 정책). 비UTF-8 legacy encoding 파일은 extract() fallback 후 실패 가능. OCI 운영 검증 완료.
+- **결론**: 7 commits, 8 files changed (+559 -5). v0.1.9 version bump.
+- **참조**: features/archive/20260526_v018_fix/
+
+---
+
+## [2026-05-26] monitor_services_remove (v0.1.9)
+
+- **목적**: v0.1.5 (ADR-0037 §D2) `wikihub-pending-monitor` + v0.1.8 `wikihub-monitor` 폐기. 운영 6주차 시점 두 unit 의 추가 surface 가 ops-alert (ADR-0024) 가 못 잡는 결함을 실제로 잡았다는 evidence 부재 — Karpathy §2 Simplicity 정공법.
+- **로직**:
+  1. **systemd unit 4종 삭제** — `_system/systemd/wikihub-monitor.{service,timer}.template` + `wikihub-pending-monitor.{service,timer}.template`.
+  2. **scripts 3 파일 폐기** — `scripts/wikihub_monitor.py` (470L), `scripts/pending_monitor.py` (110L), `scripts/lib/telegram.py` (80L).
+  3. **telegram inline 회수** — `send_telegram` + `format_telegram_alert_message` → `scripts/ops-alert.py` (단일 caller, `parse_mode="HTML"` 고정, 옵션화 제거).
+  4. **yaml.example 4 필드 제거** — `pending_alert_age_sec`, `monitor_enabled`, `monitor_report_vault`, `monitor_report_subpath`. `OperationsConfig` dataclass 동일 4 필드 + `_parse_operations` 4 라인 삭제.
+  5. **install.sh upgrade migration** — legacy monitor unit stop+disable. `render_systemd_units.py` legacy_singletons catalog 에 monitor 4 unit 추가 (operator 의 `~/.config/systemd/user/` 의 orphan unit 자동 삭제).
+  6. **ADR-0037 §Note + ADR-0024 cross-ref + ADR-0032 catalog 정리** — `pending_alert_age_sec` Group B 자동 추가 catalog 자연 제거.
+- **생성 ADR**: ADR-0040 (Supersedes ADR-0037)
+- **트레이드오프**: pending_ingest age 기반 surface 부재로 회귀 — operator 가 vault sync 실패를 ADR-0024 attempts 기반 alert (50min) 까지 기다림. `TELEGRAM_MONITOR_*` env key 명명이 fatal alert layer 만 남아 의미 부정확 → operator env 마이그레이션 부담 회피 위해 키 이름 유지 (install.sh 주석으로 historical 명시). 12hr 보고서 부재 → operator 가 journalctl 명령으로 자기 운용.
+- **결론**: 7 파일 삭제 + 12 파일 수정 (+161 -124). 멀티모델 리뷰 2회 (code_review_1 runtime correctness + code_review_2 consistency) + v2 fix (3 Critical + 5 Medium 결함 surface 후 모두 반영). multipass wikihub-test 검증 통과 — `render ok: removed_stale=6` 정합 (vault@ 2 + monitor 2 + pending-monitor 2).
+- **참조**: features/archive/20260526_monitor_services_remove/
+
+---
+
+## [2026-05-26] systemd_prefix_realign (v0.1.9)
+
+- **목적**: commit `2ed01f8` (v0.1.9 release window 의 systemd unit rename — `wikihub-vault@` → `wh-ingest@`, `lint.*` → `wh-lint.*`) 의 명분 (Hermes skill 이름과 통일) 보다 systemd namespace 일관성 (`wikihub-*` 단일) 이 운영자 mental model 에 더 유익. Hermes skill prefix `wh-` (ADR-0033 lock) 와 systemd unit prefix 는 두 다른 abstraction layer — 같은 prefix 강제 의미 부족.
+- **로직**:
+  1. **systemd template 4 rename** — `wh-ingest@.{service,timer}.template` → `wikihub-ingest@.{service,timer}.template`, `wh-lint.{service,timer}.template` → `wikihub-lint.{service,timer}.template`. 효과적 rename: `wikihub-vault@` (pre-2ed01f8) → `wikihub-ingest@` (semantic) + `lint.*` (no prefix) → `wikihub-lint.*` (namespace).
+  2. **Hermes skill `wh-*` 보존** — ADR-0033 lock 정합. ExecStart 의 `hermes chat --skills wh-ingest --quiet --yolo --query "/wh-ingest --vault %i"` 형태 보존. systemd unit layer (`wikihub-*`) ↔ Hermes skill layer (`wh-*`) 명확 분리.
+  3. **install.sh upgrade migration 확장** — pre-2ed01f8 era (`wikihub-vault@*` + `lint.*` 잔존) + 2ed01f8 canary era (`wh-ingest@*` + `wh-lint.*` 잔존) 둘 다 stop + disable cleanup.
+  4. **renderer 보강** — `_do_render` 의 per-vault regex 를 `wikihub-(?:mount|ingest)@` 패턴으로 갱신 + 별도 unconditional delete 블록 (`wikihub-vault@*` + `wh-ingest@*` template 자체 폐기). `legacy_singletons` 에 `wh-lint.{service,timer}` 추가.
+  5. **commands docs + wiki-schema + README + ADR-0040 narrative + ADR-0033 §Note cross-ref** — systemd unit 참조 일괄 갱신, Hermes skill 호출 (`/wh-lint`, `--skills wh-ingest` 등) 보존.
+- **생성 ADR**: ADR-0041 (commit `2ed01f8` 정정, ADR 결정 변경 없음 — 직전 implementation-level rename 의 첫 ADR 격상)
+- **트레이드오프**: commit `2ed01f8` 의 GLM 5.1 + Mimo 2.5 Pro 멀티모델 리뷰가 `wh-*` 방향 승인 → 직후 maintainer 검토 결과 반전. 리뷰 가치 손상 0 (당시 결정 시점의 정확한 평가) 이나 메소드론 churn cost 인식. legacy_singletons catalog 누적 (pre-2ed01f8 + 2ed01f8 canary + monitor 4 unit = 다층 cleanup) 부담.
+- **결론**: 4 template rename + install.sh 21 위치 unit 참조 갱신 + renderer regex + commands docs + ADR-0040 narrative + ADR-0033 §Note. Step 4 review 메인테이너 판단 생략 (mechanical rename + 정적 검증 + 직전 monitor_services_remove 리뷰의 graphify layer 정합 흡수). multipass wikihub-test 검증 통과 — rendered unit 7 종 모두 `wikihub-*` prefix + Hermes skill 호출 정합.
+- **참조**: features/archive/20260526_systemd_prefix_realign/
+
+---
+
+## [2026-05-26] graphify_path_absolute (v0.1.9)
+
+- **목적**: OCI 운영 중 발견 — wh-lint cycle 이 stale `$WIKIHUB_HOME/wiki/graphify-out/graph.json` (934 nodes, 826 edges, 2026-05-24 생성, 4.6MB) 을 읽고 0 edges 회귀 보고. 근본 원인 — wh-lint skill (LLM) 의 CWD context 가 wiki/ 로 implicit drift → 상대 경로 `graphify-out/graph.json` 이 `$WIKIHUB_HOME/wiki/graphify-out/` 으로 잘못 resolution.
+- **로직**:
+  1. **`_system/commands/lint.md` 5 위치 절대 경로** — `graphify-out/graph.json` → `$WIKIHUB_HOME/graphify-out/graph.json`. CWD-independent resolution.
+  2. **Step 3 schema 호환** — graphify v0.7 (`edges`) → v0.8+ (`links`) migration: `d.get('links', d.get('edges', []))` 패턴 명시.
+  3. **Step 7 stale cleanup** — `wiki/graphify-out/` 존재 감지 시 → `graphify-out/.archived/wiki-graphify-out-<utc>/` 자동 archive 이동 (recoverable, `rm -rf` 금지).
+  4. **Step 8 report 보고 형식** — stale cleanup 항목 추가.
+  5. **`.graphifyignore` 에 `graphify-out/` 추가** — defense-in-depth (graphify CLI 의 잘못된 `--out` 호출 시 자기 출력 재scan 차단).
+  6. **`docs/references/graph-path-resolution.md` 신설 (185L)** — 운영자 진단 가이드 + 정합 경로 catalog + Recovery 절차 + 회귀 차단 4-layer + graphify schema 호환 노트.
+- **생성 ADR**: 없음. ADR-0036 §"후속 영향" cross-ref 1줄 add (implementation hardening — 결정 변경 없음).
+- **트레이드오프**: Step 7 stale cleanup 가 매 lint cycle 마다 `find $WIKIHUB_HOME/wiki/graphify-out/` 검사 1회 추가 — minimal cost. `.archived/` 누적 retention policy 부재 (v0.2.x 검토 backlog).
+- **결론**: lint.md 5 위치 + .graphifyignore template + ADR-0036 §Note + docs/references/graph-path-resolution.md 신설. multipass 검증 통과. Step 4 review 메인테이너 판단 생략 (OCI 실증 trail + 직전 ADR-0036/0040/0041 review 의 graphify layer 정합 흡수).
+- **참조**: features/archive/20260526_graphify_path_absolute/
+
+---
+
+## [2026-05-27] graphifyignore_migration (v0.1.9)
+
+- **목적**: graphify_path_absolute (v0.1.9 squash) 의 multipass canary 검증에서 surface 한 결함 — 운영자 `~/wikihub/wiki/.graphifyignore` 가 update 시 자동 갱신 안 됨. `cp -n` (template 배치) 는 fresh install 만 효과, 기존 instance 의 file 은 무변경 → defense-in-depth layer 3 (`graphify-out/` ignore) 가 기존 instance 에 미적용.
+- **로직**: `install.sh _migrate_graphifyignore` 신규 — wiki/.graphifyignore 가 존재하면 `^graphify-out/?$` regex 부재 시만 idempotent append. 운영자 customization 보존 (다른 형태 `/graphify-out`, `**/graphify-out/` 미touch). `_step5_instance_dirs` 끝에 hook 추가 — 매 install (update + fresh) 시점 작동. setup.md Step 1 §wiki/.graphifyignore catalog 갱신 + ADR-0036 §"후속 영향" cross-ref.
+- **생성 ADR**: 없음. ADR-0036 §"후속 영향" cross-ref 1줄 add.
+- **트레이드오프**: regex `^graphify-out/?$` 의 매칭 범위 보수적 — 운영자가 `# graphify-out/` comment-out 형태로 작성한 경우 매칭 안 함 → migration 가 append (중복 가능). 운영자가 의도적 comment-out 했다면 본 line 의 추가는 redundant 이나 idempotent 정합 깨지지 않음.
+- **결론**: install.sh 1 fn + setup.md 1 bullet + ADR-0036 §Note 1줄. multipass 검증 통과 — 첫 실행 시 `wiki/.graphifyignore migration: graphify-out/ append (graphify_path_absolute layer 3 회복)` 출력 + 재실행 시 no-op (idempotent).
+- **참조**: features/archive/20260527_graphifyignore_migration/ (예정)

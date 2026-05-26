@@ -14,8 +14,9 @@ WorkingDirectory={wikihub_home}
 ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
-# ADR-0037 §D1 (v0.1.5) — Telegram alert channel env. lenient `-` prefix: 파일 부재/빈 값 OK.
-# 운영자가 ~/.config/wikihub/env 에 TELEGRAM_ALERT_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID 채움.
+# ADR-0040 (carry-over of ADR-0037 §D1) — Telegram alert channel env. lenient `-` prefix: 파일 부재/빈 값 OK.
+# 운영자가 ~/.config/wikihub/env 에 TELEGRAM_MONITOR_BOT_TOKEN + TELEGRAM_MONITOR_CHAT_ID 채움.
+# (MONITOR prefix 는 historical — install.sh 의 env template 주석 참조)
 EnvironmentFile=-%h/.config/wikihub/env
 ExecStart={venv_path}/bin/python {wikihub_src}/scripts/ops-alert.py
 # R16-M1 (V<N> R16 SRE 리뷰): 30s → 180s. ops-alert.py 의 collect_mount_fallback_failures

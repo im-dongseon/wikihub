@@ -94,7 +94,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 위 derived 필드 외 **모든 yaml 필드**는 maintainer-controlled — Step 0 절대 미관여. 명시 예시 (ADR-0035 정합):
 - `version`, `instance.timezone`
 - `vaults[*]`: `id`·`enabled`·`type`·`sync_interval_sec`·`options.exclude_shared_with_me`·`options.max_file_size_mb`·`options.false_delete_threshold`·`options.mount_path`·`options.rclone_remote_name`·`options.rclone_remote_path`·`options.rclone_rc_port`
-- `operations`: `lint_interval_hours`·`lint_contradiction_check`·`graphify_enabled`·`pending_alert_age_sec`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`·`graphify_min_version`·`graphify_max_version`·`graphify_backend`·`graphify_profile`·`graphify_timeout_sec`·`graphify_partial_failure_threshold`·`monitor_enabled`·`monitor_report_vault`·`monitor_report_subpath` (v0.1.7~v0.1.8 신설 field 들)
+- `operations`: `lint_interval_hours`·`lint_contradiction_check`·`graphify_enabled`·`max_concurrent_vaults`·`retry.*`·`disk.*`·`fatal_webhook_url`·`fatal_webhook_timeout_sec`·`instance_label`·`rclone_min_version`·`rclone_max_version`·`vfs_cache_max_size`·`vfs_refresh_mode`·`graphify_min_version`·`graphify_max_version`·`graphify_backend`·`graphify_profile`·`graphify_timeout_sec`·`graphify_partial_failure_threshold` (v0.1.7~v0.1.8 신설 field 들)
 - `agent.*` 전체 (특히 `agent.models` 의 per-skill model override — ADR-0032 §Note 2026-05-20)
 
 특히 `mount_path` 는 Path C+ default 패턴에선 `local_path` 와 동일하지만, advanced 운영자가 bind-mount / ramdisk / multi-vault layout 분리로 명시 분리 가능 (HIGH-A1 design review). Step 1 schema 검증의 soft warn 만 발생, Step 0 미관여.
@@ -110,7 +110,8 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
   - **Hermes terminal.env_passthrough 안내 — v0.1.7 follow-up 정합 (ADR-0038)**: namespace 격리 후 **불필요**. wikihub 가 `WIKIHUB_GRAPHIFY_*` namespace 보유 후 graphify 호출 시점에 `env <K=V> graphify ...` 로 explicit 주입 → Hermes parent 는 backend env (OLLAMA_*/ANTHROPIC_API_KEY 등) 를 안 봄, tirith strip 도 우회. 운영자가 hermes config 의 `terminal.env_passthrough` 편집 안 함.
   - **Hermes delegation.model 권장 안내** (ADR-0032 §Note 2026-05-22 — v0.1.6): wh-lint Step 6 등 subagent 호출 시 `~/.hermes/config.yaml` 의 `delegation.model` 이 적용됨. 권장값 `minimax-m2.5` (non-reasoning 안정성 + 한자→한글 정합). 부재·다른 모델 시 보고 + warn (정보 출력만, 자동 patch 미수행 — Hermes config 는 wikihub spec 외부). wh-ingest·wh-lint 메인 모델은 wikihub `agent.models` 가 `--model` 으로 systemd lock — hermes `model.default` 와 무관.
 - **wiki/ 디렉토리**: 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` + 각 vault별 `sources/{vault_id}/` 존재 (없으면 생성)
-- **wiki/.graphifyignore** (ADR-0036 §D3): 부재 시 default template 배치 — `_system/templates/wiki/.graphifyignore` 를 `cp -n` 으로 복사 (`-n`: 존재 시 미덮어쓰기, idempotent). default 내용은 `_lint/`, `_state/` 제외 (gitignore 문법). 메타 디렉토리가 graphify 그래프의 noise 노드로 포함되는 것 차단. 운영자가 vault 별 추가 패턴 직접 편집 가능.
+- **wiki/.graphifyignore** (ADR-0036 §D3): 부재 시 default template 배치 — `_system/templates/wiki/.graphifyignore` 를 `cp -n` 으로 복사 (`-n`: 존재 시 미덮어쓰기, idempotent). default 내용은 `_lint/`, `_state/`, `**/log.md`, `graphify-out/` 제외 (gitignore 문법). 메타 디렉토리가 graphify 그래프의 noise 노드로 포함되는 것 차단. 운영자가 vault 별 추가 패턴 직접 편집 가능.
+  - **`graphify-out/` line-level idempotent migration** (v0.1.10, graphify_path_absolute follow-up): 기존 instance (pre-v0.1.10) 의 `.graphifyignore` 는 `graphify-out/` line 부재. install.sh `_migrate_graphifyignore` 가 매 install (update + fresh) 시점에 `^graphify-out/?$` regex 부재 시만 append 보강. 운영자 customization 보존 (`/graphify-out`, `**/graphify-out/` 등 다른 형태는 본 regex 미매칭 — touch 안 함).
 - **_state/ 디렉토리**: 각 enabled vault의 `_state/{vault_id}/` + 초기 state 파일 (없을 때만 — ADR-0007 all JSON, ADR-0035 cursor 폐기)
   - **초기 파일 형식**:
     - `file_map.json` → `{"vault_id": "<id>", "updated_at": null, "files": {}}` (ADR-0035: primary key 는 source_id)
@@ -150,7 +151,7 @@ agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh-setup은 그 
 ### Step 4. systemd 반영 (v0.1.0 v5 — ADR-0022 흐름 역전 정합)
 
 - `systemctl --user daemon-reload`
-- `--enable` 플래그 시: `lint.timer`, `wikihub-pending-monitor.timer` (ADR-0037 v0.1.5), `wikihub-monitor.timer` (v0.1.8) (+ 조건부 `disk-watch.timer`) **만** `enable --now`. **vault-ingest.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
+- `--enable` 플래그 시: `wikihub-lint.timer` **만** `enable --now`. **wikihub-ingest@<vid>.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
 - 미플래그 시: 권장 액션 출력만.
 
 ### Step 5. 보고
@@ -165,16 +166,18 @@ SETUP 결과 — 2026-05-13 15:30 KST
 ✓ agent skill_prefix: wh-
 
 systemd unit 갱신:
-  gdrive-ingest.service (interval 600s)
-  gdrive-ingest.timer
-  lint.service (interval 3h, v0.1.5 default — 24h → 3h)
-  lint.timer
+  wikihub-ingest@gdrive.service (interval 600s)
+  wikihub-ingest@gdrive.timer
+  wikihub-lint.service (interval 3h, v0.1.5 default — 24h → 3h)
+  wikihub-lint.timer
+  wikihub-mount@gdrive.service
+  wikihub-graphify.service
   ops-alert.service
 
 daemon-reload 완료.
 
 다음 권장 액션 (--enable 미사용 시):
-  systemctl --user enable --now gdrive-ingest.timer lint.timer
+  systemctl --user enable --now wikihub-ingest@gdrive.timer wikihub-lint.timer
   systemctl --user list-timers
 ```
 
@@ -302,7 +305,7 @@ ADR-0010 의 도구 split (install.sh = OS bootstrap / `/wh-setup` = wiki·yaml 
 
 - ADR-0006 unified orchestration (ExecStart의 명령 형식)
 - ADR-0007 state all JSON (Step 1 초기 파일, ADR-0035: cursor.json 폐기)
-- ADR-0008 lint 권한 (lint.timer는 기본 모드만)
+- ADR-0008 lint 권한 (wikihub-lint.timer는 기본 모드만)
 - ADR-0009 setup 책임 (본 명령의 정본 — §4 yaml writer 확장 Note 정합)
 - ADR-0010 운영 도구 책임 분할 (install.sh와의 경계 — yaml.example 복사 책임은 ADR-0031 으로 reassign)
 - ADR-0022 첫 ingest 진입점 (ADR-0035: `--bootstrap` 플래그 폐기, file_map 비어있는 first-run 이 자연 bootstrap)

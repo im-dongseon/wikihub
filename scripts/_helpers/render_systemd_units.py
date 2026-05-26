@@ -4,7 +4,7 @@
 정본 contract: features/20260517_update_mode/analysis_and_design.md §6.1 (ADR-0030).
 
 install.sh + update_mode 가 본 helper 를 호출해서 _system/systemd/*.template →
-~/.config/systemd/user/wikihub-*.service|.timer 로 render.
+~/.config/systemd/user/wikihub-*|wh-*.service|.timer 로 render.
 
 modes (mutually exclusive):
     --render --out DIR         : template → DIR 에 render (idempotent atomic write)
@@ -322,7 +322,7 @@ def _output_filename(template_path: Path, vault_id: str | None) -> str:
 
     examples:
       wikihub-mount@.service.template + vault_id=gdrive → wikihub-mount@gdrive.service
-      lint.timer.template (singleton)                   → lint.timer (wikihub-lint.timer 로 prefix)
+      wikihub-lint.timer.template (singleton)           → wikihub-lint.timer
       ops-alert.service (file, no template suffix)      → ops-alert.service
     """
     name = template_path.name
@@ -331,11 +331,6 @@ def _output_filename(template_path: Path, vault_id: str | None) -> str:
     if vault_id is not None:
         # per-vault: `@.service` → `@<vid>.service`
         name = name.replace("@.", f"@{vault_id}.", 1)
-    # singleton 의 wikihub- prefix 정합 (lint.timer → wikihub-lint.timer)
-    if not name.startswith("wikihub-") and name not in ("ops-alert.service",):
-        # convention: lint.*, ops-alert.service 는 그대로. 다른 singleton 은 wikihub- prefix.
-        if name.startswith("lint."):
-            name = "wikihub-" + name
     return name
 
 
@@ -417,11 +412,11 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
                 skipped_count += 1
             intended_outputs.add(out_name)
 
-    # enabled=false 또는 제거된 vault 의 stale unit 정리
-    # — wikihub-mount@<vid>.service, wikihub-vault@<vid>.service, wikihub-vault@<vid>.timer.
+    # enabled=false 또는 제거된 vault 의 stale unit 정리 (per-vault).
+    # operational: wikihub-mount@<vid>, wikihub-ingest@<vid>.
     removed = 0
     for p in sorted(out_dir.glob("wikihub-*@*")):
-        m = re.match(r"^wikihub-(?:mount|vault)@([^.]+)\.(service|timer)$", p.name)
+        m = re.match(r"^wikihub-(?:mount|ingest)@([^.]+)\.(service|timer)$", p.name)
         if not m:
             continue
         vid = m.group(1)
@@ -431,6 +426,38 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
                 removed += 1
             except OSError as e:
                 print(f"WARN: stale unit 삭제 실패 {p}: {e}", file=sys.stderr)
+    # upgrade cleanup — fully deprecated template names (unit 자체가 더 이상 render 안 됨).
+    # operational vid 인지 무관하게 unconditional delete.
+    #   - wikihub-vault@<vid>.{service,timer}  ← pre-2ed01f8 (v0.1.9 rename 이전)
+    #   - wh-ingest@<vid>.{service,timer}      ← 2ed01f8 ~ ADR-0041 canary era
+    for p in sorted(out_dir.glob("wikihub-vault@*")) + sorted(out_dir.glob("wh-ingest@*")):
+        if not re.match(r".+@.+\.(service|timer)$", p.name):
+            continue
+        try:
+            p.unlink()
+            removed += 1
+        except OSError as e:
+            print(f"WARN: deprecated unit 삭제 실패 {p}: {e}", file=sys.stderr)
+    # upgrade cleanup — singleton legacy names.
+    #   - wh-lint.{service,timer}              ← 2ed01f8 ~ ADR-0041 canary era
+    #   - wikihub-monitor.{service,timer}      ← ADR-0040 폐기 (monitor_services_remove)
+    #   - wikihub-pending-monitor.{service,timer}  ← ADR-0040 폐기
+    legacy_singletons = (
+        "wh-lint.service",
+        "wh-lint.timer",
+        "wikihub-monitor.service",
+        "wikihub-monitor.timer",
+        "wikihub-pending-monitor.service",
+        "wikihub-pending-monitor.timer",
+    )
+    for old_name in legacy_singletons:
+        old_p = out_dir / old_name
+        if old_p.is_file():
+            try:
+                old_p.unlink()
+                removed += 1
+            except OSError as e:
+                print(f"WARN: legacy unit 삭제 실패 {old_p}: {e}", file=sys.stderr)
 
     print(
         f"render ok: written={written_count} skipped={skipped_count} "
@@ -460,7 +487,8 @@ def _systemd_analyze_verify(out_dir: Path) -> None:
         )
         return
 
-    services = sorted(out_dir.glob("wikihub-*.service")) + sorted(out_dir.glob("wikihub-*.timer"))
+    services = sorted(out_dir.glob("wikihub-*.service")) + sorted(out_dir.glob("wikihub-*.timer")) \
+        + sorted(out_dir.glob("wh-*.service")) + sorted(out_dir.glob("wh-*.timer"))
     if not services:
         return
     try:

@@ -9,3 +9,9 @@ _state/
 # vault 별 ingest log — append-only timeline 텍스트. graphify 가 본 파일의 timestamp/이력 텍스트를
 # entity 후보로 추출하면 god-node noise. ADR-0036 후속 cleanup (2026-05-19).
 **/log.md
+
+# Defense-in-depth (2026-05-26, graphify_path_absolute feature) — graphify CLI 의 잘못된 호출
+# (`--out wiki` 또는 `--out .` while CWD=wiki/) 시 자기 출력을 다음 cycle 의 input 으로 재scan
+# 회귀 차단. 정상 graphify 호출은 scripts/wikihub_graphify.sh 가 `--out "$WIKIHUB_HOME"` 명시
+# → wiki/graphify-out/ 미생성. 본 ignore 는 legacy 잔존 또는 manual 호출 시 안전망.
+graphify-out/

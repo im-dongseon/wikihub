@@ -111,12 +111,12 @@ ADR-0035 §Consequences 의 재검토 조건:
 
 | ID | 영역 | 항목 | 출처 | 우선순위 |
 |---|---|---|---|---|
-| BL-N1 | scripts | Telegram message 4000 chars cap 초과 시 multi-message 분할 — 현행 truncate 만, marker 명시. 보고서 폭증 시 운영자가 일부만 수신 | design_review_1 H1 + design_review_2 M5 | low (현재 단일 vault 가정에서 도달 가능성 낮음) |
-| BL-N2 | retention | `$WIKIHUB_HOME/vault/<vid>/<subpath>/YYYYMMDD__HH_mm.md` 누적 — 90일 이상 보고서 자동 cleanup (운영자 수동 또는 monitor 가 cleanup) | 사용자 §2.3 권고 | low (gdrive 자체 retention 또는 운영자 책임) |
-| BL-N3 | parse | lint.service 가 running 중일 때 monitor fire 시 진행 중 entries 처리 — 현행 종료 entry (MESSAGE_ID / EXIT_STATUS) 부재 entry skip. "1회 진행 중" 라인 surface 권고 | design_review_2 O5 | low (race window 좁음) |
-| BL-N4 | observability | monitor self-health surface — 12hr 윈도우 monitor 가 silent fail 시 운영자 인지 경로 부재. pending-monitor 가 monitor 의 마지막 성공 시점 검사 또는 별도 self-health endpoint | code_review_2 L9 | medium (가시성 layer 의 가시성) |
-| BL-N5 | systemd | timer enable catalog 정비 — lint.timer / pending-monitor.timer / monitor.timer 모두 install.sh 가 start 만, explicit enable 없음. reboot 후 자동 start 미보장 | code_review_2 M1 | medium (reboot 후 silent break) |
-| BL-N6 | security | subprocess env scrub — monitor.py / ops-alert.py 가 journalctl subprocess 호출 시 TELEGRAM_MONITOR_BOT_TOKEN 전파. `env={"PATH": ...}` explicit scrub 권장 | code_review_2 M4 | low (single-user OCI 모델에선 race window 좁음) |
+| ~~BL-N1~~ | ~~scripts~~ | ~~Telegram message 4000 chars cap 초과 시 multi-message 분할~~ — **closed by ADR-0040 (2026-05-26)**: wikihub_monitor 폐기로 본 항목 자연 무효 (ops-alert fatal alert 는 페이로드 짧음). | ~~design_review_1 H1 + design_review_2 M5~~ | closed |
+| ~~BL-N2~~ | ~~retention~~ | ~~`$WIKIHUB_HOME/vault/<vid>/<subpath>/YYYYMMDD__HH_mm.md` 누적~~ — **closed by ADR-0040**: monitor 보고서 파일 자체가 사라짐. | ~~사용자 §2.3 권고~~ | closed |
+| ~~BL-N3~~ | ~~parse~~ | ~~lint.service 가 running 중일 때 monitor fire 시 진행 중 entries 처리~~ — **closed by ADR-0040**: monitor 자체 폐기. | ~~design_review_2 O5~~ | closed |
+| ~~BL-N4~~ | ~~observability~~ | ~~monitor self-health surface~~ — **closed by ADR-0040**: monitor + pending-monitor 둘 다 폐기로 본 항목 자연 무효. | ~~code_review_2 L9~~ | closed |
+| BL-N5 | systemd | timer enable catalog 정비 — `wh-lint.timer` / `wh-ingest@<vid>.timer` 가 install.sh 가 start 만, explicit enable 없음. reboot 후 자동 start 미보장. (2026-05-26 ADR-0040: pending-monitor.timer / monitor.timer 항목은 unit 자체 폐기로 자연 제거 — `wh-*` 만 잔존) | code_review_2 M1 | medium (reboot 후 silent break) |
+| BL-N6 | security | subprocess env scrub — ops-alert.py 가 journalctl subprocess 호출 시 TELEGRAM_MONITOR_BOT_TOKEN 전파. `env={"PATH": ...}` explicit scrub 권장. (2026-05-26 ADR-0040: monitor.py 부분 폐기 — ops-alert.py 만 잔존) | code_review_2 M4 | low (single-user OCI 모델에선 race window 좁음) |
 
 ---
 

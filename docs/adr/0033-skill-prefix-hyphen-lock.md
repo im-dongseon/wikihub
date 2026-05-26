@@ -86,3 +86,14 @@ Step 3 VM 실측에서 Hermes 가 `wh:` colon prefix 도 받는 것 확인 시:
   - **`_system/commands/*.md`** 5건의 §호출 line 의 prefix 갱신.
   - **`README.md`** L:179 의 표기 정합.
   - **재검토 트리거**: 어떤 LLM agent CLI 가 colon prefix 를 강제 (다른 syntax 거부) 도입 시 본 ADR 재검토.
+
+## Note (2026-05-26, ADR-0041 cross-reference) — systemd unit ↔ Hermes skill layer 분리
+
+[ADR-0041](0041-systemd-prefix-realign.md) 가 systemd unit prefix 를 `wikihub-*` 로 lock (mount@/ingest@/lint/graphify 4 unit 일관). 본 ADR-0033 의 Hermes skill prefix `wh-` 와 **다른 abstraction layer** — 두 layer 모두 독립적으로 prefix 정합:
+
+| Layer | Prefix | 정합 ADR |
+|---|---|---|
+| Hermes skill (LLM 호출 unit) | `wh-` | **ADR-0033 (본 ADR)** |
+| systemd unit (OS service) | `wikihub-` | ADR-0041 |
+
+호출 chain (systemd ExecStart 단일 라인) — `wikihub-lint.service` (systemd) → `hermes chat --skills wh-lint --quiet --yolo --query "/wh-lint"` (skill). 두 layer 의 직접 매핑은 ExecStart 한 줄로 표현 → prefix 통일 안 해도 명료. 본 ADR-0033 의 결정 변경 없음 — 단지 ADR-0041 이 systemd layer 의 prefix 결정을 별도 ADR 로 분리 명시.

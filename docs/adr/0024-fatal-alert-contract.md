@@ -208,3 +208,5 @@ Status 변경 없음.
 ## Note (2026-05-20, feature `alert_pipeline_overhaul` v0.1.5)
 
 본 ADR 의 contract (failure → alert 의무) 본문 그대로 유지. dispatch + trigger layer architecture 는 **ADR-0037 (alert pipeline architecture)** 가 confirm — Telegram channel 추가 (webhook 병행) + wikihub-pending-monitor systemd unit 신설 (age-based trigger). 본 ADR 의 §v0.2.x notify_via_hermes stub 도 ADR-0037 이 직접 Telegram bot API 호출로 대체 — stub 의도 일부 충족.
+
+2026-05-26 (ADR-0040 Supersedes ADR-0037): wikihub-pending-monitor + wikihub_monitor 폐기 결정. ops-alert.service 의 Telegram channel (webhook 병행) + `EnvironmentFile=-%h/.config/wikihub/env` 만 ADR-0040 으로 carry-over. 본 ADR contract (failure → alert 의무) 본문 그대로 유지.

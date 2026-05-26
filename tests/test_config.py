@@ -33,7 +33,7 @@ agent:
   binary: /usr/local/bin/hermes
   oneshot_args: ["-z"]
 operations:
-  lint_interval_hours: 24
+  lint_interval_hours: 3
 """.strip()
 
 
@@ -45,7 +45,7 @@ def test_load_ok(tmp_path: Path) -> None:
     assert cfg.vaults["gdrive"].sync_interval_sec == 600
     assert cfg.agent.binary == "/usr/local/bin/hermes"
     assert cfg.agent.skill_prefix == "wh:"
-    assert cfg.operations.lint_interval_hours == 24
+    assert cfg.operations.lint_interval_hours == 3
 
 
 def test_missing_file_fatal(tmp_path: Path) -> None:

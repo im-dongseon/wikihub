@@ -223,7 +223,20 @@ def _read_from_mount(
                     extraction_status="failed",
                     reason=f"oversize: {bytes_written}B > {max_file_size_mb}MB",
                 ), 0
-            er = extract(saved, mime)
+            _text_extensions = (".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini", ".conf", ".log", ".xml", ".html")
+            if source_relpath.lower().endswith(_text_extensions):
+                try:
+                    body_text = data.decode("utf-8")
+                    er = ExtractionResult(
+                        body_text=body_text,
+                        tool="passthrough",
+                        tool_version="n/a",
+                        extraction_status="success",
+                    )
+                except UnicodeDecodeError:
+                    er = extract(saved, mime)
+            else:
+                er = extract(saved, mime)
     except OSError as e:
         log.error("mount read OSError: vault=%s id=%s path=%s err=%s",
                   vault_id, source_id, saved, e)

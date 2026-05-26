@@ -43,12 +43,6 @@ operations:
   fatal_webhook_url: null             # 미설정 시 ops-alert.service no-op (journal 만)
   fatal_webhook_timeout_sec: 10
   instance_label: null                # R10 MED-3 + R16-L6: webhook payload 의 wikihub_instance 식별자. 미설정 시 socket.gethostname() 사용 — OCI internal hostname (예: inst-2x4-arm-ubuntu) 외부 SaaS (Slack/Discord) leak 회피 위해 운영자 명시 alias 권장. 권장 형식: "wikihub-prod-ap1" / "wikihub-staging".
-  # ADR-0037 §D2 (v0.1.5) — alert pipeline age-based monitor:
-  pending_alert_age_sec: 3600         # vault pending_ingest.json 이 N초 이상 stuck 시 alert (default 1h). wikihub-pending-monitor.timer (30분 주기) 가 검사 + last_failure.json 갱신 → ops-alert.service trigger. Telegram channel 은 ~/.config/wikihub/env 의 TELEGRAM_MONITOR_BOT_TOKEN + TELEGRAM_MONITOR_CHAT_ID 로 설정.
-  # wikihub_monitor (v0.1.8) — 12hr 윈도우 운영 보고서 (wikihub-monitor.timer, 매일 09:00 / 21:00 KST):
-  monitor_enabled: true               # false 시 wikihub-monitor.service 가 즉시 exit 0 (timer 자체는 enable 되지만 no-op). Telegram channel = ops-alert 와 동일 (TELEGRAM_MONITOR_BOT_TOKEN/CHAT_ID 재사용).
-  monitor_report_vault: null          # 보고서 파일 저장 대상 vault id. null = 첫 enabled vault. 명시 시 vaults[<id>] 와 일치해야 함.
-  monitor_report_subpath: project/wikihub/report   # vault mount 안의 sub-path. 최종 경로 = $WIKIHUB_HOME/vault/<vault_id>/<subpath>/YYYYMMDD__HH_mm.md (KST, 24시간제).
   # lint_operations_improvements (v0.1.8) — graphify timeout yaml expose (ADR-0036 §"후속 영향" + ADR-0039 alias frontmatter):
   graphify_timeout_sec: 900                        # graphify subprocess wrapper timeout (15분). v0.1.5~v0.1.7 era hard-coded 720s 에서 yaml expose 격상. LLM backend latency 누적 대비 default 900s. 운영자 backend 별 조정 가능.
   graphify_partial_failure_threshold: 0.5          # graphify graph 의 N/M ratio threshold (Pass 3 silent partial failure 가드). N=graph 노드 수, M=wiki .md 페이지 수. 0.5 미만 시 _lint/report.md + journal 에 partial failure 의심 warn. 운영자 별 조정 가능 (작은 wiki 또는 entity stub 누적 적은 초기엔 보수적 default 가 false positive 가능 — 0.3 등으로 낮춤 권장). ADR-0036 §재검토 트리거.

@@ -741,15 +741,45 @@ WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_ENDPOINT=http://127.0.0.1:11434
 WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_API_KEY=local-daemon
 WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_MODEL=gemma4:31b-cloud
 
-# === Alert channel — Telegram bot (ADR-0037 §D1) ===
+# === Alert channel — Telegram bot (ADR-0040 §D1, carry-over of ADR-0037 §D1) ===
 # wikihub-ops-alert.service 가 fatal alert 발화 시 Telegram bot 으로 메시지 발송.
 # bot 생성: @BotFather 에서 /newbot → token 받음 + chat_id 는 @userinfobot 활용.
+# 키 이름의 MONITOR prefix 는 historical (v0.1.8 wikihub_monitor 통일 잔재) — operator env
+# 무수정 보장 위해 그대로 유지. 의미는 fatal alert channel.
 #    TELEGRAM_MONITOR_BOT_TOKEN=123456:ABC...
 #    TELEGRAM_MONITOR_CHAT_ID=-100123456
 EOF
     fi
     chmod 600 "$wh_env_file"
+    _migrate_graphifyignore
     ok "Step 5 instance dir + ~/.config/wikihub/env 확인 ($WIKIHUB_HOME)"
+}
+
+# wiki/.graphifyignore idempotent migration (v0.1.10, graphify_path_absolute follow-up).
+#
+# 운영자 wiki/.graphifyignore 가 update 시 자동 갱신 안 됨 결함 fix —
+# `cp -n` (template 배치) 는 fresh install 만 효과, 기존 instance 의 file 은 무변경.
+# 본 fn 가 line-level idempotent append 로 갱신 부담 회피 + defense-in-depth 정합 회복.
+#
+# 책임 경계 — wiki/ 디렉토리 자체 ensure 는 /wh-setup Step 1 책임. 본 fn 는 file 존재
+# 시만 작동 (fresh install 시 file 부재 → no-op, /wh-setup 가 신본 template `cp -n`).
+_migrate_graphifyignore() {
+    local target="$WIKIHUB_HOME/wiki/.graphifyignore"
+    [[ -f "$target" ]] || return 0
+    # idempotent — `graphify-out/` (또는 `graphify-out`) line 부재 시만 append.
+    if ! grep -qE '^graphify-out/?$' "$target"; then
+        cat >> "$target" <<'EOF'
+
+# Defense-in-depth (v0.1.10, graphify_path_absolute migration) — install.sh _migrate_graphifyignore
+# 가 자동 append. graphify CLI 의 잘못된 호출 (`--out wiki` 또는 `--out .` while CWD=wiki/) 시
+# 자기 출력을 다음 cycle input 으로 재scan 회귀 차단. 정상 graphify (scripts/wikihub_graphify.sh)
+# 는 `--out "$WIKIHUB_HOME"` 명시 → wiki/graphify-out/ 미생성. 본 ignore 는 legacy 잔존
+# 또는 manual 호출 시 안전망. 운영자가 본 line 직접 편집 시 본 fn 의 idempotent 검사 가
+# `^graphify-out/?$` regex 매칭 — 다른 형태 (`/graphify-out`, `**/graphify-out/`) 는 보존.
+graphify-out/
+EOF
+        info "wiki/.graphifyignore migration: graphify-out/ append (graphify_path_absolute layer 3 회복)"
+    fi
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1251,14 +1281,14 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
        <agent_invocation> "/wh:setup --enable"
 
 [운영 비용 환기 — graphify Pass 3 (ADR-0036)]
-  wh-lint timer (default 3h, v0.1.5) 가 graphify chain 호출. wiki page 별 Claude/OpenAI subagent 호출
+  wikihub-lint timer (default 3h, v0.1.5) 가 graphify chain 호출. wiki page 별 Claude/OpenAI subagent 호출
   발생 — 운영자 API 비용 모델 인지 필요. 호출 빈도 통제: operations.lint_interval_hours 조정.
 
 [Hermes config.yaml 권장 (wikihub 정본 영역 외 — 운영자 책임)]
   ~/.hermes/config.yaml 의 다음 필드 권장 설정:
     delegation.model: minimax-m2.5         # wh-lint Step 6 등 subagent — non-reasoning 안정성 + 한자→한글 정합
   wh-ingest·wh-lint 메인 모델은 wikihub agent.models 가 systemd \`--model\` 으로 lock — hermes
-  model.default 와 무관. Telegram 대화·미명시 skill (wh-query·wh-graphify·wh-setup) 의
+  model.default 와 무관. Telegram 대화·미명시 skill (wh-query·wh-setup) 의
   model.default 는 운영자 일반 선호로 결정.
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
@@ -1273,13 +1303,12 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
   특정 버전 pin: install.sh --version v0.1.0 (rollback 포함).
 
 [운영 진단 명령 — R10 HIGH-2 + R16-M6·L3]
-  vault sync 로그:    journalctl --user -t wikihub-vault-<vault_id> --since '24h ago'
+  vault sync 로그:    journalctl --user -t wikihub-ingest-<vault_id> --since '24h ago'
   lint 로그:          journalctl --user -t wikihub-lint --since '24h ago'
   fatal alert 로그:   journalctl --user -t wikihub-ops-alert --since '24h ago'
                        (alert 발송 실패는 "webhook 발송 실패" warn 로 기록)
   mount 로그:         journalctl --user -t wikihub-mount-<vault_id> --since '24h ago'
-  timer 상태:         systemctl --user list-timers '*wikihub*' 'lint*' '*-ingest*'
-  pending monitor:    systemctl --user status wikihub-pending-monitor.timer  /  journalctl --user -t wikihub-pending-monitor
+  timer 상태:         systemctl --user list-timers 'wikihub-*'
   alert 발화 (test):  systemctl --user start wikihub-ops-alert.service  (Telegram bot / webhook 검증)
   install 로그:       cat $WIKIHUB_HOME/install.log
   last_failure 요약:  for s in $WIKIHUB_HOME/_state/*/last_failure.json; do
@@ -1598,33 +1627,43 @@ _systemd_stop_before_update() {
     loaded_vaults="$(systemctl --user list-units --all --no-legend 'wikihub-mount@*.service' 2>/dev/null \
         | awk '{print $1}' | sed 's/wikihub-mount@\(.*\)\.service/\1/' | grep -v '^$' || true)"
     all_vaults="$(printf '%s\n%s\n' "$desired_vaults" "$loaded_vaults" | sort -u | grep -v '^$' || true)"
-    # timer 정지 — 새 fire 차단
+    # upgrade migration (v0.1.9 legacy — pre-rename): stop pre-ADR-0041 unit names.
+    #   - pre-2ed01f8 era: wikihub-vault@*, wikihub-lint.* (no-prefix lint, vault@ template).
+    #   - 2ed01f8 ~ ADR-0041 canary era: wh-ingest@*, wh-lint.* (skill-prefixed).
+    # 후속 daemon-reload + render 로 신규 이름 unit (wikihub-ingest@*, wikihub-lint.*) 만 active 유지.
     for v in $all_vaults; do
-        systemctl --user stop "wikihub-vault@${v}.timer" 2>/dev/null || true
+        systemctl --user stop "wikihub-vault@${v}.timer" "wh-ingest@${v}.timer" 2>/dev/null || true
+        timeout 5 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null || true
+    done
+    systemctl --user stop wh-lint.timer wh-lint.service 2>/dev/null || true
+    # timer 정지 — 새 fire 차단 (operational unit names: wikihub-ingest@, wikihub-lint)
+    for v in $all_vaults; do
+        systemctl --user stop "wikihub-ingest@${v}.timer" 2>/dev/null || true
     done
     systemctl --user stop wikihub-lint.timer 2>/dev/null || true
-    systemctl --user stop wikihub-pending-monitor.timer 2>/dev/null || true
-    systemctl --user stop wikihub-monitor.timer 2>/dev/null || true
     systemctl --user stop wikihub-graphify.service 2>/dev/null || true
-    systemctl --user stop wikihub-pending-monitor.service 2>/dev/null || true
-    # vault@.service mid-sync 대기 — 15min grace (TimeoutStartSec=15min 정합)
+    # ingest service mid-sync 대기 — 15min grace (TimeoutStartSec=15min 정합)
     # MED-N4: progress info — 운영자 visual 안심
     for v in $all_vaults; do
-        info "  stopping vault@${v} (max 15min grace for mid-sync)"
-        timeout 900 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null \
-            || warn "vault@${v} stop timeout — 강제 abort"
+        info "  stopping wikihub-ingest@${v} (max 15min grace for mid-sync)"
+        timeout 900 systemctl --user stop "wh-ingest@${v}.service" "wikihub-ingest@${v}.service" 2>/dev/null \
+            || warn "wikihub-ingest@${v} stop timeout — 강제 abort"
     done
     systemctl --user stop wikihub-lint.service 2>/dev/null || true
     # mount@ 마지막
     for v in $all_vaults; do
         systemctl --user stop "wikihub-mount@${v}.service" 2>/dev/null || true
     done
-    # R2-CRIT-2: StartLimitBurst 카운터 초기화
+    # upgrade migration (legacy disable): pre-ADR-0041 timer names.
+    systemctl --user disable 'wikihub-vault@*.timer' 'wh-ingest@*.timer' wh-lint.timer 2>/dev/null || true
+    # upgrade migration (post-v0.1.9, monitor_services_remove): stop+disable legacy monitor units
+    systemctl --user stop wikihub-pending-monitor.timer wikihub-pending-monitor.service \
+        wikihub-monitor.timer wikihub-monitor.service 2>/dev/null || true
+    systemctl --user disable wikihub-pending-monitor.timer wikihub-monitor.timer 2>/dev/null || true
+    # R2-CRIT-2: StartLimitBurst 카운터 초기화 (operational names)
     systemctl --user reset-failed 'wikihub-mount@*.service' \
-        'wikihub-vault@*.service' 'wikihub-vault@*.timer' \
+        'wikihub-ingest@*.service' 'wikihub-ingest@*.timer' \
         'wikihub-lint.service' 'wikihub-lint.timer' \
-        'wikihub-pending-monitor.service' 'wikihub-pending-monitor.timer' \
-        'wikihub-monitor.service' 'wikihub-monitor.timer' \
         'wikihub-graphify.service' 2>/dev/null || true
     # CRIT-N2: stop 직후 daemon-reload — Step 8 render 이전 race window 차단.
     systemctl --user daemon-reload 2>/dev/null || true
@@ -1653,14 +1692,10 @@ _systemd_start_after_update() {
         _wait_mount_ready "$v" 120 || { err "mount@${v} not ready in 120s"; return 2; }
     done
     for v in $desired_vaults; do
-        systemctl --user start "wikihub-vault@${v}.timer" 2>/dev/null \
-            || warn "vault@${v}.timer start 실패"
+        systemctl --user start "wikihub-ingest@${v}.timer" 2>/dev/null \
+            || warn "wikihub-ingest@${v}.timer start 실패"
     done
-    systemctl --user start wikihub-lint.timer 2>/dev/null || warn "lint.timer start 실패"
-    # ADR-0037 §D2 (v0.1.5) — pending_ingest age monitor
-    systemctl --user start wikihub-pending-monitor.timer 2>/dev/null || warn "pending-monitor.timer start 실패"
-    # wikihub_monitor (v0.1.8) — 12hr 윈도우 운영 보고서
-    systemctl --user start wikihub-monitor.timer 2>/dev/null || warn "monitor.timer start 실패"
+    systemctl --user start wikihub-lint.timer 2>/dev/null || warn "wikihub-lint.timer start 실패"
     ok "systemd start sequence 완료"
 }
 
@@ -1706,7 +1741,7 @@ _step8_systemd_render() {
     # 이 무력화되는 결함 closure. `try-restart` 는 inactive unit 에 no-op — update path 의
     # stop/start 순서와 충돌 없음.
     systemctl --user try-restart 'wikihub-mount@*.service' \
-        'wikihub-vault@*.timer' wikihub-lint.timer wikihub-pending-monitor.timer wikihub-monitor.timer 2>/dev/null || true
+        'wikihub-ingest@*.timer' wikihub-lint.timer 2>/dev/null || true
     # NOTE: wikihub-graphify.service 는 try-restart 대상 외 — Type=oneshot + RemainAfterExit=no 라
     # active state transient → try-restart no-op. lint Step 9 가 변경 시 systemctl start trigger
     # (fire-and-forget), update 시 자동 재시작 불요 (다음 lint cycle 이 자연 재호출). (code_review_2 C2)
@@ -1789,7 +1824,7 @@ _step11_banner() {
             echo "  ${C_WARN}⚠ wikihub.yaml 부재 — /wh:setup 호출 전에는 systemd timer enable 금지 (ADR-0031).${C_RST}"
         fi
     fi
-    echo "  status: systemctl --user list-timers wikihub-*"
+    echo "  status: systemctl --user list-timers wikihub-* 'wh-*'"
     echo "================================="
 }
 

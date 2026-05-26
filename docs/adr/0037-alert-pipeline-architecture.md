@@ -1,10 +1,10 @@
 # ADR-0037: Alert pipeline architecture — multi-channel dispatch + periodic monitor
 
-- **Status**: Accepted
+- **Status**: Superseded
 - **Date**: 2026-05-20
 - **Feature**: features/archive/20260520_alert_pipeline_overhaul
 - **Supersedes**: 없음 (ADR-0024 complement — fatal alert contract 는 그대로, dispatch architecture 만 확장)
-- **Superseded by**: 없음
+- **Superseded by**: ADR-0040 (2026-05-26) — §D2 (wikihub-pending-monitor systemd unit) + 2026-05-25 wikihub_monitor follow-up 폐기. §D1 (Telegram channel for ops-alert) + §D4 (env file pattern) + §D5 (ADR-0024 cross-reference) 의 결정 본의는 ADR-0040 으로 carry-over (ops-alert 단독 운영).
 
 ## Context
 

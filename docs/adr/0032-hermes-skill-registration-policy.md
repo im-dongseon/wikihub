@@ -245,7 +245,7 @@ wh-lint Step 6 등 subagent 호출 시 적용되는 `delegation.model` 권장값
 
 ### 발견
 
-본 §Note 의 직전 §Note (v0.1.6 `v016_operational_default_align`) 에서 yaml.example default 를 운영 정본에 align 했으나, **운영자의 wikihub.yaml 은 .example 자동 sync 안 됨** — ADR-0031 §Decision A 의 "install.sh 가 yaml 미관여" 정책 정합. 결과: v0.1.5+ 신설 field (`agent.models`, `agent.timeout_sec`, `operations.pending_alert_age_sec` 등) 운영 yaml 부재 → render 가 default 600·flag 미주입 fallback → 운영자 manual systemd unit edit 4건 overwrite 사건 (2026-05-22 OCI).
+본 §Note 의 직전 §Note (v0.1.6 `v016_operational_default_align`) 에서 yaml.example default 를 운영 정본에 align 했으나, **운영자의 wikihub.yaml 은 .example 자동 sync 안 됨** — ADR-0031 §Decision A 의 "install.sh 가 yaml 미관여" 정책 정합. 결과: v0.1.5+ 신설 field (`agent.models`, `agent.timeout_sec`, `operations.graphify_timeout_sec` 등) 운영 yaml 부재 → render 가 default 600·flag 미주입 fallback → 운영자 manual systemd unit edit 4건 overwrite 사건 (2026-05-22 OCI).
 
 기존 `_migrate_agent_schema` 함수 (`install.sh:751`) 는 ADR-0033 (skill prefix `wh:` → `wh-`) + ADR-0032 §Note 2026-05-19 (oneshot_args `--yolo` 누락) 만 처리. 신설 field 자동 추가 미처리.
 
@@ -261,12 +261,13 @@ ADR-0031 §Note (v0.1.7) 의 schema mutation 책임 정합으로 본 함수의 �
 #### Group B — 자동 추가 (안전 default, **부재 시만**) — v0.1.7 신설
 - `agent.timeout_sec: 1200`
 - `agent.models: {wh-lint: deepseek-v4-flash, wh-ingest: deepseek-v4-pro}`
-- `operations.pending_alert_age_sec: 3600`
 - `operations.lint_contradiction_check: true`
 - `operations.graphify_enabled: true`
 - `operations.graphify_backend: ""`
 - `operations.graphify_min_version: "0.8.0"`
 - `operations.graphify_max_version: "0.99.99"`
+
+> 2026-05-26 (ADR-0040): `operations.pending_alert_age_sec: 3600` 가 본 catalog 에 있었으나 ADR-0040 으로 yaml field 폐기 → Group B 자동 추가 catalog 에서 자연 제거 (`wikihub.yaml.example` single source of truth 정합).
 
 #### Group C — 자동 삭제 (ADR-0035 폐기 field cleanup) — v0.1.7 신설
 - `vaults[].options.bootstrap_allowed`
@@ -296,7 +297,7 @@ ADR-0031 §Note v0.1.7 와 정합: **mutation 의 두 종류 분리**
 - ADR-0031 §Note (2026-05-22 v0.1.7) — install.sh 의 yaml mutation 책임 boundary (value vs schema)
 - ADR-0035 — 폐기 field catalog (Group C cleanup 의 자료)
 - ADR-0036 — graphify 관련 신설 field (Group B 의 `graphify_*` 자료)
-- ADR-0037 — `pending_alert_age_sec` (Group B 자료)
+- ADR-0040 (Supersedes ADR-0037) — `pending_alert_age_sec` 폐기 → Group B catalog 에서 자연 제거
 - 사건 trail: 2026-05-22 OCI 운영 사건 — 운영자 manual systemd unit edit 4건 손실 → 운영 yaml schema drift 진단 → 본 §Note 의 implementation trigger
 
 본 변경의 분석 정본: features/archive/20260522_yaml_schema_drift_migration/ (예정)
