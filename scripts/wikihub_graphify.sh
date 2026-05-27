@@ -147,4 +147,8 @@ if [[ "$M" -gt 0 ]]; then
 fi
 
 echo "graph rebuilt: $N nodes, $M docs" >&2
+
+# Step 5. cache cleanup — 입력 경로 아래 graphify-out/cache side effect 제거 (lint→graphify 무한 루프 방지)
+rm -rf "$WIKIHUB_HOME/wiki/graphify-out"
+
 exit 0
