@@ -25,23 +25,22 @@ _write_graphify_failure() {
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  local failed_count=1
-  local first_failed_at="$now"
-  if [[ -f "$GRAPHIFY_STATE_DIR/last_failure.json" ]]; then
-    failed_count=$(python3 -c "
+  (
+    flock -w 5 200
+    failed_count=1
+    first_failed_at="$now"
+    if [[ -f "$GRAPHIFY_STATE_DIR/last_failure.json" ]]; then
+      failed_count=$(python3 -c "
 import json,sys
 d=json.load(open(sys.argv[1]))
 print(d.get(\"failed_count\",0)+1)
 " "$GRAPHIFY_STATE_DIR/last_failure.json" 2>/dev/null || echo 1)
-    first_failed_at=$(python3 -c "
+      first_failed_at=$(python3 -c "
 import json,sys
 d=json.load(open(sys.argv[1]))
 print(d.get(\"first_failed_at\", sys.argv[2]))
 " "$GRAPHIFY_STATE_DIR/last_failure.json" "$now" 2>/dev/null || echo "$now")
-  fi
-
-  (
-    flock -x 200
+    fi
     cat > "$GRAPHIFY_STATE_DIR/last_failure.json" <<EOF
 {
   "vault_id": "_graphify",
