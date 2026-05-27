@@ -364,4 +364,14 @@ features/[YYYYMMDD]_[feat_id]/
 - `feat_id`: 소문자 + 언더스코어, 기능을 간결히 표현 (예: `v030_initial_architecture`)
 
 ---
+
+## 9. GitHub 이슈 작성 컨벤션 (에이전트 공통)
+
+에이전트가 백로그·코드 리뷰 발견·운영 결함 등을 GitHub 이슈로 등록할 때의 제목·라벨·본문 형식 정본은 [docs/issue-authoring-guide.md](docs/issue-authoring-guide.md) 다. 다른 에이전트(다른 Claude 세션, Hermes 등)도 동일 형식을 따른다.
+
+- **제목**: `[<AGENT-ID>] <한글 요약>` — 내부 코드(`R15-M4` 등)·버전 문구("v0.2.x deferred" 등) 금지. `<AGENT-ID>` 는 작성 에이전트 식별 태그(이 Claude = `CLAUDE-A`).
+- **라벨**: `agent` (항상) + `priority: high|medium|low` (중요도 색 gradient).
+- **본문**: 8 섹션 템플릿(메타 / 배경 / 현행·문제 / 영향·리스크 / 제안 / 영향 범위 / DoD / 참조). 추측 금지 — 소스·코드 앵커 read 후 작성.
+
+---
 *일상적인 지식 관리(KMS) 운영 시에는 `_system/wiki-schema.md` (Operator Guide)로 전환하십시오.*
