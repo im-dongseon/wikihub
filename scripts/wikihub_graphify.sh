@@ -26,7 +26,7 @@ _write_graphify_failure() {
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   (
-    flock -w 5 200
+    flock -w 5 200 || exit 1
     failed_count=1
     first_failed_at="$now"
     if [[ -f "$GRAPHIFY_STATE_DIR/last_failure.json" ]]; then
