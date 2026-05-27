@@ -16,9 +16,54 @@ set -euo pipefail
 : "${WIKIHUB_HOME:?WIKIHUB_HOME unset}"
 : "${WIKIHUB_YAML:?WIKIHUB_YAML unset}"
 
+GRAPHIFY_STATE_DIR="${WIKIHUB_HOME}/_state/_graphify"
+
+_write_graphify_failure() {
+  local reason="$1"
+  local remediation="${2:-}"
+  mkdir -p "$GRAPHIFY_STATE_DIR"
+  local now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  (
+    flock -w 5 200 || exit 1
+    failed_count=1
+    first_failed_at="$now"
+    if [[ -f "$GRAPHIFY_STATE_DIR/last_failure.json" ]]; then
+      failed_count=$(python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get(\"failed_count\",0)+1)
+" "$GRAPHIFY_STATE_DIR/last_failure.json" 2>/dev/null || echo 1)
+      first_failed_at=$(python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get(\"first_failed_at\", sys.argv[2]))
+" "$GRAPHIFY_STATE_DIR/last_failure.json" "$now" 2>/dev/null || echo "$now")
+    fi
+    cat > "$GRAPHIFY_STATE_DIR/last_failure.json" <<EOF
+{
+  "vault_id": "_graphify",
+  "severity": "fatal",
+  "scope": "graphify",
+  "reason": "${reason}",
+  "remediation": "${remediation}",
+  "exit_code": 2,
+  "source_id": null,
+  "first_failed_at": "${first_failed_at}",
+  "last_failed_at": "${now}",
+  "failed_count": ${failed_count},
+  "alerted_at": null,
+  "alerted_failed_count": null
+}
+EOF
+  ) 200>"$GRAPHIFY_STATE_DIR/.last_failure.lock"
+}
+
 # Step 1. graphify CLI 존재 확인
 if ! command -v graphify >/dev/null; then
     echo "ERROR: graphify CLI 미설치 — install.sh 재실행 또는 'pip install graphifyy>=0.8.0,<1.0.0'" >&2
+    _write_graphify_failure "graphify CLI 미설치" "pip install graphify 또는 PATH 확인"
     exit 2
 fi
 
@@ -30,6 +75,7 @@ timeout_sec="$(yq '.operations.graphify_timeout_sec // 900' "$WIKIHUB_YAML")"
 # profile 명 정규식 검증 (silent fail 회피, ADR-0038 §Decision 2)
 if [[ ! "$profile" =~ ^[a-z][a-z0-9_]*$ ]]; then
     echo "ERROR: graphify_profile '$profile' invalid — must match ^[a-z][a-z0-9_]*\$" >&2
+    _write_graphify_failure "graphify_profile 형식 불일치: ${profile}" "profile 이름은 ^[a-z][a-z0-9_]*$ 패턴이어야 함"
     exit 2
 fi
 
@@ -44,6 +90,7 @@ model="${!model_var:-}"
 
 if [[ -z "$model" ]]; then
     echo "ERROR: $model_var unset — ~/.config/wikihub/env 의 profile bundle 확인" >&2
+    _write_graphify_failure "환경변수 ${model_var} 미설정" "wikihub.yaml의 graphify.<profile>.model 확인"
     exit 2
 fi
 
@@ -117,6 +164,7 @@ case "$backend" in
         ;;
     *)
         echo "ERROR: unknown graphify_backend '$backend' (expected: gemini|kimi|claude|openai|deepseek|ollama)" >&2
+        _write_graphify_failure "알 수 없는 graphify_backend: ${backend}" "gemini|kimi|claude|openai|deepseek|ollama 중 하나여야 함"
         exit 2
         ;;
 esac
@@ -150,5 +198,6 @@ echo "graph rebuilt: $N nodes, $M docs" >&2
 
 # Step 5. cache cleanup — 입력 경로 아래 graphify-out/cache side effect 제거 (lint→graphify 무한 루프 방지)
 rm -rf "$WIKIHUB_HOME/wiki/graphify-out"
+rm -f "$GRAPHIFY_STATE_DIR/last_failure.json"
 
 exit 0
