@@ -40,7 +40,9 @@ print(d.get(\"first_failed_at\", sys.argv[2]))
 " "$GRAPHIFY_STATE_DIR/last_failure.json" "$now" 2>/dev/null || echo "$now")
   fi
 
-  cat > "$GRAPHIFY_STATE_DIR/last_failure.json" <<EOF
+  (
+    flock -x 200
+    cat > "$GRAPHIFY_STATE_DIR/last_failure.json" <<EOF
 {
   "vault_id": "_graphify",
   "severity": "fatal",
@@ -56,12 +58,14 @@ print(d.get(\"first_failed_at\", sys.argv[2]))
   "alerted_failed_count": null
 }
 EOF
+  ) 200>"$GRAPHIFY_STATE_DIR/.last_failure.lock"
 }
 
 # Step 1. graphify CLI 존재 확인
 if ! command -v graphify >/dev/null; then
     echo "ERROR: graphify CLI 미설치 — install.sh 재실행 또는 'pip install graphifyy>=0.8.0,<1.0.0'" >&2
-    _write_graphify_failure "graphify CLI 미설치" "pip install graphify 또는 PATH 확인" && exit 2
+    _write_graphify_failure "graphify CLI 미설치" "pip install graphify 또는 PATH 확인"
+    exit 2
 fi
 
 # Step 2. yaml read + profile resolve (ADR-0038 namespace 격리)
@@ -72,7 +76,8 @@ timeout_sec="$(yq '.operations.graphify_timeout_sec // 900' "$WIKIHUB_YAML")"
 # profile 명 정규식 검증 (silent fail 회피, ADR-0038 §Decision 2)
 if [[ ! "$profile" =~ ^[a-z][a-z0-9_]*$ ]]; then
     echo "ERROR: graphify_profile '$profile' invalid — must match ^[a-z][a-z0-9_]*\$" >&2
-    _write_graphify_failure "graphify_profile 형식 불일치: ${profile}" "profile 이름은 ^[a-z][a-z0-9_]*$ 패턴이어야 함" && exit 2
+    _write_graphify_failure "graphify_profile 형식 불일치: ${profile}" "profile 이름은 ^[a-z][a-z0-9_]*$ 패턴이어야 함"
+    exit 2
 fi
 
 # env profile bundle resolve (set -u 안전)
@@ -86,7 +91,8 @@ model="${!model_var:-}"
 
 if [[ -z "$model" ]]; then
     echo "ERROR: $model_var unset — ~/.config/wikihub/env 의 profile bundle 확인" >&2
-    _write_graphify_failure "환경변수 ${model_var} 미설정" "wikihub.yaml의 graphify.<profile>.model 확인" && exit 2
+    _write_graphify_failure "환경변수 ${model_var} 미설정" "wikihub.yaml의 graphify.<profile>.model 확인"
+    exit 2
 fi
 
 # ollama endpoint pattern → env name 분기 (loopback vs OpenAI-compat proxy)
@@ -159,7 +165,8 @@ case "$backend" in
         ;;
     *)
         echo "ERROR: unknown graphify_backend '$backend' (expected: gemini|kimi|claude|openai|deepseek|ollama)" >&2
-        _write_graphify_failure "알 수 없는 graphify_backend: ${backend}" "gemini|kimi|claude|openai|deepseek|ollama 중 하나여야 함" && exit 2
+        _write_graphify_failure "알 수 없는 graphify_backend: ${backend}" "gemini|kimi|claude|openai|deepseek|ollama 중 하나여야 함"
+        exit 2
         ;;
 esac
 
