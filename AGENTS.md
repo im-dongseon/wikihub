@@ -5,6 +5,9 @@
 > WikiHub는 v0.2.6에서 안정화된 `WikiCurate`(macOS 로컬 단일 vault)의 server-first 후속입니다.
 > 운영 타깃: **OCI ARM Ubuntu + systemd + Hermes(Telegram) + 외부 vault(Google Drive API, NAS 등)**
 > 메인테이너의 개발 환경(macOS)과 배포 환경(Linux/OCI)을 분리해 관리합니다.
+>
+> 각 에이전트별 특화 지침(도구 선택, 실행 방법 등)은 별도 파일로 분리되어 있습니다.
+> - **Claude Code**: [CLAUDE.md](CLAUDE.md)
 
 ## 1. 시스템 아키텍처 원칙 (Separation of Concerns)
 
@@ -86,7 +89,7 @@ flowchart TD
 
 ### Step 2: Analysis & Design (분석및설계)
 
-**도구**: Claude Code CLI / Superpowers (선택)
+**도구**: 에이전트별 구현 도구 (CLAUDE.md 참조)
 **산출물**:
 - `features/[YYYYMMDD]_[feat_id]/analysis_and_design.md` — 분석과 설계를 통합 작성
 - `features/[YYYYMMDD]_[feat_id]/design_review_N.md` — 설계 검토 피드백 (선택, 리뷰어별)
@@ -115,7 +118,7 @@ flowchart TD
 
 ### Step 3: Implementation (구현)
 
-**도구**: Claude Code CLI
+**도구**: 에이전트별 구현 도구 (CLAUDE.md 참조)
 **진입 조건**: analysis_and_design.md에 `approved:` 마커가 있는 상태
 **활동**: 설계서를 기준으로 `_system/commands/`의 개별 명령어, `_system/wiki-schema.md`, 또는 인프라 스크립트(`scripts/`, `install.sh`)를 직접 수정하거나 신규 작성합니다. **feature 작업은 항상 `feature/<feat_id>` 브랜치에서 진행** — 분기 base 는 타겟 버전 브랜치(`origin/v0.X.Y`). main 직접 분기·commit 금지.
 **산출물**: `_system/commands/*.md`, `_system/wiki-schema.md`, `scripts/*`, `install.sh` 등
@@ -229,15 +232,15 @@ feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 
 Step 2(설계 검토 — 선택)와 Step 4(구현 검토 — 조건부)에 동일하게 적용한다.
 
 | 단계 | 파일명 | 리뷰어 예시 |
-|---|---|---|
-| Step 2 Design Review (선택) | `design_review_N.md` | `design_review_1.md` (Claude), `design_review_2.md` (Gemini) … |
-| Step 4 Code Review (조건부) | `code_review_N.md` | `code_review_1.md` (Claude), `code_review_2.md` (Gemini) … |
+||---|---|---|
+|| Step 2 Design Review (선택) | `design_review_N.md` |
+|| Step 4 Code Review (조건부) | `code_review_N.md` |
 
-**리뷰어 구성**: 2개 이상 권장 (독립성 + 다양성이 핵심)
+**리뷰어 구성**: 2개 이상 권장 (독립성 + 다양성이 핵심). 구체적인 리뷰어 선택과 실행 방법은 각 에이전트별 설정 파일을 참조하세요.
 
 | 리뷰어 | 실행 방법 |
 |---|---|
-| Claude (컨텍스트 초기화) | 새 터미널 탭에서 `claude` 실행 |
+| Claude | `claude` CLI 또는 Agent tool |
 | Gemini | `gemini` CLI 또는 웹에서 별도 세션 |
 | Codex | `codex` CLI 또는 웹에서 별도 세션 |
 | 서브에이전트 | `"서브에이전트로 리뷰해서 code_review_N.md에 기록해줘"` |
@@ -263,7 +266,7 @@ git diff $(git merge-base HEAD main) > review_context.md
 ## 5. 멀티에이전트 접근법
 
 - **수동 오케스트레이션**: [cmux](https://cmux.com/ko)로 패널 분리 → 패널별로 다른 에이전트 실행
-- **자동 오케스트레이션**: Claude Agent tool — `"두 에이전트가 병렬로 A는 성능, B는 보안 리뷰해줘"`
+- **자동 오케스트레이션**: 에이전트 도구 — `"두 에이전트가 병렬로 A는 성능, B는 보안 리뷰해줘"`
 
 ---
 
@@ -271,7 +274,7 @@ git diff $(git merge-base HEAD main) > review_context.md
 
 > 아래 조건에서 **필수** 적용:
 > - 개발자·리뷰어를 동시에 별도 패널로 운용할 때
-> - 서브에이전트 리뷰를 자동화할 때 (Claude Agent tool 활용 시)
+> - 서브에이전트 리뷰를 자동화할 때 (에이전트 도구 활용 시)
 
 **feature 브랜치 분기 base 는 타겟 버전 브랜치(`origin/v0.X.Y`)** — main 직접 분기 금지.
 
@@ -369,7 +372,7 @@ features/[YYYYMMDD]_[feat_id]/
 
 에이전트가 백로그·코드 리뷰 발견·운영 결함 등을 GitHub 이슈로 등록할 때의 제목·라벨·본문 형식 정본은 [docs/issue-authoring-guide.md](docs/issue-authoring-guide.md) 다. 다른 에이전트(다른 Claude 세션, Hermes 등)도 동일 형식을 따른다.
 
-- **제목**: `[<AGENT-ID>] <한글 요약>` — 내부 코드(`R15-M4` 등)·버전 문구("v0.2.x deferred" 등) 금지. `<AGENT-ID>` 는 작성 에이전트 식별 태그(이 Claude = `CLAUDE-A`).
+- **제목**: `[<AGENT-ID>] <한글 요약>` — 내부 코드(`R15-M4` 등)·버전 문구("v0.2.x deferred" 등) 금지. `<AGENT-ID>` 는 작성 에이전트 식별 태그.
 - **라벨**: `agent` (항상) + `priority: high|medium|low` (중요도 색 gradient).
 - **본문**: 8 섹션 템플릿(메타 / 배경 / 현행·문제 / 영향·리스크 / 제안 / 영향 범위 / DoD / 참조). 추측 금지 — 소스·코드 앵커 read 후 작성.
 
