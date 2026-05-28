@@ -60,6 +60,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 2. **Derived 필드 patching** (ADR-0031 §Decision B catalog, ADR-0035 — credentials_path/gws_min_version 폐기):
    - `instance.root` → `$WIKIHUB_HOME` env
    - `vaults[*].local_path` → `<instance.root>/vault/<vault.id>`
+   - **비교 시 `os.path.expanduser()` 적용 필수** — `~/wikihub` vs `/home/user/wikihub` 등 tilde 확장 표현 차이로 인한 false drift 방지
 3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os_replace, round-trip only).
 4. 보고:
    ```
@@ -271,6 +272,7 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 | 실패 시점 | 동작 |
 |---|---|
 | wikihub.yaml 스키마 위반 | stdout 보고 + exit 1. unit 동기화 안 함 |
+| schema version mismatch (operational v ≠ example v) | stdout 보고 + exit 2 + ops-alert 트리거. unit 동기화 안 함 (ADR-0031 §Decision E) |
 | rclone.conf 무효 (일부 vault) | 해당 vault의 unit은 생성하되 enable 권장에서 제외. 보고 + exit 0 |
 | rclone.conf 무효 (모든 vault) | 보고 + exit 1 (운영 시작 불가 상태) |
 | systemd unit 파일 쓰기 실패 | exit 2 (권한 의심) |
