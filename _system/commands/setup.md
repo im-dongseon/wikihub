@@ -2,6 +2,8 @@
 
 `wikihub.yaml`(운영 정본) **생성 + 검증**, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** 호출.
 
+> **보안**: `wikihub.yaml` 은 `agent.binary` (임의 코드 실행 경로), `fatal_webhook_url` (자격증명), `rclone_remote_name` (OAuth token 참조) 등 민감 정보 포함. 설치 시 [`install.sh: `_step5_instance_dirs` 가 `chmod 600` 자동 enforce](https://github.com/im-dongseon/wikihub/issues/17) — `.credentials` 와 동일한 trust 모델. 운영자는 수동 편집 후 권한 유지에 유의.
+
 ## 호출
 
 ```

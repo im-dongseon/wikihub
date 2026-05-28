@@ -742,6 +742,10 @@ _step5_instance_dirs() {
     local wh_env_file="$wh_config_dir/env"
     mkdir -p "$wh_config_dir"
     chmod 700 "$wh_config_dir"
+    # CR2-MED-6 (issue #17): wikihub.yaml 은 credential 동등 trust 파일 — permission 600 enforce
+    if [[ -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
+        chmod 600 "$WIKIHUB_HOME/wikihub.yaml"
+    fi
     if [[ ! -f "$wh_env_file" ]]; then
         cat > "$wh_env_file" <<'EOF'
 # wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036 + ADR-0038).
@@ -1782,6 +1786,15 @@ _step8_wh_setup_skill_meta() {
         "$yaml" 2>/dev/null || echo 600)"
     if [[ -z "$agent_binary" || ! -x "$agent_binary" ]]; then
         info "agent.binary ($agent_binary) 미설치 — /wh-setup skill 메타 갱신 skip"
+        return 0
+    fi
+    # CR2-MED-6 (issue #17): agent.binary allowlist — known compatible agent paths 만 허용
+    local _ab_allowed=0
+    case "$agent_binary" in
+        */hermes|*/claude|*/gemini|*/opencode) _ab_allowed=1 ;;
+    esac
+    if [[ "$_ab_allowed" -ne 1 ]]; then
+        warn "agent.binary ($agent_binary) 가 알려진 허용 경로(hermes/claude/gemini/opencode)와 일치하지 않음 — /wh-setup skip"
         return 0
     fi
     info "agent skill 메타 갱신 (best-effort) — $agent_binary chat --skills wh-setup --quiet --yolo --query \"/wh-setup\" (timeout=${timeout_sec}s)"
