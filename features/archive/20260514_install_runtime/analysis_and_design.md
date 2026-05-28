@@ -1948,7 +1948,7 @@ V8 acceptance gate 통과 후 V<N> Phase 2 (V13~V19) 진입 시점에 OAuth (ADR
 | V15a | Google native export 품질 (rclone vs gws) | SA 채택 후 두 도구 모두 동일 SA — export 결과 비교 fair. **2026-05-17 1차 surface**: rclone mount + `vfs-cache-mode full` 의 Google native silent fail (read=0). 진단 후 fix lock → §13 |
 | V17 | per-vault rc port 충돌 | 변경 없음 |
 | **V18** | **rclone OAuth revoke 감지** → "SA 키 revoke 감지" 로 의미 갱신 | Cloud Console SA 키 disable → rclone stderr 패턴 → `_RCLONE_AUTH_PATTERNS` 매칭. SA 의 revoke 패턴 별도 hand-check 필요 |
-| V19 | layer 2 dependency-failed 통지 | 변경 없음 |
+| V19 | layer 2 dependency-failed 통지 | 변경 없음 — issue #29 (multipass `wikihub-test` 2026-05-28) 에서 검증 PASS + 결함 3건 fix (§12.6) |
 
 ### 12.5 DoD (Phase 2 acceptance)
 
@@ -1959,6 +1959,36 @@ V8 acceptance gate 통과 후 V<N> Phase 2 (V13~V19) 진입 시점에 OAuth (ADR
 - [ ] V13~V19 + V4·V10·V12·V15-cost·V15a·V17 검증 통과
 - [ ] V18 의 SA revoke 패턴 확정 → `_RCLONE_AUTH_PATTERNS` regex refine (필요 시)
 - [ ] ADR-0029 Status `Proposed → Accepted`
+
+## §12.6 V19 acceptance gate 수행 결과 (issue #29, 2026-05-28)
+
+> **표기 정정**: issue #29 본문은 출처를 "V18" 로 적었으나, design intent (mount@ permanently failed → fallback diagnostic 검증) 와 정확히 매핑되는 항목은 본 §12 의 **V19 (layer 2 dependency-failed 통지)** 다. V18 은 OAuth/SA revoke 감지 시나리오.
+
+### 시뮬레이션 환경
+- multipass `wikihub-test` (Ubuntu 24.04.4 LTS, aarch64, kernel 6.8)
+- v0.1.10 install.sh + ops-alert.py base
+- `_state/<vid>/last_failure.json` 부재
+- `wikihub-mount@gdrive.service` permanently failed (drop-in `ExecStartPre=/usr/bin/false` + 5회 burst)
+
+### 결과 — PASS (단 fix 적용 후)
+
+| DoD | 결과 |
+|---|---|
+| last_failure.json 부재 + mount@ permanently failed 시나리오 재현 | ✅ `is-failed` returns `failed` |
+| `collect_mount_fallback_failures` 분기 진입 확인 | ✅ (fix 적용 후) — `Telegram 발송 완료: 1 failure(s) (last_failure=0, mount_fallback=1)` |
+| webhook / Telegram payload 에 `fallback_diagnostic` 필드와 journalctl tail 첨부 | ✅ (fix 적용 후) — Telegram 메시지에 `<pre>` 블록 + "Diagnostic (journalctl tail):" 라벨 (1500 char truncate) |
+| stale last_failure 잔존 환경에서 기존 alert 경로 회귀 없음 | ✅ — `collect_mount_fallback_failures` 는 `if not failures:` 분기 안에서만 호출 (`scripts/ops-alert.py` main L237-239) — `to_send` 의 dedup logic 미변경 |
+
+### 검증 중 발견된 결함 3건 — 본 PR 에서 surgical fix
+
+| # | 결함 | 영향 | Fix |
+|---|---|---|---|
+| 1 | **`env={"PATH":...}` 가 `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` 제거 → `systemctl/journalctl --user` 가 "Failed to connect to bus" 로 silent fail** (issue #35/PR #73 env scrub 의 의도하지 않은 부수 효과) | mount@ permanently failed 여도 `is_failed.returncode != 0` 라 `collect_mount_fallback_failures` 가 영구적 빈 list 반환 → **issue #29 본문의 high-risk silent failure 가 실제 발생** | `_user_systemd_env()` helper 도입 (allowlist: PATH, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS, HOME, USER). L111/L119 두 곳 교체. issue #35 의 보안 의도 (외부 webhook env leak 차단) 는 보존 — webhook/Telegram 호출은 urllib (subprocess 아님), 본 helper 도 secret-bearing 키 미포함 |
+| 2 | **`format_telegram_alert_message` 가 `fallback_diagnostic` 필드 누락** → mount@ 장애 시 Telegram 운영자가 journalctl 진단 정보 못 받음 (webhook payload 에는 첨부됐었음 — Telegram 만 누락) | mount@ permanently failed 시 운영자가 fallback 메시지의 reason 외 진단 단서 없음 — silent observability gap | 함수에 `fallback_diagnostic` 첨부 로직 추가. `<pre>` HTML 블록 + "Diagnostic (journalctl tail):" 라벨. 1500 char truncate (Telegram 4096 한도 + 다른 alert 항목 공간 고려). HTML escape (&<>) |
+| 3 | **log 카운트 misleading** — `log.info("...: %d failure(s)", len(to_send))` 가 `to_send` 만 셈 → mount_fallback 발송 시 "0 failure(s)" 로 출력 | 운영자가 journal 에서 "0 failure(s)" 로 보고 mount fallback 미발송으로 오해 가능 | `alert_count = len(alerts)` 도입 + detail breakdown (`last_failure=X, mount_fallback=Y`) |
+
+### Follow-up
+없음 — issue #29 의 high-priority silent failure 가 본 PR 에서 직접 해결. V19 acceptance gate 통과.
 
 ## §13 V15a fix lock — vfs-cache-mode minimal + drive-export-formats 명시 (2026-05-17)
 
