@@ -42,6 +42,38 @@ EXIT_SEMANTIC = 1
 EXIT_OPERATIONAL = 2
 
 
+# ── duplicate-key 검출 SafeLoader (CR2-LOW-4, issue #32) ──────────────
+# PyYAML `safe_load` 는 duplicate key (top-level 및 nested mapping 모두) 를
+# silent 로 마지막 값 채택. operator yaml 의 `vaults:` 블록을 paste-실수로
+# 두 번 두거나 `options:` 안에 같은 key 를 두 번 쓰면 첫 번째 값이 silent
+# drop 되어 운영 결과가 의도와 어긋남. 본 loader 가 duplicate key 를
+# ConstructorError 로 raise → `yaml.YAMLError` 분기 (EXIT_OPERATIONAL).
+# 검출 범위는 top-level 뿐 아니라 모든 nested mapping — fail-fast 안전 방향.
+class _DuplicateKeySafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_mapping_no_duplicates(loader, node, deep=False):
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_no_duplicates,
+)
+
+
 # ── per-vault vs singleton template 분류 ──────────────────────────────
 # per-vault: `@.` 패턴 (e.g. wikihub-mount@.service.template) — vault 마다 render.
 # singleton: 그 외 — 1회 render.
@@ -74,7 +106,8 @@ def _load_yaml(path: Path) -> dict:
         sys.exit(EXIT_OPERATIONAL)
     try:
         with path.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            # CR2-LOW-4 (issue #32): duplicate-key 검출 loader.
+            data = yaml.load(f, Loader=_DuplicateKeySafeLoader)
     except yaml.YAMLError as e:
         print(f"ERROR: yaml malformed ({path}): {e}", file=sys.stderr)
         sys.exit(EXIT_OPERATIONAL)
@@ -534,10 +567,14 @@ def _do_get_mount_path(cfg: dict, vault_id: str) -> int:
         if v.get("id") == vault_id:
             mp = (v.get("options") or {}).get("mount_path", "")
             if not mp:
-                # fallback to local_path
+                # CR1-LOW-4 (issue #32): fallback to vault top-level local_path (ADR-0019 alias).
                 mp = v.get("local_path", "")
             if not mp:
-                print(f"ERROR: vault {vault_id} 의 mount_path 미정의", file=sys.stderr)
+                # CR1-LOW-4 — 진단 hint: 두 필드 모두 부재 명시.
+                print(
+                    f"ERROR: vault {vault_id} 의 options.mount_path / local_path 둘 다 미정의",
+                    file=sys.stderr,
+                )
                 return EXIT_SEMANTIC
             print(mp)
             return EXIT_OK

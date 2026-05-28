@@ -140,12 +140,19 @@ ORIGINAL_ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-confirm) SKIP_CONFIRM=1; shift ;;
-        --branch) BRANCH="$2"; shift 2 ;;
+        --branch)
+            # CR2-LOW-2 (issue #32): leading `-` 거부 — git argparse 가 현재 거부하나 fragile.
+            if [[ "${2:-}" == -* ]]; then
+                err "--branch 인자는 leading '-' 불가 (예: --branch main)."
+                exit 1
+            fi
+            BRANCH="$2"; shift 2 ;;
         # ADR-0030 / HIGH-N3: --version 인자 강제 소비. no-arg 분기 없음.
         # version 조회는 `cat $WIKIHUB_SRC/_system/VERSION` 사용.
         --version)
-            if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-                err "--version 인자 필요 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_SRC/_system/VERSION\`."
+            # CR2-LOW-2 (issue #32): leading `-` (-x / --x 둘 다) 거부 — git 이 거부하나 fragile.
+            if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+                err "--version 인자 필요 / leading '-' 불가 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_SRC/_system/VERSION\`."
                 exit 1
             fi
             EXPLICIT_VERSION="$2"
@@ -1566,8 +1573,12 @@ _rollback_if_failed() {
     _apply_sparse_checkout \
         || warn "rollback 후 sparse re-apply fail — working tree 일관성 확인 필요"
     # CRIT-N1: 직전 ref 의 template 으로 systemd unit 재render → daemon-reload → start
-    _step8_systemd_render \
-        || warn "rollback systemd render 실패 — 수동 (systemctl daemon-reload 직접 호출)"
+    if ! _step8_systemd_render; then
+        # CR1-LOW-6 (issue #32): render 실패 분기에서 daemon-reload 만이라도 자동 fallback —
+        # CRIT-N2 의 stop 직후 daemon-reload 와 대칭. stale unit 으로 start 시도하는 위험 차단.
+        warn "rollback systemd render 실패 — daemon-reload fallback 호출 (운영자 추가 확인 필요)"
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
     _systemd_start_after_update \
         || warn "rollback systemd 재기동 실패 — 수동 복구"
     exit $exit_code
@@ -1585,15 +1596,40 @@ _enabled_vaults_yaml() {
         return $?
     fi
     # MED-N1: venv 부재 시 bash fallback (best-effort yaml parse)
+    # CR1-LOW-1 (issue #32): vault entry 의 `enabled: false` 항목 필터링 추가 — rollback 시
+    # venv 손상 분기에서 비활성 vault 까지 start 시도하는 spurious failure 차단.
+    #
+    # 한계 (best-effort):
+    #   1. `enabled:` regex 는 indent 무관 매칭 — 현 schema 에 nested `enabled:` 없음.
+    #      schema 에 nested enabled 추가 시 indent column 비교로 분기 필요.
+    #   2. YAML 1.1 boolean variant (`False`/`FALSE`/`"false"`/`'false'`/`No`) 도 false 의미 —
+    #      tolower + quote/whitespace strip + (false|no) 매칭으로 cover.
     warn "venv helper 미가용 — yaml bash fallback parse (기능 제한)"
     awk '
-        /^vaults:/ {in_vaults=1; next}
-        in_vaults && /^[^[:space:]]/ {in_vaults=0}
-        in_vaults && /^[[:space:]]*-[[:space:]]*id:/ {
-            gsub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "")
-            gsub(/[[:space:]]*#.*/, "")
-            print
+        function norm(v,   r) {
+            r=tolower(v)
+            gsub(/[[:space:]"]/, "", r)
+            gsub(/'\''/, "", r)
+            return r
         }
+        function is_disabled(v,   n) { n=norm(v); return (n == "false" || n == "no") }
+        function flush() { if (id != "" && !is_disabled(enabled)) print id }
+        /^vaults:/ {in_vaults=1; next}
+        in_vaults && /^[^[:space:]]/ {flush(); in_vaults=0; id=""; enabled=""}
+        in_vaults && /^[[:space:]]*-[[:space:]]*id:/ {
+            flush()
+            line=$0
+            gsub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "", line)
+            gsub(/[[:space:]]*#.*/, "", line)
+            id=line; enabled=""; next
+        }
+        in_vaults && /^[[:space:]]*enabled:[[:space:]]*/ {
+            line=$0
+            gsub(/^[[:space:]]*enabled:[[:space:]]*/, "", line)
+            gsub(/[[:space:]]*#.*/, "", line)
+            enabled=line
+        }
+        END { flush() }
     ' "$yaml"
 }
 
@@ -1790,9 +1826,24 @@ _step10_verify() {
             warn "  필요 시 수동 rollback: install.sh --version <prev-tag>"
             verify_failed=1
         fi
+        # CR2-LOW-3 (issue #32): vault@.timer (= wikihub-ingest@<v>.timer) 도 verify.
+        # timer 자체는 enable 후 active 가 정상. timer 부재 시 silent no-sync 회피.
+        # service 는 timer-fired 라 install 단계에 inactive 가 정상 — 검증 대상 아님 (CR1-LOW-5).
+        local timer_unit="wikihub-ingest@${v}.timer"
+        if ! systemctl --user is-active "$timer_unit" >/dev/null 2>&1; then
+            warn "$timer_unit not active — timer enable 누락 가능 (silent no-sync 위험)"
+            warn "  journalctl --user -u $timer_unit -n 50"
+            verify_failed=1
+        fi
     done
+    # CR2-LOW-3 (issue #32): lint.timer 도 verify (singleton, 3h 주기). enable 누락 시 lint silent skip.
+    if ! systemctl --user is-active wikihub-lint.timer >/dev/null 2>&1; then
+        warn "wikihub-lint.timer not active — timer enable 누락 가능 (lint silent skip 위험)"
+        warn "  journalctl --user -u wikihub-lint.timer -n 50"
+        verify_failed=1
+    fi
     if (( verify_failed )); then
-        warn "Step 10 verify: 일부 mount@ inactive — install.sh 는 정상 종료 (git rollback 안 함)"
+        warn "Step 10 verify: 일부 mount@/timer inactive — install.sh 는 정상 종료 (git rollback 안 함)"
     else
         ok "Step 10 systemd verify ok"
     fi
