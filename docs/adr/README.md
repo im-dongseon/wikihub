@@ -97,6 +97,7 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0040](0040-monitor-services-remove.md) | wikihub-monitor / wikihub-pending-monitor 폐기 — ops-alert 단독 운영. ADR-0037 의 Telegram channel + EnvironmentFile carry-over, monitor unit 4종 + scripts/lib/telegram.py + yaml 4 필드 폐기. **Supersedes ADR-0037**. | Accepted | 2026-05-26 | `20260526_monitor_services_remove` |
 | [ADR-0041](0041-systemd-prefix-realign.md) | systemd unit prefix `wikihub-` 일관화 — Hermes skill `wh-` 와 layer 분리. `wh-ingest@` / `wh-lint.*` → `wikihub-ingest@` / `wikihub-lint.*` rename (commit 2ed01f8 정정). ADR-0033 (skill prefix lock) 영향 없음. | Accepted | 2026-05-26 | `20260526_systemd_prefix_realign` |
 | [ADR-0042](0042-alias-aware-link-resolver.md) | alias-aware wiki link resolver — frontmatter `aliases` 기반 inverted index (`lowercase_alias → canonical_filename`) + 2-pass resolve (case-sensitive exact match → alias index lookup → dangling). ADR-0039 §재검토 트리거 closure (link resolver alias 인식). lint Step 1.5 신설 (index build). | Accepted | 2026-05-28 | issue #37 |
+| [ADR-0043](0043-mcp-integration.md) | wikihub MCP integration — read-only MCP server + stdio + SSH spawn. `scripts/wikihub_mcp.py` (4 resource + 5 tool). Layer 분리 (deterministic primitive vs Hermes LLM playbook). ADR-0042 alias resolver 재사용. Phase 2 (SSE/HTTP, write tool) 는 deferred. | Accepted | 2026-05-29 | `20260529_mcp_integration` (issue #95) |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.
