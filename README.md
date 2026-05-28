@@ -2,307 +2,219 @@
 
 <div align="center">
 
-# WikiHub v0.1.10
+# WikiHub
 
-서버에서 다중 소스를 통합 관리하는 LLM 위키 허브
+여러 클라우드 소스를 단일 LLM 위키로 묶어주는 server-first 시스템
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.10%20canary-green)](features/archive/)
-[![Version](https://img.shields.io/badge/Version-0.1.10-blue)](AGENTS.md)
+[![Status](https://img.shields.io/badge/Status-v0.1.10%20canary-green)](docs/changelog.md)
+[![Version](https://img.shields.io/badge/Version-0.1.10-blue)](_system/VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
 ---
 
-> **개발 상태** (2026-05-29 기준 — canary v0.1.10): v0.1.0 acceptance 달성 (2026-05-18) 후 v0.1.x 운영 정본화 진행 중. v0.1.1~v0.1.7 누적: rclone unify (ADR-0035 — gws CLI · SA JSON 폐기), graphify CLI 통합 (ADR-0036 + backend flexibility), alert pipeline overhaul (ADR-0037 — Telegram channel + pending-monitor; **monitor unit 은 ADR-0040 으로 폐기**, Telegram channel 만 ops-alert 로 carry-over), per-skill model override (`agent.models`), 운영 정본 default align (v0.1.6 — wh-lint deepseek-v4-flash · sync_interval 1h · hermes delegation.model 권장), yaml schema drift auto-migration (v0.1.7 — install.sh 가 신설 field 자동 추가 + ADR-0035 폐기 field cleanup, PTY-safe + idempotent), graphify env namespace isolation (v0.1.7 follow-up — ADR-0038 신설, Hermes parent leak 차단 + multi-profile bundle + graphify v8 CLI sync + 기존 env 파일 자동 migration), **legacy migration cleanup (v0.1.8 — install.sh 의 v0.1.0~v0.1.6 era 1회성 migration 코드 일괄 정리)**, **branch strategy formalize** (v0.1.8), **lint operations improvements** (v0.1.8), **update path fixes** (v0.1.8), **install_update_hardening** (v0.1.8), **v0.1.9 — sync passthrough fix: binary MIME (.md, .txt 등) text 확장자 기반 UTF-8 passthrough + config 기본값 정합 + 문서 보강**, **monitor services remove** (ADR-0040 — wikihub-monitor + wikihub-pending-monitor 폐기, ops-alert 단독 운영), **systemd prefix realign** (ADR-0041 — systemd unit `wikihub-*` namespace 일관화 + Hermes skill `wh-*` lock 보존, layer 분리), **graphify path absolute** (wh-lint playbook 의 graph.json 절대 경로 정합 + stale wiki/graphify-out/ 자동 cleanup, ADR-0036 §"후속 영향").
-
-> **v0.1.10 (canary, 2026-05-29)** — 신규 capability + 운영 hardening + acceptance gate:
-> - **MCP integration** (ADR-0043 신설): 외부 MCP-호환 client (Claude Desktop / Cline / IDE plugin) 가 SSH 로 wikihub VM 에 원격 spawn → wiki 데이터 read-only query. `scripts/wikihub_mcp.py` (4 resource + 5 tool) + `docs/mcp-setup.md` (OCI 측 포트 4 layer + 회사 망 4 케이스 분기). Hermes skill (LLM-mediated playbook) 과 layer 분리 — deterministic primitive 전용.
-> - **alias-aware link resolver** (ADR-0042 신설): `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 자동 resolve. lint Step 1.5 alias index build. ADR-0039 §재검토 트리거 closure.
-> - **install hardening**: ingest Step 0 per-vault flock (issue #61 — Hermes 직접 호출 race 차단), `_step2_update` self-restart 후 `current_version` export 보존 (issue #86 — downgrade warn 미발화 silent fail fix), systemctl --user enable (issue #34 — reboot 후 timer 자동 시작).
-> - **observability fix**: `mount@.service` permanently failed 시 ops-alert `collect_mount_fallback_failures` 분기 env scrub bug (issue #29 — `XDG_RUNTIME_DIR` 제거로 systemctl --user 가 silent fail) + Telegram payload 에 `fallback_diagnostic` (journalctl tail) 첨부 누락 fix.
-> - **deployment helpers**: `promote_canary.sh` + `release.sh` — AGENTS.md §3 Step 5 액션 자동화 (issue #23).
-> - **acceptance gate**: update_mode V3·V4·V5a/b·V6·V7·V8·V9a·V10·V12 multipass VM 검증 + design.md §9.2.1 결과 기록 (issue #33). V5b spec 정합 정정 (issue #87).
-> - 기타 fix 다수 — install.sh / lint / graphify timeout / yaml schema migration 등 (PR #62~#94, MCP 3 PR (#96/#97/#98) 외 일반 fix).
-
----
-
 ## 목차
 
-- [WikiHub란?](#wikihub란)
-- [타깃 아키텍처](#타깃-아키텍처)
-- [설치 / 업데이트](#설치--업데이트-adr-0010--adr-0030--adr-0032--adr-0034)
-- [외부 client 접근 (MCP)](#외부-client-접근-mcp-phase-1--v0110)
-- [개발 방법론](#개발-방법론)
-- [디렉토리 구조](#디렉토리-구조)
-- [로드맵](#로드맵)
+- [무엇을 해결하나요?](#무엇을-해결하나요)
+- [주요 기능](#주요-기능)
+- [빠른 시작](#빠른-시작)
+- [사용법](#사용법)
+- [아키텍처 요약](#아키텍처-요약)
+- [더 깊이 들어가기](#더-깊이-들어가기)
 - [참고 자료](#참고-자료)
 - [라이선스](#라이선스)
 
 ---
 
-## WikiHub란?
+## 무엇을 해결하나요?
 
-`WikiHub`는 여러 외부 소스 백엔드(Google Drive, NAS 등)를 단일 LLM 위키로 통합 관리하는 server-first 시스템입니다.
+지식의 원본이 여러 곳에 흩어져 있는 환경(개인 클라우드, NAS, 메모 앱)에서는 **단일 위키로 종합 분석**이 어렵습니다. WikiHub 는:
 
-### 왜 필요한가?
+- 평소처럼 **Google Drive 등에 파일을 떨구기만 하면**,
+- 서버가 24/7 동작하면서 **자동으로 ingest → LLM 정리 → 위키 갱신**.
+- **Telegram 같은 채팅 인터페이스로 자연어 질의** ("작년 Q1 OKR 회의록 요약해줘") 가능.
+- **외부 IDE / Claude Desktop** 에서도 표준 MCP 프로토콜로 wiki 데이터를 query.
 
-- 지식의 원본이 여러 곳에 흩어져 있는 환경(개인 클라우드, NAS, 메모 앱)에서 **단일 위키로 종합 분석**이 어려운 문제 해결
-- 서버에서 24/7 동작하면서 **Telegram 같은 대화형 인터페이스로 자연어 질의·관리**
-- 사용자는 평소대로 Google Drive 등에 파일을 떨구기만 하고, 위키는 자동으로 갱신·정리됨
-
----
-
-## 타깃 아키텍처
-
-```mermaid
-flowchart TD
-    GDrive["Google Drive"]
-    Mount["rclone mount daemon<br/>(wikihub-mount@.service, Type=simple)<br/>vfs-cache full + dir-cache 5m + --rc"]
-    Vault["wikihub-instance/vault/&lt;vault_id&gt;/<br/>(실시간 mount FS — SSH ls/cat 가능)"]
-    Sync["vault-fetch.py<br/>(wikihub-ingest@.service, Type=oneshot)<br/>systemd timer, 10분 주기"]
-    Hermes["Hermes daemon<br/>Telegram polling +<br/>/ingest /lint /query /graphify"]
-    Wiki["wikihub/wiki/<br/>(통합 위키)"]
-    ADR["docs/adr/<br/>(결정 기록)"]
-
-    GDrive -->|"FUSE read-through"| Mount
-    Mount -->|"실시간 동기화"| Vault
-    GDrive -->|"changes.list (cursor, gws CLI)"| Sync
-    Sync -->|"assert_mount_alive + vfs/refresh"| Mount
-    Vault -->|"mount FS open()"| Sync
-    Sync -->|"변동 발생 시 trigger"| Hermes
-    Hermes --> Wiki
-    Hermes --> ADR
-```
-
-**v9 (ADR-0025·0026·0027 — Path C+ 책임 분리)**:
-- **rclone mount** = Drive ↔ vault 실시간 동기화 + 파일 read 패스 (vfs cache 영속). SSH 에서 `ls/cat` 으로 Drive 파일 즉시 접근
-- **gws CLI** = `drive changes list` 로 cursor 기반 변경 감지 (정확한 삭제·rename·권한 이벤트)
-- **vault-fetch.py 사이클**: 시작 시 `assert_mount_alive` (stat) + `vfs/refresh recursive=true` 로 race window 차단 → `gws changes list` → mount FS `open()` → extraction → wiki page write
-
-**rclone OAuth 1회성 발급** (vault 별, install.sh 후 setup.md §Step 5.5):
-```
-rclone config        # 안내 따라 OAuth flow + remote name = wikihub.yaml.vaults.<id>.options.rclone_remote_name
-chmod 0600 ~/.config/rclone/rclone.conf
-```
-gws OAuth (macOS dev box 의 `scripts/auth_gdrive.py`) 와 token 분리 — 같은 Google 계정 권장.
-
-상세 설계는 [`features/20260513_v030_initial_architecture/analysis_and_design.md`](features/20260513_v030_initial_architecture/analysis_and_design.md) + Path C+ 결정은 [`docs/adr/0025-rclone-mount-adoption.md`](docs/adr/0025-rclone-mount-adoption.md) · [`docs/adr/0027-rclone-gws-responsibility-split.md`](docs/adr/0027-rclone-gws-responsibility-split.md) 참조.
+원본은 손대지 않고, wiki 페이지는 LLM 이 derivative 로 자동 생성·정리합니다.
 
 ---
 
-## 설치 / 업데이트 (ADR-0010 + ADR-0030 + ADR-0032 + ADR-0034)
+## 주요 기능
 
-운영 시 install 과 update 는 **동일 명령**. install.sh 가 `$WIKIHUB_SRC/_system/VERSION` + `.git` 존재 여부로 자동 분기.
+### 📥 다중 소스 통합 (vault)
+- Google Drive (rclone mount + OAuth, 1 vault per Drive)
+- 향후 NAS / 로컬 디렉토리 vault type 확장 예정 ([roadmap](docs/roadmap.md))
 
-### 디렉토리 layout (ADR-0034 — data-first)
+### 🔄 자동 ingest + LLM 정리
+- systemd timer (10분 주기 default) 가 vault 변경 감지 → wiki 의 `sources/` 에 source page 자동 생성.
+- LLM 이 source 본문에서 **entity** (인물·조직·제품) 와 **concept** (방법론·용어) 추출 → `wiki/entities/` · `wiki/concepts/` 자동 갱신 (alias 셋 보존, 무한 loop 방지).
+- 주기 lint 가 dangling link 정리 · index 재구성 · graph 그래프 갱신.
 
-```
-~/wikihub/                          ★ 운영 자산 (WIKIHUB_HOME — 사용자 일상 자산)
-├── wikihub.yaml                    # 운영 정본 (/wh-setup materialize)
-├── wiki/                           # wiki 콘텐츠 — index·sources·entities·concepts·analyses
-├── vault/<vault_id>/               # FUSE mount (rclone)
-└── _state/<vault_id>/              # cursor·file_map·last_sync
+### 💬 자연어 질의 (Hermes via Telegram)
+- Hermes daemon 이 Telegram polling → `/wh-ingest`, `/wh-lint`, `/wh-query` 같은 slash command 호출.
+- 예: *"`[[gdrive/meetings/2026-Q1.pptx]]` 의 핵심 결정 사항만 표로 정리해줘"*.
+- LLM 이 wiki 본문 + cross-ref 추론 → `wiki/analyses/<slug>.md` 에 분석 결과 자동 저장.
 
-~/.local/share/wikihub/             XDG data root (ADR-0020·0034)
-├── src/                            # 시스템 코드 (WIKIHUB_SRC — git clone target, install.sh)
-└── venv/                           # Python venv (ADR-0020)
+### 🔌 외부 MCP client (Claude Desktop / Cline / IDE plugin) — v0.1.10
+- 표준 MCP 프로토콜 (stdio + SSH spawn) 로 wiki 데이터에 **read-only query**.
+- 5 tool: `list_entities`, `list_concepts`, `read_page`, `grep_wiki`, `search_by_alias`.
+- `[[mini-max]]` 같은 alias form 도 canonical 페이지로 자동 resolve (frontmatter `aliases` 기반).
+- 외부 client 에 LLM 추론을 위임 — wikihub 서버는 deterministic primitive 만 제공 (recursive LLM 호출 0).
+- 셋업 가이드: [`docs/mcp-setup.md`](docs/mcp-setup.md) (회사 망 outbound 22 / 443 / proxy 케이스 모두 다룸).
 
-~/.credentials/wikihub/             # SA credentials 외부 격리 (ADR-0029)
-~/.config/systemd/user/             # systemd user units
-~/.hermes/                          # Hermes config (외부 도구, ADR-0032 external_dirs)
-```
+### 🕸️ 지식 그래프 (graphify, 외부 CLI 통합)
+- `wiki/` 의 페이지 간 link 를 graph 로 시각화 (graphify PyPI 패키지 + ollama / OpenAI 등 backend 선택 가능).
+- wh-lint 가 변경 시에만 graphify 재호출 (cost gate).
+
+---
+
+## 빠른 시작
 
 ### Prerequisites
 
-- **Hermes CLI** 사전 설치 필수 — wikihub 가 직접 설치하지 않음. `command -v hermes` 가 absolute path 반환 가능해야 함 (alias/wrapper 미지원).
-- install.sh 가 `~/.hermes/config.yaml` 의 `skills.external_dirs` 에 wikihub skill path 추가. 변경 시 backup 자동 생성 (`~/.hermes/config.yaml.wikihub-bak.<ts>`, 7일 retention).
-- `WIKIHUB_NONINTERACTIVE=1` 모드 사용 시 외부 자산 (~/.hermes/config.yaml) mutate 도 자동 동의 포함. 의도 안 하면 unset 후 호출.
-- Hermes 미설치 시 install.sh 는 success exit 하되 systemd unit render/enable skip (운영자가 Hermes 설치 후 재호출 권장).
+| 항목 | 버전 / 비고 |
+|---|---|
+| OS | Ubuntu 24.04 LTS (OCI ARM 권장. macOS 는 dev box 만, 운영 미지원) |
+| **Hermes CLI** | wikihub 가 직접 설치하지 않음. `command -v hermes` 가 absolute path 반환 필요 (alias 미지원) |
+| Google Drive | rclone OAuth (vault 1개당 1 Drive — 폴더 단위 공유) |
+| LLM provider | Anthropic / OpenAI / DeepSeek / ollama 중 선택 (`wikihub.yaml.agent.models` 로 skill 별 override 가능) |
 
-### env 변수 (ADR-0034)
-
-| env | 의미 | default |
-|---|---|---|
-| `WIKIHUB_HOME` | 운영 자산 dir | `~/wikihub` |
-| `WIKIHUB_SRC` | 시스템 코드 dir | `~/.local/share/wikihub/src` |
-
-multi-instance: 두 env 모두 override 가능 (`WIKIHUB_HOME=/var/wikihub-prod WIKIHUB_SRC=/var/wikihub-src/prod`).
-
-### 호출
+### 설치
 
 ```bash
-# 표준 — install / update 공용 (production: 검증된 stable)
 curl -fsSL --proto '=https' --tlsv1.2 \
   https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
+```
 
-# 특정 tag 명시 (rollback 포함)
-curl -fsSL ... | bash -s -- --version v0.1.0
+같은 명령이 **install + update 공용**. install.sh 가 `$WIKIHUB_SRC/_system/VERSION` + `.git` 존재 여부로 자동 분기.
 
-# 검증 채널 (canary tag — release 전 OCI 사전 검증)
+### 배포 채널 (tag)
+
+| Tag | 성격 | 사용 시점 |
+|---|---|---|
+| `latest` | force-move | **production default** — 검증된 stable 만 promote |
+| `canary` | force-move | pre-production 검증 — OCI 사전 검증용 (`--branch canary`) |
+| `vX.Y.Z` | annotated, immutable | release 영구 record · rollback target (`--version v0.1.0`) |
+
+### 검증 후 정식 호출
+
+```bash
+# 검증 채널 (canary)
 curl -fsSL ... | bash -s -- --branch canary
 
-# 명시적 destructive 재설치 (5초 confirm + safety guard 4중) — WIKIHUB_SRC 만 wipe, WIKIHUB_HOME 안전
+# 특정 버전 (rollback 포함)
+curl -fsSL ... | bash -s -- --version v0.1.0
+
+# 명시적 destructive 재설치 (5초 confirm — WIKIHUB_SRC 만 wipe, WIKIHUB_HOME 안전)
 curl -fsSL ... | bash -s -- --force-fresh
 ```
 
-### 배포 채널 (tag 운영)
-
-| Tag | 성격 | 가리키는 commit | 운영 의미 |
-|---|---|---|---|
-| `latest` | lightweight, force-move | 가장 최근 release commit (= 가장 최신 `vX.Y.Z` tag 와 동일) | **production default**. 검증된 stable 만 promote |
-| `canary` | lightweight, force-move | release 전 검증 trace commit | **pre-production 검증**. v0.1.X+1 작업 중 OCI 검증 trace — 통과 시 `latest` 로 promote |
-| `vX.Y.Z` | annotated, immutable | 해당 release commit | release 영구 record. rollback target |
-
-검증 흐름:
-1. 메인테이너가 v0.X.Y 버전 브랜치의 매 squash merge 직후 `git tag -f canary && git push origin canary --force` (AGENTS.md §3 Step 5 액션 2)
-2. 운영자가 OCI 검증: `install.sh --version canary` — canary 는 lightweight tag 라 `_resolve_ref` path 1 (tag) 으로 resolve. `--branch canary` 는 path 2 가 `origin/canary` 시도해서 unknown revision fail. `--update` 옵션은 없음 — update mode 는 `$WIKIHUB_SRC/_system/VERSION + .git` 존재 자동 detect.
-3. release batch — 메인테이너가 OCI 검증 통과 판단 → `main merge --no-ff` + annotated `vX.Y.Z` tag + `latest` force-move (3 ref 동일 commit)
-4. canary tag 는 release 직전 commit 그대로 보존 — 다음 minor 첫 squash 까지 OCI trace
-
-### 동작
-
-- **fresh install** (`$WIKIHUB_SRC/_system/VERSION` 부재): `git clone` → `$WIKIHUB_SRC` + venv + skill materialize + `~/.hermes/config.yaml` 패치 + systemd render + 운영자 안내.
-- **update** (`$WIKIHUB_SRC/_system/VERSION` 존재): unstaged guard → systemd stop (15min in-flight grace) → fetch + reset → skill 재materialize + schema migration (필요시) → render → daemon-reload → systemd start → verify. 실패 시 직전 ref 자동 rollback.
-- 현재 버전 조회: `cat $WIKIHUB_SRC/_system/VERSION`.
-- Hermes skill 4건 (`wh-ingest`·`wh-lint`·`wh-query`·`wh-setup`) 자동 등록 — 인식 확인: `hermes skills list`. (v0.1.8 update_path_fixes: `wh-graphify` hermes skill 폐기 → `wikihub-graphify.service` systemd 격상, lint Step 9 가 변경 시만 trigger)
-- **lint cycle 자동 적용** (v0.1.8 ADR-0039): `wh-lint` 가 매 cycle (3h timer + 메인테이너 수동 호출) 진단 + 적용 default. `--apply` flag 폐기 — wikihub `wiki/` 가 sources (vault, immutable) 의 LLM derivative 라 원본 변경 0. case-variant duplicates (`MiniMax` / `minimax`) + cross-category duplicates (entity `Docker` + concept `Docker`) 는 entity/concept page frontmatter `aliases` 필드로 인식 → LLM 재생성 무한 loop 차단. graphify wrapper timeout yaml `operations.graphify_timeout_sec` (default 900s = 15분) 로 운영자 backend 별 조정 가능.
-
-### Migration (historical — v0.1.8 cleanup 완료)
-
-pre-v0.1.0 layout (`~/wikihub` = repo + `~/wikihub-instance` = 운영 데이터) transition 의 1회성 helper (`scripts/migrate_layout.sh` 9-phase state machine + install.sh `_step0_legacy_detect`) 는 v0.1.8 cleanup (feature `legacy_migration_cleanup`, 2026-05-25) 으로 삭제. v0.1.0+ install 운영자 base 정착 정합 — 운영자 base 0건. ADR 의사결정 history 는 [`docs/adr/0034-data-first-layout.md`](docs/adr/0034-data-first-layout.md) 의 §"후속 영향" 참조.
-
-운영 흐름 (install/update) 상세: [`docs/adr/0030-update-workflow-orchestration.md`](docs/adr/0030-update-workflow-orchestration.md) + [`docs/adr/0032-hermes-skill-registration-policy.md`](docs/adr/0032-hermes-skill-registration-policy.md).
+자세한 디렉토리 layout · env 변수 · 운영 흐름: [`AGENTS.md`](AGENTS.md) + [ADR-0030 update workflow](docs/adr/0030-update-workflow-orchestration.md) + [ADR-0034 data-first layout](docs/adr/0034-data-first-layout.md).
 
 ---
 
-## 외부 client 접근 (MCP, Phase 1 — v0.1.10)
+## 사용법
 
-회사 노트북 / 개인 IDE / Claude Desktop 등 **MCP-호환 client** 에서 wikihub VM 의 wiki 데이터 (entities · concepts · sources · analyses) 를 **read-only query** 로 탐색한다. daemon 없이 sshd + Python venv 만 재사용 — client 가 `ssh wikihub-oci '... wikihub_mcp.py'` 으로 stdio MCP server 를 원격 spawn 한다.
+### 1) wikihub.yaml 작성 (1회)
+설치 직후 `~/wikihub/wikihub.yaml` template 이 materialize 됩니다. vault 1개 등록 + OAuth flow:
+
+```bash
+rclone config         # remote name = wikihub.yaml.vaults.<id>.options.rclone_remote_name
+chmod 0600 ~/.config/rclone/rclone.conf
+```
+
+자세한 vault 등록 절차: `_system/commands/setup.md` + `wikihub.yaml.example`.
+
+### 2) Hermes 채팅 또는 systemd timer 가 자동 ingest
+
+systemd timer (default 10분 주기) 가 알아서 ingest. 수동 호출도 가능:
 
 ```
-[client (Claude Desktop)] ── ssh subprocess ──► [OCI VM] ── stdio ──► [wikihub_mcp.py]
-                              (per-session)        (sshd)             (read-only, LLM 0)
+/wh-ingest --vault gdrive    # vault 변경 사항 → wiki/sources/gdrive/*.md
+/wh-lint                     # entities/concepts 정리 + dangling link 보고 + index 재구성
+/wh-query "Q1 OKR 회의 결정 사항 정리해줘"   # → wiki/analyses/<slug>.md 자동 저장
 ```
 
-- **Resources (4 base + 1 dynamic)**: `wikihub://entities`, `wikihub://concepts`, `wikihub://sources/<vault_id>`, `wikihub://analyses`, `wikihub://page/<category>/<name>` (ADR-0042 resolver — alias form 도 canonical 페이지로 매핑)
-- **Tools (5)**: `list_entities`, `list_concepts`, `read_page`, `grep_wiki`, `search_by_alias`
-- **Auth**: SSH key. mutation 0. OAuth credential 접근 0
-- **Layer 분리**: MCP server = deterministic primitive (LLM 호출 0). Hermes `/wh-query` = LLM-mediated semantic synthesis. 책임 분담 (ADR-0043 §Hermes layer)
+### 3) 외부 client 에서 wiki query (v0.1.10 신기능)
 
-설정 step-by-step (OCI 측 포트 4 layer 검토 + 회사 망 4 케이스 분기 + Claude Desktop config + 회사 망 fallback ProxyCommand 포함): [`docs/mcp-setup.md`](docs/mcp-setup.md).
+회사 노트북 · 개인 IDE 의 MCP-호환 client (Claude Desktop / Cline 등) 에서 wikihub VM 의 wiki 를 read-only 로 query.
 
-**Phase 2 (deferred)** — SSE/HTTP + Bearer token (Cloudflare Tunnel 등) / 다중 client / IDE plugin / write tool 은 ADR-0043 §재검토 트리거 surface 시 별도 ADR.
+Claude Desktop `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "wikihub": {
+      "command": "ssh",
+      "args": [
+        "wikihub-oci",
+        "/home/ubuntu/.local/share/wikihub/venv/bin/python",
+        "/home/ubuntu/.local/share/wikihub/src/scripts/wikihub_mcp.py"
+      ]
+    }
+  }
+}
+```
 
-상세: [`docs/adr/0043-mcp-integration.md`](docs/adr/0043-mcp-integration.md).
+자세한 셋업 (SSH config + OCI 측 포트 4 layer + 회사 망 proxy fallback 등): [`docs/mcp-setup.md`](docs/mcp-setup.md).
 
 ---
 
-## 개발 방법론
-
-WikiHub는 5단계 Feature-based Workflow를 따릅니다. 상세 가이드: [`AGENTS.md`](AGENTS.md), [`docs/agent_dev_guide.md`](docs/agent_dev_guide.md).
+## 아키텍처 요약
 
 ```mermaid
-flowchart TD
-    Plan["Step 1: Plan<br/>(타겟 버전 브랜치 결정)"]
-    AD["Step 2: Analysis & Design"]
-    Impl["Step 3: Implementation<br/>(feature/&lt;id&gt; on v0.X.Y)"]
-    Review["Step 4: Review<br/>(조건부)"]
-    Deploy["Step 5: Deploy<br/>(squash → canary force-update)"]
-    Release{"release<br/>batch?"}
-    MainMerge["main merge --no-ff<br/>+ vX.Y.Z + latest"]
-    Archive["Feature 종료 처리"]
+flowchart LR
+    GDrive["Google Drive 등"]
+    Mount["rclone mount<br/>(wikihub-mount@)"]
+    Sync["vault-fetch.py<br/>(wikihub-ingest@, timer)"]
+    Hermes["Hermes daemon<br/>(Telegram + slash commands)"]
+    Wiki["wiki/<br/>(통합 위키)"]
+    MCP["wikihub_mcp.py<br/>(외부 MCP client, read-only)"]
+    Client["Claude Desktop /<br/>IDE plugin"]
 
-    Plan --> AD --> Impl --> Review --> Deploy --> Release
-    Release -->|"중간"| Archive
-    Release -->|"버전 batch 완료"| MainMerge --> Archive
+    GDrive -->|FUSE| Mount
+    Mount -->|read| Sync
+    Sync -->|page write| Wiki
+    Hermes -->|/wh-* skills| Wiki
+    Client -->|ssh + stdio MCP| MCP
+    MCP -->|read-only| Wiki
 ```
 
-### 핵심 컨벤션
+- **rclone mount** = Drive ↔ vault 실시간 동기화 + 파일 read 패스 (vfs cache 영속).
+- **vault-fetch.py** = 사이클마다 변경 감지 + source page 작성 (자세: ADR-0035).
+- **Hermes** = LLM-mediated playbook entry (`/wh-query` 같은 의미 검색 + analyses 저장 mutation).
+- **MCP server** = deterministic primitive entry (외부 client 의 LLM 이 추론 — 서버측 LLM 호출 0, ADR-0043).
 
-- **결정 정본은 ADR**: 모든 아키텍처 결정은 [`docs/adr/NNNN-{slug}.md`](docs/adr/) 단일 파일에. 다른 문서는 `ADR-NNNN` 식별자로 참조.
-- **라이프사이클 분리**: `docs/`는 영속 기록(가이드·개념·ADR), `features/`는 워크스페이스(active → archive).
-- **조건부 단계**: 검토와 배포는 plan.md에서 미리 생략 선언 가능(기준: 변경 크기·성격·영향 범위).
-- **코딩 행동 원칙**: [Karpathy Guidelines](docs/karpathy-guidelines.md) 4원칙(Think Before Coding / Simplicity First / Surgical Changes / Goal-Driven Execution)을 메소드론과 매핑해 적용. 자세히는 `AGENTS.md §2`.
+두 entry (Hermes / MCP) 는 같은 `wiki/` 를 read 하되 **layer 분리** — mutation 책임은 Hermes 의 `/wh-lint` · `/wh-ingest` 만.
+
+상세 아키텍처: [`features/archive/20260513_v030_initial_architecture/analysis_and_design.md`](features/archive/20260513_v030_initial_architecture/analysis_and_design.md) + [`docs/adr/`](docs/adr/).
 
 ---
 
-## 디렉토리 구조
+## 더 깊이 들어가기
 
-현재 상태 (v0.1.0 부트스트랩):
-
-```
-wikihub/
-├── AGENTS.md                  # 메인테이너 가이드 (CLAUDE.md / GEMINI.md 심볼릭)
-├── docs/                      # 영속 기록 (영구 보존, supersede로만 변경)
-│   ├── adr/                   #   결정 기록 (Architecture Decision Records)
-│   ├── agent_dev_guide.md     #   개발 방법론 상세
-│   ├── karpathy-guidelines.md #   코딩 행동 가이드
-│   └── llm_wiki.md            #   LLM 위키 패턴 개념 설명
-└── features/                  # 워크스페이스 (라이프사이클 있음)
-    ├── HISTORY.md             #   배포 이력 (append-only)
-    ├── [active feat_id]/      #   진행 중 feature
-    └── archive/               #   완료 feature (종료 처리 시 이동)
-```
-
-향후 추가될 디렉토리 (구현 단계에서):
-
-```
-wikihub/
-├── _system/                   # 정본 룰 + 명령어 플레이북 (install.sh + git workflow로 주입)
-├── scripts/                   # gdrive-sync.py, watcher 등 인프라
-│   └── wikihub_mcp.py         # MCP server (v0.1.10, ADR-0043 — 외부 client read-only query)
-├── docs/
-│   └── mcp-setup.md           # 외부 client (Claude Desktop / Cline) 셋업 가이드 (v0.1.10)
-├── install.sh                 # systemd 배포 + canary/latest tag 흐름
-└── wikihub.yaml.example       # vault 등록 설정 예시
-
-별도 위치 (운영 시):
-/opt/vault-gdrive/             # Drive API로 미러링되는 외부 vault
-/opt/vault-nas/                # 향후 추가 가능
-```
-
----
-
-## 로드맵
-
-v0.1.0 feature 진행 상황 (2026-05-18 기준 — **acceptance 달성**):
-
-| Feature | 범위 | 상태 |
-|---|---|---|
-| **F1: `v030_initial_architecture`** | 메소드론 + 초기 architecture 정본화 | ✅ archive |
-| **F2: `wikihub_schema_v1`** | `_system/wiki-schema.md` + `_system/commands/*` 구현 | ✅ archive |
-| **F3: `vault_gdrive_api`** | `scripts/sync.py` + Drive API + cursor/file_map 영속화 | ✅ archive |
-| **F4: `install_runtime`** | `install.sh` + systemd unit (mount@/vault@/timer/ops-alert/lint) + rclone mount + vfs/refresh + SA 인증 (ADR-0029) | ✅ archive (2026-05-17) |
-| **`update_mode`** | `install.sh` dual-mode (fresh / update) + `_system/VERSION` detect + tag `latest` ref + rollback trap + systemd orchestration + log rotation. F4 결함 #A·#B·#C·#D + R16-L2 일괄 fix. ADR-0030 신설 | ✅ archive (2026-05-17) |
-| **`install_scope_reduction`** | sparse-checkout 6필드 lock + install.sh yaml 미관여 + `/wh-setup` Step 0 yaml writer 단독 책임 + ruamel.yaml round-trip. F4 결함 #E·#F closure. ADR-0031 신설 | ✅ archive (2026-05-18) |
-| **F5: `hermes_adapter`** | Hermes 호출 어댑터 — wikihub `wh-*` skill ↔ Hermes skill 시스템 정합화 (`hermes chat --skills <name> --quiet --query "/<name> ..."`). install-time materialized SKILL.md (frontmatter + commands body) + external_dirs + flock·backup·sha256 + Hermes detect gate. F4 결함 #12 closure. ADR-0032 (skill registration policy) + ADR-0033 (`wh-` prefix lock, supersedes ADR-0011) 신설 | ✅ archive (2026-05-18) |
-| **`dir_layout_refactor`** | Data-first layout invert — `~/wikihub/` = 운영 자산 (WIKIHUB_HOME), `~/.local/share/wikihub/src/` = 시스템 코드 (WIKIHUB_SRC, XDG). env swap + 폐기 + WIKIHUB_INSTANCE_ROOT 폐기. migration helper (`scripts/migrate_layout.sh`, 9-phase state machine + flock + rollback trap + rclone FUSE unmount retry). ADR-0034 신설 + 7 ADR Note (0010·0020·0023·0029·0030·0031·0032). e2e PASS (wikihub-test VM Ubuntu 24.04 ARM + Hermes v0.14.0 + deepseek-v4-pro) | ✅ archive (2026-05-19) |
-| **v0.1.x 운영 정본화 (2026-05-19 ~ 2026-05-22)** | rclone unify (ADR-0035) · graphify CLI (ADR-0036 + backend flexibility) · alert pipeline overhaul (ADR-0037 — Telegram + pending-monitor) · per-skill model override (`agent.models`) · 운영 정본 default align (v0.1.6 — wh-lint=deepseek-v4-flash · sync_interval=1h · hermes `delegation.model` 권장) · yaml schema drift auto-migration (v0.1.7 — `_migrate_agent_schema` 확장: 신설 field 자동 추가 + ADR-0035 폐기 field cleanup) | ✅ archive (`features/archive/` 다수) |
-| **v0.1.10 (2026-05-26 ~ 2026-05-29 — canary)** | MCP integration (ADR-0043 — read-only MCP server + stdio + SSH spawn) · alias-aware link resolver (ADR-0042) · ingest per-vault flock (race guard) · `_step2_update` self-restart current_version export (silent downgrade fix) · `ops-alert` env scrub bug fix (mount@ fallback diagnostic restore) · `promote_canary.sh` + `release.sh` (Step 5 액션 helper) · update_mode V3·V4·V5a/b·V6·V7·V8·V9a·V10·V12 multipass acceptance gate | 🚧 canary (release 직전) |
-| **F6: `vault_directory`** (v0.2.x) | NAS / 로컬 디렉토리 vault type, inotifywait 통합 | 후속 |
-
-**v0.1.0 acceptance 달성** = F1·F2·F3·F4 + update_mode + install_scope_reduction + F5 + dir_layout_refactor (모두 archive). install + update + skill registration + sync→ingest 자동화 사슬 + data-first layout end-to-end 검증 (multipass VM Ubuntu 24.04 ARM + Hermes v0.14.0 + LLM provider 환경에서 V1·V2·V3·V5a·V6·V7·V8·V9 PASS). v0.1.x patch 누적 (2026-05-22 v0.1.6 시점) — OCI 운영 정본 align 완료.
-
-자세한 backlog (R15·R16 Could 8건 + F5 surface 의 #G mount@ root_folder_id 전파 등) 는 [`features/backlog.md`](features/backlog.md) 참조.
+| 주제 | 문서 |
+|---|---|
+| 외부 client (MCP) 셋업 | [`docs/mcp-setup.md`](docs/mcp-setup.md) |
+| version 별 누적 변경 | [`docs/changelog.md`](docs/changelog.md) |
+| 향후 계획 (Phase 2 / v0.2.x) | [`docs/roadmap.md`](docs/roadmap.md) |
+| 메인테이너 / 기여 가이드 | [`AGENTS.md`](AGENTS.md) + [`docs/agent_dev_guide.md`](docs/agent_dev_guide.md) |
+| 모든 아키텍처 결정 | [`docs/adr/`](docs/adr/) (ADR-NNNN 식별자 정본) |
+| LLM wiki 패턴 (배경) | [`docs/llm_wiki.md`](docs/llm_wiki.md) |
 
 ---
 
 ## 참고 자료
 
-### 핵심 개념
-- **[LLM Wiki Pattern (Karpathy)](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** — AI 에이전트가 지식을 축적·구조화하는 설계 패턴 (`docs/llm_wiki.md`에 사본)
-- **[Karpathy Coding Guidelines](https://x.com/karpathy/status/2015883857489522876)** — LLM 코딩 행동 원칙 (`docs/karpathy-guidelines.md`에 사본)
-- **[Architecture Decision Records (Nygard)](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)** — 본 리포의 ADR 컨벤션 출처
-
-### 선행 시스템
-- **[WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate)** — macOS 로컬 단일 vault 모델의 안정화 구현
-
-### 예정 도구
+- **[LLM Wiki Pattern (Karpathy)](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** — AI 에이전트가 지식을 축적·구조화하는 설계 패턴 (사본: [`docs/llm_wiki.md`](docs/llm_wiki.md))
+- **[Karpathy Coding Guidelines](https://x.com/karpathy/status/2015883857489522876)** — LLM 코딩 행동 원칙 (사본: [`docs/karpathy-guidelines.md`](docs/karpathy-guidelines.md))
+- **[Architecture Decision Records (Nygard)](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)** — 본 repo 의 ADR 컨벤션 출처
+- **[MCP spec](https://modelcontextprotocol.io)** — v0.1.10 의 MCP integration 표준
+- **[WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate)** — macOS 로컬 단일 vault 모델의 선행 시스템
 - **[graphify](https://github.com/safishamsi/graphify)** — 위키 페이지 간 지식 그래프
-- **[Hermes](#)** — Telegram 연동 에이전트 (외부 컴포넌트)
+- **Hermes** — Telegram 연동 에이전트 (외부 컴포넌트)
 
 ---
 
