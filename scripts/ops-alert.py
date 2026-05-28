@@ -108,6 +108,7 @@ def collect_mount_fallback_failures(vault_ids: list[str]) -> list[dict[str, Any]
         is_failed = subprocess.run(
             ["systemctl", "--user", "is-failed", f"wikihub-mount@{vault_id}.service"],
             capture_output=True, text=True, timeout=5, check=False,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
         )
         # is-failed: failed 면 exit 0 + stdout "failed". active/inactive 등은 exit 1.
         if is_failed.returncode == 0 and "failed" in is_failed.stdout.strip():
@@ -115,6 +116,7 @@ def collect_mount_fallback_failures(vault_ids: list[str]) -> list[dict[str, Any]
                 ["journalctl", "--user", "-u", f"wikihub-mount@{vault_id}.service",
                  "--since", "30min ago", "--no-pager", "-n", "100"],
                 capture_output=True, text=True, timeout=10, check=False,
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
             )
             diag = (
                 log_tail.stdout[:5000] if log_tail.returncode == 0
