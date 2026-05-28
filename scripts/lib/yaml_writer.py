@@ -88,6 +88,8 @@ def _cleanup_stale_tmp(path: Path) -> None:
         for entry in path.parent.iterdir():
             if not entry.name.startswith(prefix):
                 continue
+            if not entry.is_file():
+                continue
             try:
                 stale_pid = int(entry.name[len(prefix):])
             except ValueError:
