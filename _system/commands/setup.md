@@ -58,7 +58,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 2. **Derived 필드 patching** (ADR-0031 §Decision B catalog, ADR-0035 — credentials_path/gws_min_version 폐기):
    - `instance.root` → `$WIKIHUB_HOME` env
    - `vaults[*].local_path` → `<instance.root>/vault/<vault.id>`
-3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data, round_trip=True)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os.replace).
+3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os_replace, round-trip only).
 4. 보고:
    ```
    wikihub.yaml 생성 완료 (.example → operational, derived 필드 patching 적용).
@@ -83,7 +83,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
        위 변경은 install-time env 값으로 yaml 을 덮어씁니다.
        메인테이너 hand-edit 가 있으면 N 선택. [y/N] (default N)
        ```
-     - `Y` → `yaml_writer.atomic_yaml_write(target, data, round_trip=True)` 재기록.
+     - `Y` → `yaml_writer.atomic_yaml_write(target, data)` 재기록.
      - `N` → 보존 + "재호출 시 다시 prompt" 안내. Step 1 진입 (exit 0).
    - **비대화 모드** (`WIKIHUB_NONINTERACTIVE=1` 또는 `/dev/tty` 부재):
      - drift 보고 (stderr) + 보존.
