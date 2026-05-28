@@ -275,6 +275,18 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참�
 - sources의 vault-prefix는 **필수**. 단축형 `[[meetings/2026-Q1.pptx]]` 사용 금지 → /wh-lint Step 2가 위반 보고
 - entities/concepts/analyses의 단축형 (vault·카테고리 prefix 없음) 허용
 
+**resolver 알고리즘 (entities / concepts 한정) — ADR-0042 정본**:
+
+본 resolver 는 `category ∈ {entities, concepts}` 의 단축형 `[[<name>]]` 에만 적용. sources `[[<vault>/<path>]]` 는 vault-prefix 필수 + alias 개념 없음 (ADR-0001) — 기존 path 그대로.
+
+`[[<name>]]` link 를 wiki 페이지로 매핑할 때 다음 순서로 resolve:
+
+1. **case-sensitive exact match** — `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 시 → 그 페이지.
+2. **alias index lookup** — 부재 시 alias index (`Dict[lowercase_alias, canonical_filename]`) 에서 `<name>.strip().lower()` 조회 → 매핑 canonical 페이지로 resolve. 예: `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 resolve.
+3. **dangling** — 둘 다 부재 시 dangling link (lint Step 2 보고 대상).
+
+**alias index 구축**: lint cycle 시작 시 (Step 1 직후, Step 2 진입 전) `wiki/entities/` + `wiki/concepts/` 의 모든 page frontmatter `aliases` 를 lowercase normalize 한 inverted index 빌드. 동일 cycle 내 모든 resolver 호출이 같은 index 공유. alias `aliases[0]` 는 ADR-0039 정합 — canonical name = 파일명 stem. 충돌 (같은 lowercase alias 의 2+ canonical) 은 lint Step 4.5 가 duplicate 로 보고.
+
 **entities/concepts 동명 충돌 정책** (현 v0.1.0):
 - 동일 카테고리에 동명이 발생할 경우 `<name> (disambiguator).md` 형식으로 disambiguator 추가 (Wikipedia 스타일)
   - 예: `entities/홍길동 (전략기획팀).md`, `entities/홍길동 (재무팀).md`

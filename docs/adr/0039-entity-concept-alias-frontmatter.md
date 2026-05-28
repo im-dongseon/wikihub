@@ -96,10 +96,11 @@ ingest.md / lint.md Step 3 의 LLM prompt 에 명시:
 - **재검토 트리거**:
   - LLM 재생성 cycle 의 alias skip 정확도가 운영 데이터에서 부족 surface 시 — prompt 보강 또는 lint Step 4.5 의 알고리즘 정밀화
   - alias 가 운영자에게 부담 surface 시 — 자동 추론 default 강화 (예: sources 본문 등장 form 모두 자동 alias)
-  - wiki-schema 의 link resolver 가 alias 인식 (`[[mini-max]]` 가 `MiniMax` page 로 자동 해석) 필요 시 — 별도 ADR
+  - ~~wiki-schema 의 link resolver 가 alias 인식 (`[[mini-max]]` 가 `MiniMax` page 로 자동 해석) 필요 시 — 별도 ADR~~ → **closure: ADR-0042 (alias-aware wiki link resolver)** 가 본 항목 처리 (frontmatter `aliases` 기반 inverted index + 2-pass resolve, 2026-05-28)
 
 ## Cross-references
 
 - ADR-0001 (link 규약) — link 단축형 `[[<name>]]` 그대로 사용. alias 는 frontmatter 만.
 - ADR-0036 (graphify CLI integration) — graphify_timeout_sec yaml expose 가 본 feature 의 다른 부분 (I1).
+- ADR-0042 (alias-aware wiki link resolver) — 본 ADR 의 §재검토 트리거 link resolver 항목 closure. frontmatter `aliases` 를 link resolution 에도 사용.
 - features/20260525_lint_operations_improvements/analysis_and_design.md §2.9 — alias 도입 결정 흐름

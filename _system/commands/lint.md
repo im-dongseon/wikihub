@@ -49,13 +49,48 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 - `wiki/` 직속 파일 중 `index.md` 외 페이지 → `_lint/report.md`에 보고 (이동은 Step 7 에서 자동)
 - 4 카테고리·`_lint/`·vault별 `sources/{vault}/` 디렉토리 부재 시 생성
 
-### Step 2. ADR-0001 link 규약 검증 (자동, 보고만)
+### Step 1.5. alias index build (v0.1.10 — ADR-0042)
+
+본 cycle 의 Step 2 dangling 검사가 사용할 alias inverted index 를 1회 빌드. (Step 4.5 duplicate detection 은 별도 subprocess `detect_alias_duplicates.py` 가 wiki 자체 스캔으로 처리 — 본 index 와 독립.)
+
+```python
+alias_index: dict[str, str] = {}   # lowercase_alias → canonical_filename
+for category in ("entities", "concepts"):
+    for page in (wiki_root / category).glob("*.md"):
+        canonical = page.stem
+        fm = read_frontmatter(page)
+        for alias in (fm.get("aliases") or [canonical]):
+            key = alias.strip().lower()
+            if key in alias_index and alias_index[key] != canonical:
+                continue   # 충돌 — Step 4.5 가 duplicate 보고
+            alias_index[key] = canonical
+```
+
+비용: O(N) frontmatter read (N = entities + concepts 페이지 수). frontmatter 파싱 오류 발생 페이지는 skip + Step 4.5 가 결함 보고. 본 cycle 내 모든 resolver 호출이 같은 index 공유 (consistency).
+
+### Step 2. ADR-0001 link 규약 검증 (자동, 보고만 — ADR-0042 resolver 적용)
 
 전체 wiki 페이지의 `[[link]]` 추출 후:
 
 - **위반 1 — sources의 단축형 link**: source 카테고리 페이지 또는 source 페이지로 향하는 link 중 vault prefix 누락 (`[[report]]` 같은 형식) → 위반 항목 `_lint/report.md`에 기록
 - **위반 2 — 잘못된 vault prefix**: `[[unknown/path]]`에서 `unknown`이 `wikihub.yaml.vaults[*].id`에 없음 → 보고
 - **위반 3 — vault 존재하나 path 없음 (dangling)**: `[[gdrive/old/file]]`에서 `wiki/sources/gdrive/old/file.md` 부재 → 보고
+
+**entities / concepts 단축형 `[[<name>]]` dangling 검사 (ADR-0042 resolver)** — **category ∈ {entities, concepts} 한정**. sources 는 위반 1·2·3 path 그대로.
+
+```python
+def resolve_link(name, category):
+    # 호출 전제: category in {"entities", "concepts"}
+    exact = wiki_root / category / f"{name}.md"
+    if exact.is_file():
+        return exact
+    canonical = alias_index.get(name.strip().lower())
+    if canonical:
+        return wiki_root / category / f"{canonical}.md"
+    return None   # dangling
+```
+
+`[[<name>]]` 가 entities/concepts 단축형이면 `resolve_link(name, "entities")` 또는 `resolve_link(name, "concepts")` 호출 — alias 매핑된 canonical 페이지가 존재하면 valid (dangling 아님). 둘 다 부재 시 dangling 보고. 예: `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 resolve → 보고 안 함.
 
 검출만, 자동 수정 X (단축형의 의도된 동의어 가능성, dangling의 "나중에 만들 페이지" 의도 가능성).
 
