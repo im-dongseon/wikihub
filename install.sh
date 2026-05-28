@@ -1414,8 +1414,12 @@ _step2_update() {
     trap '_rollback_if_failed' ERR EXIT INT TERM HUP
 
     info "[detected wikihub at $WIKIHUB_SRC]"
-    local current_version=""
-    IFS= read -r current_version < "$WIKIHUB_SRC/_system/VERSION" || current_version=""
+    # current_version capture: self-restart 전에 export 해야 child process 가 pre-reset version 보존 (Issue #86)
+    if [[ -z "${INSTALL_OLD_VERSION:-}" ]]; then
+        IFS= read -r INSTALL_OLD_VERSION < "$WIKIHUB_SRC/_system/VERSION" || INSTALL_OLD_VERSION=""
+        export INSTALL_OLD_VERSION
+    fi
+    local current_version="$INSTALL_OLD_VERSION"
     if [[ -z "$current_version" ]]; then
         err "_system/VERSION empty — 파일 손상 의심. \`--force-fresh\` 로 재설치 또는 수동 복구."
         exit 1
