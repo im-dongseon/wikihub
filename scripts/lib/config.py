@@ -220,6 +220,20 @@ def load_wikihub_yaml(path: Path | None = None) -> Config:
                 remediation="vault id 는 unique 해야 함",
             )
         vaults[vid] = _parse_vault(vid, vcfg)
+    # vault 간 rclone_rc_port 중복 검증 (ADR-0025: rc port unique per vault)
+    seen_ports: dict[str | int, str] = {}
+    for vcfg in vaults_raw:
+        vid = _require(vcfg, "id", ctx="vaults[*]")
+        opts = dict(vcfg.get("options", {}))
+        port = opts.get("rclone_rc_port")
+        if port is not None:
+            if port in seen_ports:
+                raise VaultSyncFatal(
+                    vault_id=vid,
+                    reason=f"rclone_rc_port={port} 중복 (vault '{seen_ports[port]}' 가 이미 사용 중)",
+                    remediation="각 vault 의 rclone_rc_port 는 고유해야 합니다. 중복 port 제거 또는 변경.",
+                )
+            seen_ports[port] = vid
     return Config(
         version=version,
         instance_root=Path(_require(instance, "root", ctx="instance")).expanduser(),
