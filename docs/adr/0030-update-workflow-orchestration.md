@@ -124,3 +124,9 @@ ADR-0034 data-first layout invert 후 본 ADR 의 4 sub-decision 모두 path 변
 - **sub-4 (ref resolution chain)**: `--version > BRANCH > latest > local cache > main HEAD` — 모두 `git -C "$WIKIHUB_SRC"` 컨텍스트.
 
 Status 변경 없음. cwd 변경만, 4 sub-decision invariant 보존.
+
+## Note (2026-05-28, issue #8) — 운영 가이드: rollback window 내 수동 systemctl 자제
+
+install.sh 실행 중(특히 rollback 진행 중) 운영자의 수동 `systemctl --user start/stop wikihub-*` 호출은 flock 보호 범위 밖이다. install.sh 실행 로그(`install.sh` tee 출력 또는 `journalctl --user -f`) 를 확인하면서 스크립트가 종료될 때까지 systemctl 직접 호출을 자제할 것.
+
+Status 변경 없음. 운영 가이드 보강.
