@@ -157,6 +157,8 @@ agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh-setup은 그 
 - `--enable` 플래그 시: `wikihub-lint.timer` **만** `enable --now`. **wikihub-ingest@<vid>.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
 - 미플래그 시: 권장 액션 출력만.
 
+> **update path (install.sh `_systemd_start_after_update`)**: v0.1.10+ 부터 `install.sh` 의 update path 에서 timer start 직후 `systemctl --user enable` 을 자동 수행. 재부팅 후 timer 자동 시작 보장. `--enable` 플래그 없는 install.sh update 에서도 timer 가 enable 처리됨.
+
 ### Step 5. 보고
 
 ```

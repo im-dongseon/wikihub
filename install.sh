@@ -1672,8 +1672,13 @@ _systemd_start_after_update() {
     for v in $desired_vaults; do
         systemctl --user start "wikihub-ingest@${v}.timer" 2>/dev/null \
             || warn "wikihub-ingest@${v}.timer start 실패"
+        # Issue #34: enable — reboot 후 timer 자동 시작 보장
+        systemctl --user enable "wikihub-ingest@${v}.timer" 2>/dev/null \
+            || warn "wikihub-ingest@${v}.timer enable 실패"
     done
     systemctl --user start wikihub-lint.timer 2>/dev/null || warn "wikihub-lint.timer start 실패"
+    # Issue #34: enable — reboot 후 timer 자동 시작 보장
+    systemctl --user enable wikihub-lint.timer 2>/dev/null || warn "wikihub-lint.timer enable 실패"
     ok "systemd start sequence 완료"
 }
 
