@@ -77,7 +77,7 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 | profile bundle 부재 (env model var unset, exit 2) | OnFailure=ops-alert 발화 — `~/.config/wikihub/env` 확인 |
 | graphify extract timeout (exit 124) | SuccessExitStatus 정합 (75 분류 안 됨, 124 fail — ops-alert) |
 | graph.json invalid JSON (partial write) | scripts/wikihub_graphify.sh 가 자동 삭제 + exit 1 (force clean) |
-| N/M ratio < threshold | journal WARNING surface — ops-alert trigger 는 BL 등록 (현행 stderr warn 만) |
+| N/M ratio < threshold | `_state/_graphify/last_failure.json` 기록 + journal WARNING. ops-alert 가 다음 주기 collect (v0.1.10, Issue #42). |
 
 ## 관련 ADR
 

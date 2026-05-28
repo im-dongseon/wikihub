@@ -21,6 +21,8 @@ GRAPHIFY_STATE_DIR="${WIKIHUB_HOME}/_state/_graphify"
 _write_graphify_failure() {
   local reason="$1"
   local remediation="${2:-}"
+  local exit_code_arg="${3:-2}"
+  local severity_arg="${4:-fatal}"
   mkdir -p "$GRAPHIFY_STATE_DIR"
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -44,11 +46,11 @@ print(d.get(\"first_failed_at\", sys.argv[2]))
     cat > "$GRAPHIFY_STATE_DIR/last_failure.json" <<EOF
 {
   "vault_id": "_graphify",
-  "severity": "fatal",
+  "severity": "${severity_arg}",
   "scope": "graphify",
   "reason": "${reason}",
   "remediation": "${remediation}",
-  "exit_code": 2,
+  "exit_code": ${exit_code_arg},
   "source_id": null,
   "first_failed_at": "${first_failed_at}",
   "last_failed_at": "${now}",
@@ -183,6 +185,8 @@ if ! keys="$(jq -r 'keys | join(",")' "$WIKIHUB_HOME/graphify-out/graph.json" 2>
 fi
 
 # partial failure 가드 (ADR-0036 §재검토 트리거 — Pass 3 silent partial failure)
+# stale last_failure cleanup: 이전 사이클의 bootstrap/timeout fail 기록 선삭제 (Issue #42)
+rm -f "$GRAPHIFY_STATE_DIR/last_failure.json"
 N="$(jq -r '.nodes | length' "$WIKIHUB_HOME/graphify-out/graph.json")"
 M="$(find "$WIKIHUB_HOME/wiki" -name '*.md' -not -path '*/_lint/*' -not -path '*/_state/*' 2>/dev/null | wc -l)"
 threshold="$(yq '.operations.graphify_partial_failure_threshold // 0.5' "$WIKIHUB_YAML")"
@@ -190,7 +194,10 @@ threshold="$(yq '.operations.graphify_partial_failure_threshold // 0.5' "$WIKIHU
 if [[ "$M" -gt 0 ]]; then
     if awk "BEGIN {exit !($N / $M < $threshold)}"; then
         echo "WARNING: graphify partial failure 의심: N=$N, M=$M, ratio=$(awk "BEGIN {print $N/$M}")" >&2
-        # ops-alert trigger 는 BL 등록 (본 fix scope 외 — 단순 stderr warn 만)
+        _write_graphify_failure \
+            "graphify partial failure 의심: N=$N, M=$M, ratio=$(awk "BEGIN {printf \"%.2f\\n\", $N/$M}")" \
+            "wiki page 수 대비 graph node 수가 threshold($threshold) 미만 — graphify backend/endpoint 점검 또는 threshold 조정" \
+            0 "warning"
     fi
 fi
 
@@ -198,6 +205,6 @@ echo "graph rebuilt: $N nodes, $M docs" >&2
 
 # Step 5. cache cleanup — 입력 경로 아래 graphify-out/cache side effect 제거 (lint→graphify 무한 루프 방지)
 rm -rf "$WIKIHUB_HOME/wiki/graphify-out"
-rm -f "$GRAPHIFY_STATE_DIR/last_failure.json"
+# last_failure cleanup 은 partial failure 가드 앞에서 선실행 (Issue #42)
 
 exit 0
