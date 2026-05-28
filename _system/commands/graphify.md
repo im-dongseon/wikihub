@@ -52,7 +52,14 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 ## 운영 흐름
 
 - **timer 자동**: lint cycle 의 Step 9 가 trigger 책임. lint cycle 자체가 wikihub-lint.timer (3h 주기) 로 fire — graphify chain 은 변경 시만 fire (cost gate).
-- **메인테이너 수동**: `systemctl --user start wikihub-graphify.service` — 즉시 graph 갱신 필요 시. 또는 `WIKIHUB_HOME=... WIKIHUB_YAML=... scripts/wikihub_graphify.sh --rebuild` (force full rebuild).
+- **메인테이너 수동**: `systemctl --user start wikihub-graphify.service` — lint Step 9 분기와 동일한 systemd 경로. graph.json 이 손상되지 않은 일반 갱신용.
+- **강제 rebuild** (`--rebuild`): systemd ExecStart 는 인자 전달 불가. 직접 script 호출 필요:
+  ```bash
+  cd "$WIKIHUB_HOME"
+  source ~/.config/wikihub/env                    # ADR-0038 profile bundle (WIKIHUB_GRAPHIFY_<PROFILE>_*)
+  scripts/wikihub_graphify.sh --rebuild
+  ```
+  `WIKIHUB_HOME`, `WIKIHUB_YAML`, `WIKIHUB_SRC`, `PATH` 가 설정된 shell 에서 실행. 위 `source ~/.config/wikihub/env` 로 두 env 를 직접 설정하지 않아도 systemd 의 EnvironmentFile 과 동일한 profile bundle env 가 로드됨. graph.json 손상·stale 데이터 강제 재생성 시 사용.
 
 ## 산출물
 
