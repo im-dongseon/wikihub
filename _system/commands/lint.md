@@ -84,22 +84,52 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 
 wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 탐지. **alias 기반 인식** — 단순 lowercase 비교가 아닌 frontmatter `aliases` 셋 비교 (ADR-0039 정합).
 
-**Alias migration** (idempotent, 매 cycle):
+**구현**: `scripts/_helpers/detect_alias_duplicates.py` (Python subprocess helper, token 0화). LLM 호출 대신 deterministic subprocess 로 동일한 알고리즘을 처리한다:
+
+```bash
+# WIKIHUB_HOME 기준 wiki/entities/ + wiki/concepts/ scan → JSON stdout
+python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+출력 JSON 구조:
+```json
+{
+  "case_variant": [
+    {
+      "alias": "minimax",
+      "category": "entity",
+      "category_dir": "entities",
+      "pages": [
+        {"path": "wiki/entities/MiniMax.md", "original": "MiniMax"},
+        {"path": "wiki/entities/minimax.md", "original": "minimax"}
+      ]
+    }
+  ],
+  "cross_category": [
+    {
+      "alias": "docker",
+      "pages": [
+        {"path": "wiki/entities/Docker.md", "original": "Docker", "category": "entity"},
+        {"path": "wiki/concepts/Docker.md", "original": "Docker", "category": "concept"}
+      ]
+    }
+  ]
+}
+```
+
+→ `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 결과를 변환해 기록. Step 7 에서 자동 처리.
+
+**검증 기준** (ADR-0039 정합):
+- 비교는 **alias 셋의 lowercase normalize** — `MiniMax` 와 `minimax` 의 alias 셋이 공통 lowercase form 1+ 공유하면 같은 entity (단일 page 내 변형 alias 들은 다른 page 와 분리).
+- case-variant = 같은 카테고리 내 2+ page 가 공통 lowercase form 보유.
+- cross-category = entity normalize 셋 ∩ concept normalize 셋 ≠ ∅.
+
+**Alias migration** (idempotent, 매 cycle — 기존 유지, Python subprocess 외 보조):
 - 각 entity/concept page 의 frontmatter `aliases` 부재 시 — `aliases: [<canonical>]` 자동 추가 (canonical = 페이지 파일명 base).
 - 빈 `aliases: []` 도 동일 처리.
 - **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (ingest.md:152) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
-
-**Case-variant duplicate** (같은 카테고리):
-- entity 또는 concept 각각의 page list — `aliases` 셋을 lowercase 로 normalize 한 셋끼리 비교.
-- 2+ page 의 normalize 셋이 1+ 공통 form 보유 + 다른 page → duplicate 보고.
-- 공통 form 없으면 정합 (단일 page 의 변형 alias 들이 다른 page 와 분리).
-
-**Cross-category duplicate** (entity ↔ concept):
-- entity 의 normalize 셋 ∩ concept 의 normalize 셋 = 비공집합 페어 → duplicate 보고.
-- 예: entities/Docker (aliases [Docker, docker]) + concepts/Docker (aliases [Docker]) → 공통 `docker` lowercase → duplicate.
-
-→ `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 보고. Step 7 에서 자동 처리.
 
 ### Step 5. wiki/index.md 재구성 (자동)
 
