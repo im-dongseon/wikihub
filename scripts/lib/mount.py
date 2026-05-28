@@ -82,9 +82,10 @@ def assert_mount_alive(
             capture_output=True, text=True, timeout=timeout_sec, check=False,
         )
         if result.returncode != 0:
+            stderr_snip = result.stderr[:200].replace("\n", " ").replace("\r", "")
             reason = (
                 f"mount path stat 실패 (rc={result.returncode}) — mount.service 미준비/dead: "
-                f"{mount_path}, stderr={result.stderr[:200]!r}"
+                f"{mount_path}, stderr={stderr_snip}"
             )
             _raise_mount_failure(vault_id, state_dir, reason)
     except subprocess.TimeoutExpired:
@@ -246,6 +247,7 @@ def vfs_refresh(
     raw_full = result.stderr or rc_error_msg
     error_full = raw_full[-_ERROR_REGEX_SIZE_CAP:] if len(raw_full) > _ERROR_REGEX_SIZE_CAP else raw_full
     error_snippet = error_full[:500]
+    snippet = error_snippet[:200].replace("\n", " ").replace("\r", "")
     if _RCLONE_AUTH_PATTERNS.search(error_full):
         if state_dir is not None:
             now = utc_now_iso()
@@ -254,7 +256,7 @@ def vfs_refresh(
                 "exit_code": 2,
                 "severity": "fatal",
                 "scope": "mount",
-                "reason": f"rclone OAuth revoked/corrupt: {error_snippet[:200]!r}",
+                "reason": f"rclone OAuth revoked/corrupt: {snippet}",
                 "remediation": (
                     "setup.md §Step 5.5 — `rclone config` 재발급 (OAuth token) "
                     f"+ chmod 0600 ~/.config/rclone/rclone.conf "
@@ -268,7 +270,7 @@ def vfs_refresh(
             })
         raise VaultSyncFatal(
             vault_id=vault_id,
-            reason=f"rclone OAuth error (pattern matched): {error_snippet[:200]!r}",
+            reason=f"rclone OAuth error (pattern matched): {snippet}",
             remediation=(
                 f"rclone config 재발급 (setup.md §Step 5.5, ADR-0035) "
                 f"+ systemctl --user restart wikihub-mount@{vault_id}.service"
@@ -281,7 +283,7 @@ def vfs_refresh(
         vault_id=vault_id,
         retry_after_sec=120,    # 진단 메타
         reason=f"rclone rc vfs/refresh failed: rc={result.returncode}, "
-               f"error={error_snippet[:200]!r}",
+               f"error={snippet}",
     )
 
 
