@@ -448,7 +448,7 @@ _step3_venv() {
     local req_file="$WIKIHUB_SRC/scripts/requirements.txt"
     if [ -f "$req_file" ]; then
         info "deps 설치/갱신: scripts/requirements.txt (uv pip — idempotent)"
-        uv pip install --python "$VENV_PATH/bin/python" -r "$req_file"
+        uv pip install --require-hashes --python "$VENV_PATH/bin/python" -r "$req_file"
     else
         warn "scripts/requirements.txt 없음 — venv 생성만 (의존성 미설치)"
     fi
