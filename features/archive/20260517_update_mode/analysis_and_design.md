@@ -837,13 +837,42 @@ backlog 후보 (본 feature 스코프 밖):
 | V6 | install.log > 10MB 호출 | rotation + 새 file. 8번째 prune |
 | V7 | requirements.txt 변경된 ref | venv keep, pip install 재실행. 미변경 → skip |
 | V8 | tag latest 부재 + ls-remote 정상 → main HEAD fallback. ls-remote fail → local cache | banner 에 명시 |
-| V9a | `--version <존재 tag>` → checkout. `--version <부재 tag>` → fatal |  |
+| V9a | `--version <존재 tag>` → checkout. `--version <부재 tag>` → fatal | 존재 tag 시 `_resolve_ref` path 1 (`refs/tags/<tag>`) 으로 reset --hard + full install pipeline 진행. 부재 tag 시 `_resolve_ref` 가 `--version <tag>: tag 부재.` ERROR 출력 + exit 1 + trap rollback (systemd 재기동) |
 | V10 | template fixture commit (e.g. mount@ 의 placeholder 한 줄 추가) → update → active service 의 `systemctl show` 에 반영 | render_systemd_units.py 가 정합 |
 | V11 | `uv pip install` 강제 실패 (PyPI 401 또는 invalid requirement) → trap rollback | PRE_UPDATE_REF 복귀 + render 재호출 + systemd 재기동. **rollback 후 active unit content 가 직전 ref render 결과와 byte-equal** (CRIT-N1 검증) |
 | V12 | `git reset --hard` 중 disk full (`fallocate` 시뮬) → fatal + 진단 | trap rollback (PRE_UPDATE_REF 미변경 분기) |
 | V13 | 동시 두 install.sh 호출 | 둘째 즉시 fatal (lock). curl-pipe + update 호출 시 bootstrap exec 후 새 process 가 fresh lock 잡음 (HIGH-N4 검증) |
 | V14 | `render_systemd_units.py` contract — yaml malformed (`--render` exit 2), `--list-enabled` (enabled vault stdout), `--get-mount-path` (미발견 exit 1), idempotent (동일 yaml 재호출 시 byte-equal skip — `stat -c %Y` mtime 보존) | HIGH-N1 contract 정합 |
 | V15 | stop sequence 중간 Ctrl+C (SIGINT) | rollback trap 의 SIGINT 분기 진입 + systemd 재기동 자동 (MED-N4 검증) |
+
+### 9.2.1 Acceptance gate 수행 결과 (issue #33, 2026-05-28)
+
+OCI ARM Ubuntu 24.04 multipass VM 에서 v0.1.10 install.sh 호출. update path 검증 결과.
+
+| ID | 검증 방법 | 결과 | 관찰 |
+|---|---|---|---|
+| V1 | (이전 archive 시점 VM-test) | PASS | F4 backport — 변경 없음 |
+| V2a | (이전 archive 시점 VM-test) | PASS | unstaged guard L1432 동작 |
+| V2b | (이전 archive 시점 VM-test) | PASS | index.lock guard L1427 동작 |
+| V3 | code-read (`_confirm_force_fresh_wipe` L338-344, `_rollback_if_failed` SIGINT 분기 L1518-1528) | PASS (코드 정합) | wipe 5초 confirm = `sleep 5`. Ctrl+C → exit 130 + systemd 재기동 trap |
+| V4 | code-read (`_systemd_stop_before_update` L1610-1659, `_timeout 900 systemctl stop` L1637) | PASS (코드 정합) | 15min grace = `_timeout 900`. mid-sync 실제 시뮬은 OAuth + vault data 필요라 운영자 별도 검증 |
+| V5a | VM-test (`--version v0.1.8` from v0.1.9) | **FAIL** | `intentional downgrade` warn (L1496) 미발화. 원인: self-restart (L1479-1487) 후 child process 가 `current_version` 을 git reset 후 read 해서 항상 `current_version == new_version` (idempotent 분기 hit). transition reporting 도 동일 원인으로 "vX → vX" 잘못 표시. **follow-up issue 필요** |
+| V5b | VM-test (VERSION 0.0.1 위조) + code-read | PARTIAL | `_verify_version_tag_integrity` (L1326-) 가 warn 발화 ✓. 단 issue #33 본문 / 본 §9.2 의 "fatal exit" 기대는 코드와 어긋남 — 실제 `_verify_version_tag_integrity` 는 warn-only (운영자 인지 + 진행), fatal exit 는 unstaged guard 의 부수 효과. **spec 정합화 필요 — V5b 기대를 "warn + 진행" 으로 정정 권고** |
+| V6 | VM-test (`dd 11MB padding` → `install.sh` 호출) | PASS | install.log 12MB → 15KB 새 file + `install.log.20260528_232053_4074` 로 rotate. 8번째 prune 는 1회 호출로 미검증 (8회 누적 필요) |
+| V7 | code-read (`_step3_venv` venv age + requirements.txt diff 분기) | PASS (코드 정합) | venv keep + pip install 재실행. 운영 환경 시뮬은 별도 commit + push 권한 필요 |
+| V8 | code-read (`_resolve_ref` path 4·5 L1382-1395) | PASS (코드 정합) | latest tag 부재 + ls-remote fail → local semver max tag. local cache 도 부재 → `origin/main` HEAD + banner. 운영 시뮬은 origin 의 latest tag 삭제 권한 필요 |
+| V9a 존재 | VM-test (`--version v0.1.9` same-ref) | PASS | full install pipeline 통과. `Step 10 systemd verify ok` |
+| V9a 부재 | VM-test (`--version v999.0.0`) | PASS | `--version v999.0.0: tag 부재.` ERROR + exit 1 + trap rollback (systemd 재기동) |
+| V10 | partial VM-test (V9a 존재 케이스에서 `_step8_systemd_render` 정상 호출) + code-read | PASS (코드 정합) | `render ok: written=0 skipped=7 removed_stale=0 enabled_vaults=['gdrive']` (idempotent). 실제 template fixture commit 시뮬은 push 권한 필요 |
+| V11 | (이전 archive 시점 VM-test) | PASS | CRIT-N1 검증 |
+| V12 | code-read (`_rollback_if_failed` PRE_UPDATE_REF 미변경 분기 L1530-1538) | PASS (코드 정합) | `current_ref == PRE_UPDATE_REF` 일 때 reset 생략, render + systemd 재기동만. 실제 disk full 시뮬은 VM disk 공간/위험 |
+| V13 | (이전 archive 시점 VM-test) | PASS | install.lock 정합 |
+| V14 | (이전 archive 시점 VM-test) | PASS | render_systemd_units.py contract |
+| V15 | (이전 archive 시점 VM-test) | PASS | SIGINT 분기 정합 |
+
+**결함 발견 (V5a)** — self-restart 후 `current_version` 재read 로 인해 downgrade warn / transition reporting 항상 same-version 표시. issue #33 본 acceptance gate 의 명시적 FAIL 발견. follow-up fix 이슈 권고:
+- 원인: install.sh L1417 (current_version 첫 read) 가 self-restart 전 호출인데, self-restart 후 같은 line 이 다시 hit (이번엔 reset 후 VERSION = target).
+- 권장 fix: self-restart 전 `INSTALL_OLD_VERSION` 을 export → child process 에서 그대로 신뢰. 또는 PRE_UPDATE_REF 와 같이 ORIGINAL_VERSION 도 export.
 
 ### 9.3 review (Step 4)
 
