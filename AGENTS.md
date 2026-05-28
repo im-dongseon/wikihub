@@ -185,6 +185,8 @@ flowchart TD
 
 > 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치의 누적 commit + OCI canary 검증 통과 후. 운영자 호출형 = `install.sh --branch canary`.
 
+> **다중 feat_id squash**: 두 개 이상의 feature 가 동일 squash commit 에 포함될 때, commit title 은 primary feat_id 만 사용하고 commit body 에 포함된 모든 feat_id 를 열거한다. 형식: `feat(primary): <설명> (vX.Y.Z)` + body 에 `Also includes: secondary_feat, micro_feat`. 단일 feat_id 와 동일한 squash flow 를 적용하며, HISTORY.md 에는 primary feat_id 기준 1 항목으로 기록한다.
+
 **release 후 ref 상태**:
 - `main HEAD` = `refs/tags/vX.Y.Z` = `refs/tags/latest` = merge commit M (3 ref 동일 commit)
 - `refs/heads/v0.X.Y` = M.parents[1] (release 직전 commit, **hotfix base 후보로 보존**)
@@ -209,6 +211,8 @@ flowchart TD
 ```
 
 > 결정 이유의 상세는 ADR로 옮겨갔으므로 HISTORY 항목은 "생성 ADR" 한 줄로 참조한다. ADR이 없는 단순 운영성 feature는 이 줄을 생략한다.
+
+> **다중 feat_id squash**: 두 개 이상의 feature 가 동일 squash commit 에 포함된 경우, HISTORY.md 에는 primary feat_id 기준 1 항목만 추가한다. feat_id 목록은 `참조` 행에 포함된 feat_id 를 열거한다.
 
 **에스컬레이션**: 배포 실패 시 운영 서버의 systemd 상태(`systemctl --user status …`)와 `wikihub.yaml` 설정을 점검합니다.
 
