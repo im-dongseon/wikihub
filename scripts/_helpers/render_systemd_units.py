@@ -254,7 +254,11 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
         "agent_invocation": agent_invocation,
         "skill_prefix": agent.get("skill_prefix", "wh-"),
         # F5 — yaml.agent.timeout_sec ↔ systemd TimeoutStartSec sync (R3-CR3-2 B-HIGH-2)
-        "timeout_start_sec": str(agent.get("timeout_sec", 600)),
+        # Issue #104: lint/ingest 각각 yaml override 지원. 우선순위:
+        # operations.lint_timeout_start_sec → agent.timeout_sec → 600
+        # operations.ingest_timeout_start_sec → agent.timeout_sec → 600
+        "lint_timeout_start_sec": str(ops.get("lint_timeout_start_sec") or agent.get("timeout_sec", 600)),
+        "ingest_timeout_start_sec": str(ops.get("ingest_timeout_start_sec") or agent.get("timeout_sec", 600)),
     }
 
     # F5 — per-skill agent_invocation_for_<skill> keys (ADR-0032·0033)

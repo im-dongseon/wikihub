@@ -43,6 +43,9 @@ operations:
   fatal_webhook_url: null             # 미설정 시 ops-alert.service no-op (journal 만)
   fatal_webhook_timeout_sec: 10
   instance_label: null                # R10 MED-3 + R16-L6: webhook payload 의 wikihub_instance 식별자. 미설정 시 socket.gethostname() 사용 — OCI internal hostname (예: inst-2x4-arm-ubuntu) 외부 SaaS (Slack/Discord) leak 회피 위해 운영자 명시 alias 권장. 권장 형식: "wikihub-prod-ap1" / "wikihub-staging".
+  # Issue #104 (v0.1.10) — systemd TimeoutStartSec yaml-driven. 미설정 시 agent.timeout_sec fallback → 600:
+  lint_timeout_start_sec: 1200          # wikihub-lint.service TimeoutStartSec. lint Step 9 (graphify trigger) 는 fire-and-forget 이므로 lint timeout 과 graphify timeout 은 독립적.
+  ingest_timeout_start_sec: 1200        # wikihub-ingest@.service TimeoutStartSec. vault size 대비 여유 margin 필요 시 증설.
   # lint_operations_improvements (v0.1.8) — graphify timeout yaml expose (ADR-0036 §"후속 영향" + ADR-0039 alias frontmatter):
   graphify_timeout_sec: 900                        # graphify subprocess wrapper timeout (15분). v0.1.5~v0.1.7 era hard-coded 720s 에서 yaml expose 격상. LLM backend latency 누적 대비 default 900s. 운영자 backend 별 조정 가능.
   graphify_partial_failure_threshold: 0.5          # graphify graph 의 N/M ratio threshold (Pass 3 silent partial failure 가드). N=graph 노드 수, M=wiki .md 페이지 수. 0.5 미만 시 _lint/report.md + journal 에 partial failure 의심 warn. 운영자 별 조정 가능 (작은 wiki 또는 entity stub 누적 적은 초기엔 보수적 default 가 false positive 가능 — 0.3 등으로 낮춤 권장). ADR-0036 §재검토 트리거.
