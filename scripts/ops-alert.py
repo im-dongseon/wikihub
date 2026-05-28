@@ -162,10 +162,7 @@ def collect_last_failures(instance_root: Path) -> list[tuple[Path, dict[str, Any
 def post_webhook(url: str, payload: dict[str, Any], timeout_sec: int) -> bool:
     """webhook POST. 성공 시 True. 실패는 silent — exit 0 유지.
 
-    R10 HIGH-1 fix: connect + read timeout 분리 — socket-level default 도 설정.
     """
-    # connect timeout 도 함께 적용되도록 socket default 도 짧게 설정
-    socket.setdefaulttimeout(timeout_sec)
     try:
         req = urllib.request.Request(
             url,
@@ -178,8 +175,6 @@ def post_webhook(url: str, payload: dict[str, Any], timeout_sec: int) -> bool:
     except (urllib.error.URLError, socket.timeout, OSError) as e:
         log.warning("webhook POST 실패: %s — %s", url, e)
         return False
-    finally:
-        socket.setdefaulttimeout(None)
 
 
 def send_telegram(
@@ -196,7 +191,6 @@ def send_telegram(
         "parse_mode": "HTML",
     }
     data = json.dumps(payload).encode("utf-8")
-    socket.setdefaulttimeout(timeout_sec)
     try:
         req = urllib.request.Request(
             url,
@@ -209,8 +203,6 @@ def send_telegram(
     except (urllib.error.URLError, socket.timeout, OSError) as e:
         log.warning("telegram 전송 실패: %s", e)
         return False
-    finally:
-        socket.setdefaulttimeout(None)
 
 
 def format_telegram_alert_message(instance: str, alerts: list[dict[str, Any]]) -> str:
