@@ -789,12 +789,14 @@ _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
 
-    # drift detect — yaml.example single source of truth 와 자동 sync (v0.1.8 update_path_fixes R2 fix).
-    # 운영자 yaml 의 operations + agent top-level field 가 yaml.example 의 default 와 비교 — 부재 시 flag.
-    # 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0). ADR-0031 §"후속 영향".
+    # PYEOF3 — 단일 heredoc: detect + write + backup (race window 제거, ruamel 일관 사용).
+    # 운영자 yaml 의 operations + agent top-level field 가 yaml.example 의 default 와 비교 —
+    # 부재 시 자동 추가. 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0).
+    # ADR-0031 §"후속 영향". flag format 의 space-safe.
     local drift_flags
     drift_flags="$("$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
-import sys, os, yaml as _yaml
+import sys, os, copy, shutil, ruamel.yaml
+from datetime import datetime
 path = sys.argv[1]
 example_path = sys.argv[2]
 
@@ -803,11 +805,14 @@ if not os.path.isfile(example_path):
     print(f"ERROR: yaml.example 부재 — {example_path}", file=sys.stderr)
     sys.exit(2)
 
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+yaml.indent(mapping=2, sequence=4, offset=2)
 try:
     with open(path, encoding="utf-8") as f:
-        data = _yaml.safe_load(f) or {}
+        data = yaml.load(f) or {}
     with open(example_path, encoding="utf-8") as f:
-        example = _yaml.safe_load(f) or {}
+        example = yaml.load(f) or {}
 except Exception as e:
     print(f"ERROR: yaml load 실패 — {e}", file=sys.stderr)
     sys.exit(2)
@@ -830,8 +835,6 @@ for top in ("operations", "agent"):
                 flags.append(f"B_sync:{top}.{k}")
 
 # Group A_yolo_missing — v0.1.4 era oneshot_args 에 --yolo 부재 detect (legacy_migration_cleanup 부분 inversion).
-# 본 fix 의 multipass v0.1.0 → v0.1.8 jump 실 surface — legacy_migration_cleanup 의 "운영자 base v0.1.4+ 가정" 위반.
-# oneshot_args list 가 명시되어 있으나 element --yolo 만 부재인 케이스 (yaml.example sync 의 list-atomic 동작 외).
 agent_args = agent.get("oneshot_args") or []
 if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
     flags.append("A_yolo_missing")
@@ -848,6 +851,41 @@ _profile = operations.get("graphify_profile")
 if _profile and not _re.match(r"^[a-z][a-z0-9_]*$", str(_profile)):
     flags.append(f"W_graphify_profile_invalid:{_profile}")
 
+if flags:
+    # backup — 변경 발생 시만 (atomic replace 전 원본 보존)
+    backup = path + ".wikihub-bak." + datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    shutil.copy2(path, backup)
+    print(f"_BACKUP:{backup}", file=sys.stderr)
+
+    # operations + agent top-level field 자동 sync (yaml.example 의 모든 default).
+    # Step 4 code_review_2 H1 흡수: copy.deepcopy — ruamel CommentedMap/CommentedSeq 의 reference assignment 회피.
+    for top in ("operations", "agent"):
+        example_top = example.get(top, {}) or {}
+        target_top = data.setdefault(top, {})
+        if isinstance(example_top, dict) and isinstance(target_top, dict):
+            for k, default_v in example_top.items():
+                if k not in target_top:
+                    target_top[k] = copy.deepcopy(default_v)
+
+    # Group A_yolo_missing: oneshot_args 의 --yolo element insert (legacy_migration_cleanup 부분 inversion).
+    agent = data.get("agent") or {}
+    agent_args = agent.get("oneshot_args")
+    if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
+        idx = agent_args.index("--query")
+        agent_args.insert(idx, "--yolo")
+
+    # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
+    vaults = data.get("vaults") or []
+    for v in vaults:
+        if isinstance(v, dict) and "sync_interval_sec" not in v:
+            v["sync_interval_sec"] = 3600
+
+    # atomic replace
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+    os.replace(tmp, path)
+
 print("\n".join(flags))
 PYEOF
 )"
@@ -857,11 +895,9 @@ PYEOF
     # info log 출력 — 운영자가 어떤 drift 가 감지됐는지 surface
     info "schema drift detected — auto migration (PTY-safe, idempotent):"
     local f
-    # newline-separated flags — profile 값에 `,` 박힌 경우 안전 (code review 1 §M1)
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            # v0.1.8 update_path_fixes R2: yaml.example sync 일반화 (hardcoded case 폐기 — generic message)
             B_sync:*)                   info "  - [yaml.example sync] ${f#B_sync:} 부재 → wikihub.yaml.example default 자동 추가 (운영자 명시 값은 보존)" ;;
             A_yolo_missing)             info "  - [v0.1.4 ADR-0032] agent.oneshot_args 의 --yolo 부재 → --query 앞에 insert (hermes auto-approve 필수 — 큰 jump 운영자 대응, legacy_migration_cleanup 부분 inversion)" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
@@ -869,69 +905,7 @@ PYEOF
         esac
     done <<< "$drift_flags"
 
-    # backup — 변경 발생 시만 (위 early return 통과한 경우)
-    local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
-    cp -p "$yaml" "$backup"
-    info "backup: $backup"
-
-    # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY
-    # 환경에서 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 →
-    # v0.1.4 cycle 의 root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety
-    # net — 운영자가 의도와 다르면 cp 1회로 즉시 복원. **값 변경은 자동 회피** — 운영자 의도
-    # (또는 schema drift) 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec,
-    # operations.lint_interval_hours).
-
-    "$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
-import sys, os, copy, ruamel.yaml
-path = sys.argv[1]
-example_path = sys.argv[2]
-
-# R2 fix: yaml.example single source of truth — 운영자 yaml 의 부재 field 자동 추가.
-# 깊이 제한: operations + agent top-level dict 만. vaults[] array 별도 (배열 semantics).
-yaml = ruamel.yaml.YAML(typ="rt")
-yaml.preserve_quotes = True
-yaml.indent(mapping=2, sequence=4, offset=2)
-with open(path, encoding="utf-8") as f:
-    data = yaml.load(f)
-with open(example_path, encoding="utf-8") as f:
-    example = yaml.load(f)
-
-# operations + agent top-level field 자동 sync (yaml.example 의 모든 default).
-# Step 4 code_review_2 H1 흡수: copy.deepcopy — ruamel CommentedMap/CommentedSeq 의 reference assignment 회피.
-# (운영자 yaml 의 dict 가 yaml.example 의 dict 와 reference 공유 시 한쪽 modify 가 다른쪽 영향)
-for top in ("operations", "agent"):
-    example_top = example.get(top, {}) or {}
-    target_top = data.setdefault(top, {})
-    if isinstance(example_top, dict) and isinstance(target_top, dict):
-        for k, default_v in example_top.items():
-            if k not in target_top:
-                target_top[k] = copy.deepcopy(default_v)
-
-# Group A_yolo_missing: oneshot_args 의 --yolo element insert (legacy_migration_cleanup 부분 inversion).
-# yaml.example sync 가 list-atomic 이라 element-level 보강 안 함 — 별도 처리.
-agent = data.get("agent") or {}
-agent_args = agent.get("oneshot_args")
-if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
-    idx = agent_args.index("--query")
-    agent_args.insert(idx, "--yolo")
-
-# Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
-# vaults[] array 는 top-level sync 외 별도 처리 (배열 semantics — 개수/식별자 운영자 의존).
-vaults = data.get("vaults") or []
-for v in vaults:
-    if isinstance(v, dict) and "sync_interval_sec" not in v:
-        v["sync_interval_sec"] = 3600
-
-tmp = path + ".tmp"
-with open(tmp, "w", encoding="utf-8") as f:
-    yaml.dump(data, f)
-import os
-os.replace(tmp, path)
-PYEOF
-
-    ok "schema migration 완료 (backup: $backup)"
-    info "  운영자 의도 영향 field (sync_interval_sec, lint_interval_hours 등) 의 새 default 적용은"
-    info "  wikihub.yaml.example 참조 후 manual edit + install.sh 재실행 권장."
+    ok "schema migration 완료"
 }
 
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
