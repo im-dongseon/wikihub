@@ -833,7 +833,7 @@ backlog 후보 (본 feature 스코프 밖):
 | V3a | `WIKIHUB_HOME=/ --force-fresh` | guard fatal exit (confirm 도달 안 함) |
 | V4 | vault@.service mid-sync 중 update | 15min in-flight grace, fetch 도중 timer fire 0건 |
 | V5a | `--version <older>` (의도 rollback) | warn + 진행 |
-| V5b | `_system/VERSION` 위조 후 update (no --version) | fatal exit |
+| V5b | `_system/VERSION` 위조 후 update (no --version) | warn 발화 (`_verify_version_tag_integrity`) + 진행. VERSION 위조와 dev branch (VERSION 미tag 상태) 가 distinguishable 하지 않아 fatal exit 안 함 |
 | V6 | install.log > 10MB 호출 | rotation + 새 file. 8번째 prune |
 | V7 | requirements.txt 변경된 ref | venv keep, pip install 재실행. 미변경 → skip |
 | V8 | tag latest 부재 + ls-remote 정상 → main HEAD fallback. ls-remote fail → local cache | banner 에 명시 |
@@ -857,7 +857,7 @@ OCI ARM Ubuntu 24.04 multipass VM 에서 v0.1.10 install.sh 호출. update path 
 | V3 | code-read (`_confirm_force_fresh_wipe` L338-344, `_rollback_if_failed` SIGINT 분기 L1518-1528) | PASS (코드 정합) | wipe 5초 confirm = `sleep 5`. Ctrl+C → exit 130 + systemd 재기동 trap |
 | V4 | code-read (`_systemd_stop_before_update` L1610-1659, `_timeout 900 systemctl stop` L1637) | PASS (코드 정합) | 15min grace = `_timeout 900`. mid-sync 실제 시뮬은 OAuth + vault data 필요라 운영자 별도 검증 |
 | V5a | VM-test (`--version v0.1.8` from v0.1.9) | **FAIL** | `intentional downgrade` warn (L1496) 미발화. 원인: self-restart (L1479-1487) 후 child process 가 `current_version` 을 git reset 후 read 해서 항상 `current_version == new_version` (idempotent 분기 hit). transition reporting 도 동일 원인으로 "vX → vX" 잘못 표시. **follow-up issue 필요** |
-| V5b | VM-test (VERSION 0.0.1 위조) + code-read | PARTIAL | `_verify_version_tag_integrity` (L1326-) 가 warn 발화 ✓. 단 issue #33 본문 / 본 §9.2 의 "fatal exit" 기대는 코드와 어긋남 — 실제 `_verify_version_tag_integrity` 는 warn-only (운영자 인지 + 진행), fatal exit 는 unstaged guard 의 부수 효과. **spec 정합화 필요 — V5b 기대를 "warn + 진행" 으로 정정 권고** |
+| V5b | VM-test (VERSION 0.0.1 위조) + code-read + spec 정합 (#87) | PASS | `_verify_version_tag_integrity` (L1326-) 가 warn 발화 ✓ (fatal exit 는 unstaged guard 의 부수 효과였음). 본 §9.2 V5b 기대를 "warn + 진행" 으로 정정 완료. |
 | V6 | VM-test (`dd 11MB padding` → `install.sh` 호출) | PASS | install.log 12MB → 15KB 새 file + `install.log.20260528_232053_4074` 로 rotate. 8번째 prune 는 1회 호출로 미검증 (8회 누적 필요) |
 | V7 | code-read (`_step3_venv` venv age + requirements.txt diff 분기) | PASS (코드 정합) | venv keep + pip install 재실행. 운영 환경 시뮬은 별도 commit + push 권한 필요 |
 | V8 | code-read (`_resolve_ref` path 4·5 L1382-1395) | PASS (코드 정합) | latest tag 부재 + ls-remote fail → local semver max tag. local cache 도 부재 → `origin/main` HEAD + banner. 운영 시뮬은 origin 의 latest tag 삭제 권한 필요 |
