@@ -31,6 +31,20 @@
 
 ## 절차
 
+### Step 0. per-vault flock 가드 (race 가드)
+
+`wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wh-ingest --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단. 진행 중 ingest 가 있으면 즉시 exit 0 (no-op).
+
+```bash
+exec 200>"$WIKIHUB_HOME/.wh-ingest-<vault_id>.lock"
+flock -n 200 || { echo "ingest (vault=<vault_id>) 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
+# lock 은 process 종료 시 자동 해제 (kernel-managed)
+```
+
+`flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 timer fire 자연 재시도). race window 0% 회피 (lint.md Step 0 와 동일 패턴).
+
+**scope = per-vault** (lock 파일명에 `<vault_id>` 접미). multi-vault 병렬 ingest 허용 — `wikihub.yaml.operations.max_concurrent_vaults` 정책 정합. 본 lock 은 Step 1~6 전체를 cover하므로, Step 2 의 `vault-fetch.py` 가 보유한 기존 `_state/<vault>/.lock` 이 보호하지 못하던 Step 1 (`pending_ingest.json` attempts 증가) · Step 4 (LLM entity·concept 추출) · Step 5 (`log.md` append) · Step 6 (`pending_ingest.json` 삭제) 의 race window 가 본 lock 으로 닫힌다.
+
 ### Step 1. pending_ingest.json 확인 (부분 실패 복구)
 
 `_state/<vault_id>/pending_ingest.json` 존재 시:
@@ -223,8 +237,9 @@ Step 5까지 무에러 완료 시:
 
 ## 동시성
 
-- vault별 systemd unit이 Type=oneshot → 같은 vault의 /wh-ingest 중복 실행 차단 (F1 §4.6.5)
-- 다중 vault 간 직렬화는 wikihub.yaml `operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede)
+- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wh-ingest-<vault_id>.lock`) — systemd timer · 메인테이너 수동 `systemctl start` · Hermes 채팅의 `/wh-ingest` 직접 호출 사이의 동일 vault 중복 실행을 일괄 차단. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover.
+- vault별 systemd unit 이 `Type=oneshot` → 동일 vault timer 중복 발화는 systemd 자체에서도 드롭 (Step 0 lock 의 보강 layer, F1 §4.6.5).
+- 다중 vault 간 직렬화는 `wikihub.yaml.operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede). Step 0 lock 은 per-vault 이므로 본 정책에 직교.
 
 ## 관련 ADR
 
