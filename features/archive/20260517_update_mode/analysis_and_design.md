@@ -701,10 +701,12 @@ options:
 3. template type 분류:
    - `wikihub-mount@.service.template` / `wikihub-vault@.service.template` / `wikihub-vault@.timer.template` — **per-vault instantiated**. enabled vault 마다 1회 render → `wikihub-<type>@<vault_id>.service` 또는 `.timer`.
    - 그 외 (`wikihub-lint.timer.template` · `ops-alert.service` 등) — **singleton**. 1회 render → 동일 stem.
-4. **2-pass substitution** (setup.md L72-81 의 spec lift):
-   - **Pass 1** (per-vault key): yaml `vaults[*]` 의 각 vault 에 대해 vault-scoped key 산출 — `{vault_id}`, `{mount_path}`, `{rclone_rc_port}`, `{credentials_path}`, `{sync_interval_sec}` 등.
-   - **Pass 2** (instance-wide key): yaml `instance.*` · `operations.*` · `agent.*` 의 key 산출 — `{instance_root}`, `{agent_binary}`, `{agent_oneshot_args}`, `{wikihub_home}`, `{venv_path}`, `{rclone_min_version}` 등.
-   - substitution 은 `str.format_map` 으로 1-pass execution — 두 pass 의 key 가 disjoint 여야 함 (`render_systemd_units.py` 가 동일 key 명 중복 시 fatal).
+4. **Multi-group substitution** (4 groups — `_current_vault_subs` · `_cross_vault_subs` · `_instance_wide_subs`):
+   - **current-vault scalar** (`_current_vault_subs`): `{sync_interval_sec}` — 각 vault 의 현재 instance render 에만 적용. `{credentials_path}` 는 ADR-0035 로 폐기됨.
+   - **cross-vault** (`_cross_vault_subs`): `{remote_name_for_<vid>}`, `{remote_path_for_<vid>}`, `{rc_port_for_<vid>}` — `%i → vault_id` 변환 후 lookup. template 에 `{remote_name_for_%i}` 형태로 사용.
+   - **instance-wide** (`_instance_wide_subs`): `{wikihub_home}`, `{wikihub_src}`, `{instance_root}`, `{venv_path}`, `{rclone_config_path}`, `{rclone_bin}`, `{vfs_cache_max_size}`, `{lint_interval_hours}`, `{agent_invocation}`, `{skill_prefix}`, `{timeout_start_sec}`, `{agent_invocation_for_<skill>}`.
+   - **systemd-native** (`%i`): `{vault_id}`, `{mount_path}` — helper 미산출. template 의 systemd `%i` instantiation 으로 직접 처리. vault_id 는 `WikihubMount@.service` · `WikihubVault@.service` 의 unit instance 식별자로 사용되며, mount_path 는 `--get-mount-path` CLI 로 조회.
+   - 모든 key group 이 **disjoint** 여야 함 (`render_systemd_units.py` 가 동일 key 명 중복 시 fatal). 총 4개 그룹의 합집합이 template 접근 가능한 전체 key space.
 5. **idempotency**: 기존 output file 이 존재하고 byte-equal 이면 **rewrite skip** (mtime preserve). 다르면 atomic write — `<output>.tmp` 작성 후 `os.rename` (POSIX rename atomic).
 6. enabled=false vault 의 직전 render 가 disk 에 있으면 — **`enabled: false` 진입 시 명시 삭제** (file_map 의 desired state 정합). 단 user 데이터인 mount point 디렉토리 자체는 보존.
 
