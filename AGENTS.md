@@ -274,6 +274,21 @@ git diff $(git merge-base HEAD main) > review_context.md
 
 ---
 
+## 5.1 외부 client entry points (v0.1.10 — ADR-0043)
+
+운영 환경에서 wiki 데이터에 접근하는 entry point 는 두 layer 로 분리됩니다.
+
+| Entry | 책임 | invocation | 정본 |
+|---|---|---|---|
+| **Hermes CLI skill** (`/wh-ingest`, `/wh-lint`, `/wh-query`, `/wh-setup`) | LLM-mediated playbook — 의미 검색 · cross-ref 추론 · `analyses` 자동 저장 · ingest/lint mutation | OCI VM 에서 CLI agent (Hermes / claude-code / codex-cli) 가 slash command 실행. systemd timer + 메인테이너 수동 호출 | `_system/commands/wh-*.md` + ADR-0006 (unified orchestration) |
+| **MCP server** (`scripts/wikihub_mcp.py`) | deterministic primitive (LLM 호출 0) — 외부 MCP-호환 client (Claude Desktop / Cline / IDE plugin) 가 SSH 로 원격 spawn 해서 wiki read-only query | 외부 client 가 `ssh wikihub-oci '<venv>/bin/python <src>/scripts/wikihub_mcp.py'`. stdio MCP protocol | ADR-0043 + `docs/mcp-setup.md` |
+
+**layer 분리 invariant**: MCP server 는 `wiki/` read 만. mutation (`wiki/`, `_state/`, OAuth credential) 은 Hermes skill 전유. semantic synthesis (LLM 추론) 은 MCP client 측 LLM 책임 — `wikihub_mcp.py` 안에서 LLM 호출 0 (recursive LLM 회피).
+
+외부 client 셋업 (Claude Desktop config + SSH config + OCI 측 포트 검토 + 회사 망 fallback): [`docs/mcp-setup.md`](docs/mcp-setup.md).
+
+---
+
 ## 6. Git Worktree 활용
 
 > 아래 조건에서 **필수** 적용:
