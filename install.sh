@@ -83,6 +83,19 @@ WIKIHUB_SRC="$(_abs_path "$WIKIHUB_SRC")"
 INSTALL_LOG="${WIKIHUB_HOME}/install.log"
 mkdir -p "$WIKIHUB_HOME"
 
+# POSIX-compatible timeout wrapper — handles macOS (gtimeout) and systems without timeout
+_timeout() {
+    if command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$@"
+    elif command -v timeout >/dev/null 2>&1; then
+        timeout "$@"
+    else
+        # noop fallback — warn at most once per session
+        warn "_timeout: 'timeout' 명령 없음 — grace limit 미적용"
+        "$@"
+    fi
+}
+
 # ─── Step 0a — env semantic check (ADR-0034 §sub-2 — v0.1.0 release 전 architectural refactor) ──
 # WIKIHUB_INSTANCE_ROOT env detect: ADR-0034 로 폐기. WIKIHUB_HOME 으로 통일.
 if [[ -n "${WIKIHUB_INSTANCE_ROOT:-}" ]]; then
@@ -111,7 +124,7 @@ _rotate_install_log() {
     if (( age_days >= 7 || size_mb >= 10 )); then
         # PID suffix 로 1초 안 중복 호출 collision 회피
         mv "$log" "${log}.$(date +%Y%m%d_%H%M%S)_$$"
-        ls -1t "${log}".*_* 2>/dev/null | tail -n +8 | xargs -r rm -f
+        ls -1t "${log}".*_* 2>/dev/null | tail -n +8 | while IFS= read -r f; do rm -f "$f"; done
     fi
 }
 _rotate_install_log
@@ -397,10 +410,13 @@ _install_uv() {
     ( cd "$tmpdir" && sha256sum -c "${asset}.sha256" )
     tar -C "$tmpdir" -xzf "$tmpdir/$asset"
     # uv tar 구조 가설: 최상위 또는 한 단계 깊이의 디렉토리 안에 `uv` binary
-    uv_bin="$(find "$tmpdir" -maxdepth 3 -name uv -type f -executable | head -1)"
+    uv_bin="$(find "$tmpdir" -maxdepth 3 -name uv -type f | head -1)"
+    if [ -n "$uv_bin" ] && [ ! -x "$uv_bin" ]; then
+        uv_bin=""
+    fi
     if [ -z "$uv_bin" ]; then
         err "uv binary 가 tar 내에 없음 — V8 hand-check 필요 (asset 구조 가설 실패)"
-        find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" -printf '  %P\n' >&2
+        find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" >&2
         exit 2
     fi
     mkdir -p "$LOCAL_BIN_DIR"
@@ -1633,7 +1649,7 @@ _systemd_stop_before_update() {
     # 후속 daemon-reload + render 로 신규 이름 unit (wikihub-ingest@*, wikihub-lint.*) 만 active 유지.
     for v in $all_vaults; do
         systemctl --user stop "wikihub-vault@${v}.timer" "wh-ingest@${v}.timer" 2>/dev/null || true
-        timeout 5 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null || true
+        _timeout 5 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null || true
     done
     systemctl --user stop wh-lint.timer wh-lint.service 2>/dev/null || true
     # timer 정지 — 새 fire 차단 (operational unit names: wikihub-ingest@, wikihub-lint)
@@ -1646,7 +1662,7 @@ _systemd_stop_before_update() {
     # MED-N4: progress info — 운영자 visual 안심
     for v in $all_vaults; do
         info "  stopping wikihub-ingest@${v} (max 15min grace for mid-sync)"
-        timeout 900 systemctl --user stop "wh-ingest@${v}.service" "wikihub-ingest@${v}.service" 2>/dev/null \
+        _timeout 900 systemctl --user stop "wh-ingest@${v}.service" "wikihub-ingest@${v}.service" 2>/dev/null \
             || warn "wikihub-ingest@${v} stop timeout — 강제 abort"
     done
     systemctl --user stop wikihub-lint.service 2>/dev/null || true
