@@ -443,7 +443,6 @@ _step3_venv() {
     # venv 검증 — 정상 venv (bin/python + 버전 일치) = skip, 무효/부분 생성 = wipe + 재생성
     # (V8 결함 #2·#6 fix — `uv venv` 자체는 기존 venv 존재 시 error, 검증 분기 + 명시적 wipe 필요)
     mkdir -p "$(dirname "$VENV_PATH")"
-    local venv_was_recreated=0
     if [ -x "$VENV_PATH/bin/python" ] \
         && "$VENV_PATH/bin/python" --version 2>/dev/null | grep -q "Python $PYTHON_VERSION"; then
         info "venv 기존 사용: $VENV_PATH ($($VENV_PATH/bin/python --version))"
@@ -454,7 +453,6 @@ _step3_venv() {
         fi
         info "venv 생성: $VENV_PATH (Python $PYTHON_VERSION)"
         uv venv "$VENV_PATH" --python "$PYTHON_VERSION" --seed
-        venv_was_recreated=1
     fi
 
     # R10 MED-7: scripts/requirements.txt (운영 deps) 가 정본 — repo root requirements.txt 미존재.
