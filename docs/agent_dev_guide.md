@@ -34,32 +34,7 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 ## 5단계 Feature-based Workflow
 
-```mermaid
-flowchart TD
-    Plan["Step 1: Plan<br/>(타겟 버전 브랜치 결정)"]
-    AD["Step 2: Analysis & Design"]
-    Review2["리뷰어/사용자 검토"]
-    Impl["Step 3: Implementation<br/>(feature/&lt;id&gt; on v0.X.Y)"]
-    Review4["Step 4: Code Review<br/>(조건부 생략)"]
-    Deploy["Step 5: Deploy<br/>(1) squash → v0.X.Y<br/>(2) canary force-update<br/>(3) feature 브랜치/worktree 정리"]
-    Release{"release<br/>batch?"}
-    MainMerge["(4) main merge --no-ff<br/>(5) vX.Y.Z annotated + latest force-update"]
-    Close["Feature 종료 처리<br/>(archive 이동 + 브랜치 정리 확인)"]
-    NewF["새 Feature<br/>(revert squash 또는 신규)"]
-
-    Plan --> AD
-    AD --> Review2
-    Review2 -->|승인| Impl
-    Review2 -.->|피드백 반영| AD
-    Impl --> Review4
-    Review4 -.->|"범위 내 결함:<br/>Step 2/3 복귀"| AD
-    Review4 -.->|"범위 초과 결함"| NewF
-    Review4 -->|결함 없음| Deploy
-    Deploy --> Release
-    Release -->|"중간 feature<br/>(OCI 검증 trace)"| Close
-    Release -->|"버전 batch 완료<br/>+ OCI 검증 통과"| MainMerge --> Close
-    Deploy -.->|"squash 후 결함 발견"| NewF
-```
+> **플로우 개요**: [AGENTS.md §3 (기능 기반 개발 플로우)](../AGENTS.md#3-기능-기반-개발-플로우-feature-based-workflow) mermaid 다이어그램 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
 
 > **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/v0.X.Y`, main 직접 분기·commit 금지. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
 
@@ -206,15 +181,7 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 생략 결정은 Step 1 plan.md에 미리 선언한다. 생략 시 HISTORY.md 항목 추가도 함께 생략한다.
 
-**5 액션 git workflow** (메인테이너가 squash 직후 즉시 수동 실행):
-
-| # | 액션 | 명령 | 예외 처리 |
-|---|---|---|---|
-| 1 | feature → 버전 브랜치 squash merge | `git checkout v0.X.Y && git merge --squash feature/<id> && git commit -m "<type>(<feat_id>): ... (vX.Y.Z)"` <br/>※ `--squash` 가 implicit no-commit | conflict 시 해결 후 commit, 또는 `git reset --hard HEAD` |
-| 2 | 버전 브랜치 push + canary tag force-update | `git fetch origin v0.X.Y` ← push 직전 lease 기준 최신화 (race-safe 보장) <br/>`git push origin v0.X.Y --force-with-lease` ← 브랜치 lease-protected push <br/>`git tag -f canary` ← local tag move (HEAD = squash commit) <br/>`git push origin canary --force` ← tag force-push <br/>※ 세 줄로 분리 실행 — 중간 fail 시 silent divergent 방지 | force-push fail 시 GitHub Tag protection rule 확인 |
-| 3 | feature 브랜치/worktree 정리 | `git -C ../wikihub-feat/<id> status --porcelain` ← 출력 확인 (비어있어야 정상) <br/>`git worktree remove ../wikihub-feat/<id>` ← dirty 시 git 자체가 거부 <br/>`git branch -D feature/<id>` ← squash 는 fully-merged 인식 안 함 → `-D` 강제 | dirty 잔존은 squash 누락분 — 새 micro feature 로 별도 squash 권장 |
-| 4 | (release 시점) 버전 브랜치 → main `merge --no-ff` | `git status` ← working tree clean 확인 (dirty 시 stash) <br/>`git checkout main && git merge --no-ff v0.X.Y` | conflict 시 해결 후 commit. **main 직접 commit 금지** |
-| 5 | annotated version tag + latest force-update + push | `git tag -a v0.X.Y -m "v0.X.Y — <description>" <merge_sha>`<br/>`git tag -f latest <merge_sha>`<br/>`git push origin main v0.X.Y`<br/>`git push origin latest --force` | annotated tag 는 immutable — force 금지 |
+> **5 액션 git workflow**: [AGENTS.md §3 Step 5](../AGENTS.md#step-5-deployment-배포--조건부-생략-가능)의 "수행 시 git 액션 — 5 단계" 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 절차 요약만 제공한다.
 
 > 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치 누적 commit + OCI canary 검증 통과 후.
 
@@ -269,13 +236,7 @@ journalctl --user -u wikihub-lint.service -n 50
 systemctl --user list-timers
 ```
 
-**Tag 운영 의미** (정본은 AGENTS.md §8 — 동기화 유지):
-
-| Tag | 성격 | 가리키는 commit | 운영 의미 |
-|---|---|---|---|
-| `vX.Y.Z` | **annotated**, immutable | main 의 merge commit M | release 영구 record. force-push 금지. |
-| `latest` | lightweight, force-move | 가장 최근 release commit | production default |
-| `canary` | lightweight, force-update | 버전 브랜치 HEAD | pre-production 검증 trace. **fetch 시 `--force` 필요** (git 2.20+) — install.sh 가 자동 처리. |
+> **Tag 운영 의미**: [AGENTS.md §8 (버전 관리 및 패치 정책 - Tag 운영 의미)](../AGENTS.md#tag-운영-의미) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 운영 시 필요한 canary tag 명령만 기술한다.
 
 > install.sh `_step2_update` 는 `git fetch origin --tags --force` 로 force-updated lightweight tag 자동 수신 (ADR-0030 의 `_resolve_ref` path 2 + `--branch canary` 호출과 정합).
 
