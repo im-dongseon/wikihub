@@ -57,6 +57,9 @@ operations:
   graphify_max_version: "0.99.99"     # ADR-0036 breaking change 방어
   graphify_backend: ollama            # graphify --backend = protocol (graphify CLI 의 코드 경로). v8 backends: gemini | kimi | claude | openai | deepseek | ollama. ADR-0036 §Note (2026-05-24, v0.1.7 follow-up) — `ollama` backend 는 endpoint 형식 자동 분기 (loopback → native OLLAMA_HOST API, 외부 → OLLAMA_BASE_URL OpenAI-compat).
   graphify_profile: ollama_gemma      # endpoint+key+model bundle 선택자. env 의 WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL> 와 1:1 매칭 (ADR-0038, v0.1.7 follow-up). 다중 profile 동시 보유 + yaml 한 줄 swap. 기본 ollama_gemma = local Ollama daemon + gemma4:31b-cloud. 추가 profile cookbook → docs/graphify-backend-test-reference.md §6.
+  graphify_profiles:                  # (v0.1.10) profile-level timeout override. graphify_timeout_sec 보다 우선. 미설정 시 global → 900 fallback. Issue #36.
+    ollama_gemma:
+      timeout_sec: 1800               # ollama local LLM (gemma4:31b-cloud) — wiki 200+ 페이지 시 30분+ 소요. cloud profile 은 미설정 시 global 900s 사용.
 
 # agent: Hermes (또는 codex/gemini) 는 install.sh 설치 범위 밖 — 메인테이너가 별도 설치 후 binary 경로 확인 필수.
 # 미설치 시 install.sh _step6_agent_skill 가 detect → systemd unit render/enable skip (ADR-0032). 운영자가 hermes 설치 후 install.sh 재호출.
