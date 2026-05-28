@@ -351,7 +351,7 @@ docs/adr/
 
 | Tag | 성격 | 가리키는 commit | 운영 의미 | 비고 |
 |---|---|---|---|---|
-| `vX.Y.Z` | **annotated**, immutable | main 의 merge commit (M) | release 영구 record | `git tag -a v0.X.Y -m "..."`. force-push 금지. |
+| `vX.Y.Z` | **annotated**, immutable | main 의 merge commit (M) | release 영구 record | `git tag -a v0.X.Y -m "..."`. force-push 금지. GitHub Ruleset 으로 force-push + deletion 차단됨. |
 | `latest` | lightweight, **force-move** | 가장 최근 release commit | production default | `git tag -f latest M && git push --force` |
 | `canary` | lightweight, **force-update** | 버전 브랜치 HEAD (release 직전 candidate 포함) | pre-production 검증 trace | `git tag -f canary <sha> && git push --force`. **fetch 시 `--force` 필요** (git 2.20+, install.sh 가 자동 처리). 운영자 호출형 = `install.sh --branch canary`. |
 
