@@ -900,3 +900,22 @@ MED·LOW 처리:
 | LOW-N1 | R3 신규 | §3 main flow 단일 wipe — `_step2_clone` 이 wipe 책임 단일화 |
 | LOW-N2 | R3 신규 | §3 Step -1 prune 카운트 8 의 의미 주석 |
 | LOW-N3 | R3 신규 | §3 `_step2_update` 진입 즉시 trap 등록 + VERSION empty 검증 |
+
+---
+
+## v3.1 closure trace — VM 테스트 4 fix
+
+VM 테스트(V1·V2·V13·V14) 수행 도중 surface 된 fix 4건. install.sh 코드에는 반영됐으나 본 설계서 v3 시점에는 미포함. 하단에 closure trace.
+
+| # | 영역 | 설계 위치 | 변경 요지 | 사유 | install.sh 위치 |
+|---|---|---|---|---|---|
+| 1 | refspec | §3 Step 2d | `git config --replace-all remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'` 추가 | `git clone --branch X --depth 1` 은 single-branch 로 제한되어 update path 에서 다른 ref (tag 등) fetch 불가능. 설계 §3 Step 2d 의사코드는 `git fetch origin --tags` 만 명시 | `install.sh:909~910` |
+| 2 | `origin/` prefix normalize | §4 path 2 | `_resolve_ref` path 2 가 BRANCH env 에 `origin/` prepend. fresh path 는 반대로 strip | 동일 BRANCH env 에 대해 fresh path 와 update path 가 정반대 변환 적용. 설계 §4 path 2 는 "branch name" 만 명시하며 prefix 운용 미명시 | `install.sh:838~842` |
+| 3 | unshallow fetch | §3 Step 2d | `git fetch --unshallow 2>/dev/null \|\| true` | shallow clone 상태에서 arbitrary ref fetch 불가 — --unshallow 로 전체 히스토리 확보 후 fetch | `install.sh:912` |
+| 4 | pip install skip 제거 | §3 Step 3 | 설계 §3 Step 3 MED-N3 의 "requirements.txt 변경 없을 때 pip skip" 최적화 제거 — venv partial install state 결함으로 제거 | partial install state (venv 는 있으나 deps 미설치) 에서 skip 분기가 pip 설치를 건너뛰어 결함 발생. 항상 `uv pip sync` 실행으로 변경 | `install.sh:386~395` |
+
+**추가 fix**:
+
+| 항목 | 설계 위치 | 변경 | 사유 | 코드 위치 |
+|---|---|---|---|---|
+| `.venv_path` `.gitignore` 등록 | §3 Step 2a | `.gitignore` 에 `.venv_path` 행 추가 | `git status --porcelain` 의 dirty 분류 방지 — unstaged guard 정합 fix | `.gitignore:22` |
