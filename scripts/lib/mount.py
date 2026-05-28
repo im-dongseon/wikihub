@@ -19,12 +19,15 @@ last_failure (scope="mount") writer 책임을 직접 수행.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 from pathlib import Path
 
 from .exceptions import VaultSyncFatal, VaultSyncRetryable
 from .state import read_last_failure, save_last_failure, utc_now_iso
+
+log = logging.getLogger(__name__)
 
 
 # ADR-0035 — rclone OAuth error 패턴. SA 패턴 폐기 (gws·SA 자체 폐기).
@@ -216,6 +219,16 @@ def vfs_refresh(
             joined = " ".join(str(v) for v in result_val.values() if v and v != "OK")
             if joined:
                 rc_error_msg = joined
+            # issue #12 — rclone rc API schema 변경 forensic: 알려지지 않은
+            # 상위 키(error, errors, failed 등) 감지 시 log.warning 출력.
+            # 정상 응답의 키는 "" (빈 문자열, root path) 또는 파일 경로(/. 포함).
+            for key in result_val:
+                if key and '/' not in key and '.' not in key:
+                    log.warning(
+                        "vfs/refresh rc API: unexpected schema key %r — "
+                        "rclone 버전 확인 권장 (issue #12)",
+                        key,
+                    )
         elif result_val is not None:
             # dict 도 None 도 아닌 경우 (`result: "..."` 같은 unexpected schema) — 전체를 error
             # 로 분류해서 regex 매칭에 위임. 운영자에게 surface.
