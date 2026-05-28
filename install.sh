@@ -673,6 +673,7 @@ _write_installed_versions_sidecar() {
 }
 
 _step45_rclone() {
+    info "rclone + graphify + yq 설치 (fresh/update 공통)"
     _install_rclone
     _enforce_rclone_conf_perms
     _install_graphify

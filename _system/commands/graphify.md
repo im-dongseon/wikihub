@@ -33,7 +33,7 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 
 ## 사전 조건
 
-- `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, ADR-0036)
+- `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, ADR-0036). **fresh/update 경로 모두 install.sh `_step45_rclone` 에서 자동 설치** (v0.1.0 업데이트 시에도 graphify 자동 추가, Issue #43).
 - `wiki/` 디렉토리 존재 (페이지 0개여도 OK — 빈 그래프 생성)
 - `instance.root`/`graphify-out/` 쓰기 권한
 - `~/.config/wikihub/env` 의 active profile bundle 채워짐 (ADR-0038 v0.1.7 follow-up — namespace 격리). yaml `operations.graphify_profile` 이 가리키는 env keyset (`WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>`) 가 호출 시점에 backend-native env (OLLAMA_HOST/ANTHROPIC_API_KEY 등) 로 explicit 변환 주입 — 추가 profile cookbook → `docs/graphify-backend-test-reference.md` §6
