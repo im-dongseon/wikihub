@@ -1278,14 +1278,7 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
   curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
-
-[install/update 동작 — dual-mode (ADR-0030)]
-  detect: $WIKIHUB_SRC/_system/VERSION + .git AND → update path / 미만족 → fresh path.
-  update path: unstaged guard → systemd stop (15min grace) → git fetch + reset → render →
-               daemon-reload → systemd start → verify. 실패 시 자동 rollback (직전 ref 복귀).
-  fresh path: clean wipe + clone (ADR-0023 보존). user 파일 (instance.root) 미터치.
-  명시적 재설치: install.sh --force-fresh (5초 confirm + 3중 safety guard).
-  특정 버전 pin: install.sh --version v0.1.0 (rollback 포함).
+  (detect: $WIKIHUB_SRC/_system/VERSION + .git 존재 → update path 자동 진입)
 
 [운영 진단 명령 — R10 HIGH-2 + R16-M6·L3]
   vault sync 로그:    journalctl --user -t wikihub-ingest-<vault_id> --since '24h ago'
