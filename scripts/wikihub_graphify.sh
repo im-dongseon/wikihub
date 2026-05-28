@@ -70,7 +70,7 @@ fi
 # Step 2. yaml read + profile resolve (ADR-0038 namespace 격리)
 profile="$(yq '.operations.graphify_profile // ""' "$WIKIHUB_YAML")"
 backend="$(yq '.operations.graphify_backend // "ollama"' "$WIKIHUB_YAML")"
-timeout_sec="$(yq '.operations.graphify_timeout_sec // 900' "$WIKIHUB_YAML")"
+timeout_sec="$(yq ".operations.graphify_profiles.\"${profile}\".timeout_sec // .operations.graphify_timeout_sec // 900" "$WIKIHUB_YAML")"
 
 # profile 명 정규식 검증 (silent fail 회피, ADR-0038 §Decision 2)
 if [[ ! "$profile" =~ ^[a-z][a-z0-9_]*$ ]]; then

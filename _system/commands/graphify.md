@@ -45,7 +45,8 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 | `operations.graphify_enabled` | `true` | false 시 lint Step 9 가 graphify trigger 안 함 (운영자 cost / API key 부재 대응) |
 | `operations.graphify_backend` | `""` (auto-detect 또는 명시) | `ollama` / `openai` / `claude` / `gemini` / `deepseek` / `kimi` 중 하나 |
 | `operations.graphify_profile` | `ollama_gemma` | env namespace prefix (lowercase, ^[a-z][a-z0-9_]*$) — ADR-0038 |
-| `operations.graphify_timeout_sec` | `900` (15분) | graphify CLI wrapper timeout — ADR-0036 §"후속 영향" |
+| `operations.graphify_profiles.<profile>.timeout_sec` | (미설정) | **(v0.1.10)** profile-specific timeout. 지정 시 `graphify_timeout_sec` 보다 우선. Issue #36. |
+| `operations.graphify_timeout_sec` | `900` (15분) | graphify CLI wrapper timeout — ADR-0036 §"후속 영향". profile-specific 미설정 시 fallback. |
 | `operations.graphify_partial_failure_threshold` | `0.5` | N/M ratio threshold (Pass 3 silent partial failure 가드) |
 | `operations.graphify_min_version` / `graphify_max_version` | `0.8.0` / `0.99.99` | graphify CLI 버전 범위 |
 
