@@ -191,6 +191,7 @@ type: entity                                  # 'entity' | 'concept' | 'analysis
 created: 2026-05-13
 updated: 2026-05-13
 aliases: [홍길동]                              # v0.1.8 ADR-0039 — duplicate detection 정합 + LLM 재생성 무한 loop 차단
+merged_from: [<concept-slug>]              # (v0.1.10) cross-category merge 출처. lint Step 7 가 merge 시 추가. 재호출 idempotency guard (Issue #39).
 referenced_by:                                # /wh-lint 가 갱신, wikihub-graphify.service 는 무관 (v0.1.8 update_path_fixes — referenced_by 는 lint Step 4 책임)
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/notes/promotion-plan
@@ -215,6 +216,7 @@ tags: [team-lead]
 | LLM 재생성 무한 loop 차단 | ingest 스킬 + lint Step 3 가 stub 생성 전 기존 page 의 aliases 확인. 본문 form 의 lowercase 가 기존 셋과 겹치면 stub 생성 skip + referenced_by 만 갱신. |
 | duplicate detection | lint Step 4.5 가 case-variant + cross-category duplicate 를 alias 셋 비교로 식별. `--apply` 시 canonical 보존 + alias 합집합 + 다른 form page archive. |
 | cross-category 정책 (v0.1.8) | entity vs concept 동명 + alias 공유 시 — entity 우선 merge (concept 본문 LLM merge → entity, concept page archive). 운영자 정책 override 는 v0.2.x 검토. |
+| merged_from 마커 (v0.1.10, Issue #39) | entity 가 cross-category merge 의 대상이 된 경우 frontmatter 에 `merged_from: [concept-slug]` 자동 추가. 존재 시 lint Step 6/7 에서 LLM merge 재호출 금지 — entity 본문 git history churn 차단. |
 
 ### `analyses/<slug>.md` (agent 작성, /wh-query 자동 저장)
 
