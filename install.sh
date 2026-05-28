@@ -525,7 +525,7 @@ _install_rclone() {
 
     if command -v rclone >/dev/null 2>&1; then
         local current
-        current="$(rclone version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/^v//')"
+        current="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//')"
         # 단순 string compare 로 충분 (v0.1.0 — semantic compare 는 v0.2.x)
         if [[ -n "$current" && "$current" == "$pinned" ]]; then
             ok "rclone $current 이미 설치됨 (pinned 일치) — skip"
