@@ -493,6 +493,12 @@ _enabled_vaults_yaml() {
 
 ### Step 10 — verify (**R2-LOW-4 linger 검사 + H2 unit 존재 검증**)
 
+**Verify 범위 (CR1-LOW-5 / CR2-LOW-3, issue #32)** —
+- `wikihub-mount@<vault>.service` — install 시점에 **active 여야 정상** (rclone mount FUSE). inactive 시 warn (transient slow-start 가능성, V10 호환).
+- `wikihub-ingest@<vault>.timer` — install 시점에 **active 여야 정상** (timer 자체는 enable 후 즉시 active, 시간 trigger 와 무관). inactive 시 silent no-sync 위험 → warn.
+- `wikihub-lint.timer` — install 시점에 **active 여야 정상** (singleton, 3h 주기). inactive 시 lint silent skip 위험 → warn.
+- `wikihub-ingest@<vault>.service` — install 시점에 **inactive 가 정상** (timer 가 시간 trigger 로 깨움, install 단계 직후엔 fire 전). 검증 대상 아님.
+
 ```bash
 _step10_verify() {
     if [[ "$(loginctl show-user --property=Linger --value $USER)" != "yes" ]]; then
@@ -500,15 +506,33 @@ _step10_verify() {
         return 0
     fi
     local desired_vaults; desired_vaults="$(_enabled_vaults_yaml)"
+    local verify_failed=0
+    # CR2-HIGH-4 정합: 실패는 warn-only — git rollback 분리. transient slow-start 가 git rollback
+    # 을 trigger 하면 새 vault@ 가 이미 state 손댄 상태에서 fire → invariant #1 위배. warn 만으로
+    # 운영자가 journalctl 진단 + 필요 시 수동 `install.sh --version <prev>` rollback 유도.
     for v in $desired_vaults; do
         local unit="wikihub-mount@${v}.service"
         if ! systemctl --user is-active "$unit" >/dev/null; then
-            err "$unit not active"
-            err "  진단: journalctl --user -u $unit -n 50"
-            exit 2
+            warn "$unit not active — 진단 필요 (transient slow-start 가능성)"
+            warn "  journalctl --user -u $unit -n 50"
+            verify_failed=1
+        fi
+        # CR2-LOW-3 (issue #32) — vault@.timer (= wikihub-ingest@<v>.timer) 도 verify.
+        local timer="wikihub-ingest@${v}.timer"
+        if ! systemctl --user is-active "$timer" >/dev/null; then
+            warn "$timer not active — timer enable 누락 가능 (silent no-sync 위험)"
+            warn "  journalctl --user -u $timer -n 50"
+            verify_failed=1
         fi
     done
-    ok "systemd verify ok"
+    # CR2-LOW-3 (issue #32) — lint.timer 도 verify.
+    if ! systemctl --user is-active wikihub-lint.timer >/dev/null; then
+        warn "wikihub-lint.timer not active — timer enable 누락 가능 (lint silent skip)"
+        warn "  journalctl --user -u wikihub-lint.timer -n 50"
+        verify_failed=1
+    fi
+    (( verify_failed )) && warn "Step 10: 일부 unit inactive — install.sh 정상 종료 (git rollback 안 함)"
+    return 0   # CR2-HIGH-4 — 항상 success, auto rollback 회피.
 }
 ```
 
@@ -594,8 +618,10 @@ main() {
 
 ### `_resolve_ref()` 우선순위
 
-1. `--version <tag>` flag 명시 + tag 존재 → `refs/tags/<tag>`. tag 부재 시 fatal exit. `EXPLICIT_VERSION_FLAG=1` set. (HIGH-N3: 인자 강제 소비, no-arg 분기 없음 — 다음 토큰 부재 또는 `--` 시작 시 fatal)
+1. `--version <tag>` flag 명시 + tag 존재 → `refs/tags/<tag>`. tag 부재 시 fatal exit. `EXPLICIT_VERSION_FLAG=1` set. (HIGH-N3: 인자 강제 소비, no-arg 분기 없음 — 다음 토큰 부재 또는 leading `-` (예: `-x`, `--x`) 시 fatal — CR2-LOW-2 정합).
+   - **fresh path / update path 분기 (CR1-LOW-3, issue #32)**: tag 부재 fatal check 는 **update path 에만 동작** — local clone 의 `git rev-parse refs/tags/<tag>` 로 검증. fresh path 는 clone 전이라 local check 불가능, `git clone --branch <tag>` 의 native error 위임 (메시지: `fatal: Remote branch <tag> not found in upstream origin`). 운영자 진단 surface 차이는 의도된 동작.
 2. `BRANCH` env / `--branch <name>` 명시 + branch 존재 → branch name. fallback 안 함 (의도 명시).
+   - **fresh path / update path prefix 정합 (CR1-LOW-2, issue #32)**: fresh path 의 `_step2_clone` 는 `git clone --branch X` bare name 요구 → `origin/` strip. update path 의 `git reset --hard X` 는 remote-tracking ref 요구 → `origin/` prepend. 동일 BRANCH env 가 두 코드패스에서 정반대로 변환되는 게 정합 (bare name vs remote-tracking ref). `--branch feature/foo` 는 두 path 모두 `feature/foo` (fresh) / `origin/feature/foo` (update) 로 해석.
 3. (default) tag `latest` 존재 → `refs/tags/latest`. ADR-0010 정본 — 메인테이너 release 시 `git tag -f latest <commit> && git push -f origin latest`.
 4. (network fallback) `git ls-remote` fail 시 local cache: `git for-each-ref --sort=-v:refname 'refs/tags/v*' | head -1` — **semver `v*` tag 의 max 값만** 사용. mutable `latest` 의 stale cache 는 비사용 (의미 불안정). banner 에 "[network offline — using local semver max tag (not 'latest')]". 운영자가 `latest` 의 직전 값을 원하면 `--version <tag>` 명시.
 5. (bootstrap fallback) tag `latest` 부재 (v0.1.0 spec 완성 전) → `origin/main` HEAD. banner 에 "[no `latest` tag — using main HEAD]".
@@ -731,7 +757,7 @@ options:
 
 ### `--get-mount-path` 동작
 
-`vaults[*]` 에서 id 가 매칭되는 첫 entry 의 `options.mount_path` 출력 (path 그대로 — `~` expansion 은 호출자 책임). 미발견 시 exit 1 + stderr 명시.
+`vaults[*]` 에서 id 가 매칭되는 첫 entry 의 `options.mount_path` 출력 (path 그대로 — `~` expansion 은 호출자 책임). `options.mount_path` 부재 시 vault top-level `local_path` 로 fallback (ADR-0019 의 alias — yaml.example 에서 두 필드 동일값 권장). 두 필드 모두 부재 시 exit 1 + stderr 명시. (CR1-LOW-4, issue #32: fallback 동작 spec 정본화.)
 
 ---
 
