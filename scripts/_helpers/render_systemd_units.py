@@ -336,6 +336,14 @@ def _output_filename(template_path: Path, vault_id: str | None) -> str:
 
 def _do_render(cfg: dict, out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # startup cleanup: 이전 run crash 로 인한 잔존 .tmp 파일 제거
+    for stale_tmp in out_dir.glob("*.tmp"):
+        try:
+            stale_tmp.unlink()
+        except OSError:
+            pass
+
     tpl_dir = _systemd_templates_dir()
     if not tpl_dir.is_dir():
         print(f"ERROR: template dir 부재: {tpl_dir}", file=sys.stderr)
