@@ -89,6 +89,27 @@ def needs_alert(failure: dict[str, Any]) -> bool:
     return False
 
 
+# issue #29 — `systemctl --user` / `journalctl --user` 는 user systemd manager 와 DBus 통신을
+# 사용한다. issue #35 의 env scrub (`env={"PATH": ...}`) 는 외부 SaaS (webhook) 호출의 leak 차단
+# 의도였으나, 같은 패턴을 user systemd subprocess 에 적용하면 `XDG_RUNTIME_DIR` /
+# `DBUS_SESSION_BUS_ADDRESS` 가 제거되어 `Failed to connect to bus: No medium found` 로 silent
+# fail. 본 helper 는 동작 필수 변수만 명시 allowlist 로 통과시킨다.
+_USER_SYSTEMD_ENV_KEYS = (
+    "PATH",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "HOME",
+    "USER",
+)
+
+
+def _user_systemd_env() -> dict[str, str]:
+    """user systemctl/journalctl 호출용 minimal env (DBus session 필수 변수만 통과)."""
+    env = {k: v for k in _USER_SYSTEMD_ENV_KEYS if (v := os.environ.get(k))}
+    env.setdefault("PATH", "/usr/bin:/bin")
+    return env
+
+
 def collect_mount_fallback_failures(vault_ids: list[str]) -> list[dict[str, Any]]:
     """v9 (ADR-0024 minor) — mount@.service OnFailure 직접 trigger case 의 fallback diagnostic.
 
@@ -108,7 +129,7 @@ def collect_mount_fallback_failures(vault_ids: list[str]) -> list[dict[str, Any]
         is_failed = subprocess.run(
             ["systemctl", "--user", "is-failed", f"wikihub-mount@{vault_id}.service"],
             capture_output=True, text=True, timeout=5, check=False,
-            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            env=_user_systemd_env(),
         )
         # is-failed: failed 면 exit 0 + stdout "failed". active/inactive 등은 exit 1.
         if is_failed.returncode == 0 and "failed" in is_failed.stdout.strip():
@@ -116,7 +137,7 @@ def collect_mount_fallback_failures(vault_ids: list[str]) -> list[dict[str, Any]
                 ["journalctl", "--user", "-u", f"wikihub-mount@{vault_id}.service",
                  "--since", "30min ago", "--no-pager", "-n", "100"],
                 capture_output=True, text=True, timeout=10, check=False,
-                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                env=_user_systemd_env(),
             )
             diag = (
                 log_tail.stdout[:5000] if log_tail.returncode == 0
@@ -218,6 +239,20 @@ def format_telegram_alert_message(instance: str, alerts: list[dict[str, Any]]) -
         lines.append(f"  Reason: {reason[:200]}")
         if a.get("failed_count"):
             lines.append(f"  Failed count: {a['failed_count']}")
+        # issue #29 — mount@ OnFailure fallback case: journalctl tail 첨부 (v9 ADR-0024 정합).
+        # last_failure.json 부재 분기에서 운영자가 진단할 유일한 신호. webhook payload 와 동일.
+        diag = a.get("fallback_diagnostic")
+        if diag:
+            # Telegram HTML 의 <pre> 는 4096 char 메시지 한도 고려해 1500 char 로 truncate.
+            diag_str = str(diag)
+            if len(diag_str) > 1500:
+                diag_str = diag_str[:1500] + "\n... (truncated)"
+            # HTML escape — &, <, > 만 escape 하면 충분 (telegram HTML mode).
+            diag_escaped = (
+                diag_str.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            )
+            lines.append("  Diagnostic (journalctl tail):")
+            lines.append(f"<pre>{diag_escaped}</pre>")
         lines.append("")
     return "\n".join(lines)
 
@@ -307,11 +342,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # ADR-0040 §D1 (carry-over of ADR-0037 §D1) — webhook + Telegram 병행 발송. 한쪽이라도 성공하면 alerted_at 갱신 (dedup).
     sent = False
+    # issue #29 — log 카운트는 alerts 전체 (to_send + mount_fallbacks). 이전에 len(to_send) 만 셈
+    # → mount@ OnFailure fallback case 가 "0 failure(s)" 로 misleading 보고됐음.
+    alert_count = len(alerts)
     if webhook_url:
         ok = post_webhook(webhook_url, payload, cfg.operations.fatal_webhook_timeout_sec)
         if ok:
             sent = True
-            log.info("webhook 발송 완료: %d failure(s)", len(to_send))
+            log.info(
+                "webhook 발송 완료: %d failure(s) (last_failure=%d, mount_fallback=%d)",
+                alert_count, len(to_send), len(mount_fallbacks),
+            )
         else:
             log.error(
                 "webhook 발송 실패 — 운영자 점검: webhook URL=%s, timeout=%ds",
@@ -327,7 +368,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if ok:
             sent = True
-            log.info("Telegram 발송 완료: %d failure(s)", len(to_send))
+            log.info(
+                "Telegram 발송 완료: %d failure(s) (last_failure=%d, mount_fallback=%d)",
+                alert_count, len(to_send), len(mount_fallbacks),
+            )
         else:
             log.error("Telegram 발송 실패 — chat_id=%s 확인", tg_chat_id)
 
