@@ -85,6 +85,49 @@ def test_low_interval_fatal(tmp_path: Path) -> None:
     assert "60" in e.value.reason
 
 
+def test_mount_path_warn_on_mismatch(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """mount_path != local_path 시 WARNING 로그 발화 + VaultSyncFatal 미발생."""
+    yp = _write(
+        tmp_path / "wikihub.yaml",
+        _minimum_yaml().replace(
+            "    options:",
+            "    options:\n      mount_path: /custom/mount",
+        ),
+    )
+    cfg = load_wikihub_yaml(yp)
+    assert "gdrive" in cfg.vaults
+    assert any("mount_path" in record.message for record in caplog.records)
+    assert any(record.levelname == "WARNING" for record in caplog.records)
+
+
+def test_mount_path_no_warn_on_default(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """mount_path 미설정 시 WARNING 로그 미발화."""
+    yp = _write(tmp_path / "wikihub.yaml", _minimum_yaml())
+    cfg = load_wikihub_yaml(yp)
+    assert "gdrive" in cfg.vaults
+    mount_warnings = [
+        r for r in caplog.records if "mount_path" in r.message and r.levelname == "WARNING"
+    ]
+    assert len(mount_warnings) == 0
+
+
+def test_mount_path_no_warn_on_equal(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """mount_path == local_path 시 WARNING 로그 미발화."""
+    yp = _write(
+        tmp_path / "wikihub.yaml",
+        _minimum_yaml().replace(
+            "    options:",
+            "    options:\n      mount_path: /opt/vault-gdrive",
+        ),
+    )
+    cfg = load_wikihub_yaml(yp)
+    assert "gdrive" in cfg.vaults
+    mount_warnings = [
+        r for r in caplog.records if "mount_path" in r.message and r.levelname == "WARNING"
+    ]
+    assert len(mount_warnings) == 0
+
+
 def test_duplicate_vault_id_fatal(tmp_path: Path) -> None:
     text = """
 version: 1
