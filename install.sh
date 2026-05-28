@@ -658,45 +658,12 @@ _enforce_rclone_conf_perms() {
     fi
 }
 
-# ADR-0031 §Decision B (MED-S2 design review): install-time version fact 를 sidecar 에 기록.
-# ADR-0035: gws 키 제거. `/wh:setup` Step 0 의 gws_min_version 비교도 폐기.
-# stdout 파싱 brittleness 회피 (rclone --version 형식 변경 시 fallback 으로만 사용).
-#
-# atomic write (CR1-HIGH-3 review 반영): tmpfile + sync + mv. same-directory + PID suffix +
-# cleanup trap (errexit 또는 중단 시 orphan tmp 회수) + stale tmp 5분 이상 자동 정리.
+# Migrated to Python (issue-19): scripts/lib/sidecar.py.
+# Atomic write invariant (ADR-0031 §Decision A): tmpfile + fsync + os.replace,
+# matching state.py._atomic_write_json pattern.
 _write_installed_versions_sidecar() {
     local target="$WIKIHUB_SRC/_system/INSTALLED_VERSIONS.json"
-    local target_dir; target_dir="$(dirname "$target")"
-    local target_base; target_base="$(basename "$target")"
-    mkdir -p "$target_dir"
-    # Stale .tmp.* 5분 이상 자동 cleanup (이전 process 의 SIGTERM/errexit 흔적).
-    find "$target_dir" -maxdepth 1 -name "${target_base}.tmp.*" -mmin +5 -delete 2>/dev/null || true
-
-    local rclone_v graphify_v yq_v
-    rclone_v="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//' || true)"
-    # ADR-0036 — graphify 도 INSTALLED_VERSIONS.json 의 fact 로 기록. graphify --version 형식 미보장 → 단순 last-field 추출.
-    graphify_v="$(graphify --version 2>/dev/null | awk '{print $NF; exit}' || true)"
-    # yq (mikefarah/yq go version) — `yq --version` 출력 last-field "v4.44.3" → v prefix strip.
-    yq_v="$(yq --version 2>/dev/null | awk '{print $NF; exit}' | sed 's/^v//' || true)"
-
-    local tmp="${target}.tmp.$$"
-    # 본 함수 ERR/RETURN 시 tmp 자동 회수 — set -e 환경에서 cat/sync fail 시 orphan 차단.
-    trap "rm -f '$tmp' 2>/dev/null || true" RETURN ERR
-    cat > "$tmp" <<EOF
-{
-  "schema_version": 1,
-  "rclone": "${rclone_v:-}",
-  "graphify": "${graphify_v:-}",
-  "yq": "${yq_v:-}",
-  "uv": "${UV_VERSION}",
-  "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
-  "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
-    # Ubuntu 22.04+ coreutils 8.32 의 `sync -f <file>` 는 해당 파일 의 FS data 만 flush.
-    # 실패 시 fallback 으로 global sync (cost 증가하나 정합 유지).
-    sync -f "$tmp" 2>/dev/null || sync || true
-    mv "$tmp" "$target"
+    "$VENV_PATH/bin/python3" -m scripts.lib.sidecar
     info "Step 4.5 INSTALLED_VERSIONS.json 작성: $target"
 }
 
