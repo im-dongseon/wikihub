@@ -20,6 +20,8 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 > Step 1~3(분석·설계·구현)은 어느 에이전트든 사용 가능하다. Step 2 design review와 Step 4 code review에서 여러 에이전트를 혼용하면 맹점을 줄일 수 있다.
 
+> **외부 client (운영 데이터 조회용)**: 위 에이전트는 wikihub 개발/운영용. 운영 환경의 wiki 데이터를 **외부 MCP-호환 client** (Claude Desktop / Cline / IDE plugin) 에서 read-only query 하려면 v0.1.10 부터 도입된 **MCP server** (`scripts/wikihub_mcp.py`) 를 SSH 로 원격 spawn — deterministic primitive 전용, LLM-mediated playbook (Hermes `/wh-query`) 와 layer 분리. 자세: `AGENTS.md` §5.1 (외부 client entry points) + [`docs/mcp-setup.md`](mcp-setup.md) + ADR-0043 (`docs/adr/0043-mcp-integration.md`).
+
 ---
 
 ## 핵심 원칙
