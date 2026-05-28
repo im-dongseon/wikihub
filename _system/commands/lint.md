@@ -176,6 +176,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 
 각 페이지를 LLM으로 점검:
 
+- **idempotency (Issue #39)**: entity 페이지 frontmatter에 `merged_from` 필드 존재 시 → 해당 entity는 이미 cross-category merge 완료 상태. LLM merge(본문 갱신) 재호출 금지. 본문 불변, `referenced_by` 만 갱신 대상.
 - 페이지 간 모순되는 클레임
 - 더 최신 source로 무효화 가능성 있는 내용
 - 본문에 언급되지만 entity·concept 페이지가 없는 항목 (Step 3에서 자동 생성됐어야 하나 누락 케이스)
@@ -200,9 +201,13 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - wiki/ 전체 sed 치환: 변형 form 의 link `[[<variant>]]` → `[[<canonical>]]` (명시적 카테고리 prefix link 만 매칭. 단축형 `[[<name>]]` 은 link resolver 가 새 page 위치 자동 인식)
   - **idempotency**: archive 후 같은 form 의 page 가 ingest 사이클에서 재생성되지 않도록 ingest.md alias 인식 (Step 4) 정합 — 같은 alias 보유 시 stub 생성 skip
 - **cross-category duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
-  - entity 우선 — concept 페이지의 본문 + referenced_by + alias 셋을 entity 페이지로 LLM merge
+  - entity 우선 — concept 페이지의 본문 + referenced_by + alias 셋을 entity 페이지로 **LLM merge**
+  - **merge 수행 후 entity frontmatter에 `merged_from: [<concept-page-slug>]` 추가** (idempotency 마커, Issue #39)
   - concept 페이지를 `.archived/concepts/<name>-<utc_iso>.md` 이동
-  - **idempotency gate**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시에도 entity 본문 LLM merge 재호출 안 함 — concept 본문 + referenced_by 만 합집합 추가. entity 본문 git history churn 차단.
+  - **idempotency gate (Issue #39)**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시:
+    - entity frontmatter 에 `merged_from` 존재 → **entity 본문 LLM merge 재호출 안 함**
+    - concept 본문 + `referenced_by` + alias 만 합집합 추가 (entity 본문 git history churn 차단)
+    - `merged_from` 부재 시 (첫 merge) → LLM merge 정상 수행 후 `merged_from` 추가
 
 - **stale `wiki/graphify-out/` cleanup (v0.1.10 — graphify_path_absolute)**:
   - `$WIKIHUB_HOME/wiki/graphify-out/` 존재 감지 시 → `$WIKIHUB_HOME/graphify-out/.archived/wiki-graphify-out-<utc_iso>/` 로 이동 (recoverable archive — `rm -rf` 절대 금지, `mv` 만).
