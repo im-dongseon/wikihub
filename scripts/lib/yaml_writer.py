@@ -9,6 +9,11 @@ ruamel.yaml 의 round-trip 모드 (`YAML(typ='rt')`) 가 주석·key 순서·ind
 
 atomic write 패턴은 `scripts/lib/state.py` 의 `_atomic_write_json` 와 정합 — tmpfile 은
 target 의 same-directory + PID suffix, fsync 후 os.replace.
+
+**Thread-safety**: `_yaml_rt` 는 module-level singleton (`YAML(typ="rt")` 인스턴스) 으로,
+ruamel.yaml 공식 문서 기준 thread-safe 하지 않음. 본 helper 는 single-threaded 호출을 가정한다.
+v0.2.x multi-thread 도입 시 function-local instance 또는 `threading.Lock` 보호 필요
+(ADR-0031 §Decision A single-writer invariant 범위 확장 검토).
 """
 from __future__ import annotations
 
