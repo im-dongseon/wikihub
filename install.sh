@@ -668,7 +668,10 @@ _enforce_rclone_conf_perms() {
 # matching state.py._atomic_write_json pattern.
 _write_installed_versions_sidecar() {
     local target="$WIKIHUB_SRC/_system/INSTALLED_VERSIONS.json"
-    "$VENV_PATH/bin/python3" -m scripts.lib.sidecar
+    # cwd 고정 (issue #108): `-m scripts.lib.sidecar` 는 scripts 를 top-level 패키지로 import →
+    # curl-pipe 업데이트(cwd=$HOME, self-restart 후에도 유지)에서 ModuleNotFoundError. WIKIHUB_SRC
+    # 에서 실행해야 sys.path[0] 에 src 가 들어간다 (install.sh:325·1437 의 cwd 패턴 정합).
+    ( cd "$WIKIHUB_SRC" && "$VENV_PATH/bin/python3" -m scripts.lib.sidecar )
     info "Step 4.5 INSTALLED_VERSIONS.json 작성: $target"
 }
 
