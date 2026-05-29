@@ -40,4 +40,5 @@ docs/superpowers/
 # Agent skills (project-local installs via `npx skills add`)
 .agents/
 .claude/
+.hermes/
 skills-lock.json
