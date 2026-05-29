@@ -6,7 +6,7 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.10] — 2026-05-29 (canary)
+## [v0.1.10] — 2026-05-30 (released)
 
 ### 추가 (Added)
 - **MCP server** (ADR-0043) — 외부 MCP-호환 client (Claude Desktop / Cline / IDE plugin) 가 SSH 로 wikihub VM 에 원격 spawn → wiki 데이터 read-only query.
@@ -16,8 +16,11 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 - **alias-aware link resolver** (ADR-0042) — `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 자동 resolve. lint Step 1.5 alias index build (per-cycle, in-memory).
 - **deployment helpers** — `promote_canary.sh` + `release.sh` (AGENTS.md §3 Step 5 자동화).
 - **acceptance gate 결과 기록** — update_mode V3·V4·V5a/b·V6·V7·V8·V9a·V10·V12 multipass VM 검증 + design.md §9.2.1.
+- **웹 UI 도입 검토 가이드** — `docs/web-ui-setup.md` (hermes-webui + Cloudflare Tunnel, Telegram 대체 — issue #107). 외부 컴포넌트 셋업·보안·걷어내기 절차 + AionUi 비교.
 
 ### 수정 (Fixed)
+- **curl-pipe 업데이트 sidecar fix** — `_write_installed_versions_sidecar` 가 cwd 미고정으로 `python3 -m scripts.lib.sidecar` 호출 → curl-pipe 업데이트(cwd=$HOME)에서 `ModuleNotFoundError` 로 Step 4.5 abort. `(cd "$WIKIHUB_SRC" && …)` 로 해소 (issue #108 — curl-pipe 업데이트 경로 blocking)
+- **sidecar uv 버전 탐지** — `INSTALLED_VERSIONS.json` 의 uv 필드 빈 문자열 → rclone/yq 와 동일하게 `uv --version` 직접 파싱 (issue #109)
 - **install hardening**:
   - `_step2_update` self-restart 후 `current_version` export 보존 (downgrade warn 미발화 silent fail fix, issue #86)
   - ingest Step 0 per-vault flock — Hermes 채팅 직접 호출 race 차단 (issue #61)
@@ -27,6 +30,8 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 - 기타 install.sh / lint / graphify timeout / yaml schema migration 다수 (PR #62~#94, #100/#101)
 
 ### 변경 (Changed)
+- **systemd TimeoutStartSec yaml-driven** — lint/ingest 각각 `lint_timeout_start_sec` / `ingest_timeout_start_sec` override + `agent.timeout_sec` fallback (issue #104)
+- **문서 정리** — `docs/reviews/`·`docs/reports/` 의 v0.1.8/v018-fix 산출물을 `features/archive/` 로 이관 (docs/ 는 영속 문서만 잔존)
 - `_system/VERSION` — `0.1.9` → `0.1.10`
 
 ---

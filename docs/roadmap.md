@@ -4,17 +4,13 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 ---
 
-## 현재 진행 (v0.1.10 canary, release 준비 중)
+## 현재 진행 (v0.1.11, 진행 중)
 
 | 항목 | 상태 |
 |---|---|
-| MCP integration Phase 1 (ADR-0043) | ✅ canary |
-| alias-aware link resolver (ADR-0042) | ✅ canary |
-| install hardening (race guard / self-restart fix / observability) | ✅ canary |
-| deployment helpers (promote_canary.sh / release.sh) | ✅ canary |
-| update_mode acceptance gate | ✅ canary |
+| release.sh push refspec fix — branch+tag 동일명(`vX.Y.Z`) 모호성 (#112) | 🔧 PR #113 |
 
-`canary` tag 기준 OCI 운영 검증 통과 후 `vX.Y.Z` annotated tag + `latest` 로 promote (AGENTS.md §3 Step 5).
+**v0.1.10 은 2026-05-30 정식 release** — `main` merge (`--no-ff`) + `v0.1.10` annotated tag + `latest` promote (AGENTS.md §3 Step 5). 운영자: `install.sh --branch latest`. 자세한 내용은 [`docs/changelog.md`](changelog.md) v0.1.10 entry.
 
 ---
 
@@ -45,7 +41,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 그룹 | feature_id | 결과 |
 |---|---|---|
-| v0.1.10 (canary, release 준비) | (다수) | 위 §"현재 진행" 참조 |
+| v0.1.10 | MCP Phase 1(ADR-0043) · alias resolver(ADR-0042) · install/update hardening · deployment helpers · sidecar fixes(#108/#109) | ✅ release (2026-05-30) |
 | v0.1.9 | `sync_passthrough_fix` | ✅ release |
 | v0.1.8 | `entity_concept_alias_frontmatter`, `monitor_services_remove`, `systemd_prefix_realign`, `branch_strategy_formalize`, `lint_operations_improvements`, `update_path_fixes`, `install_update_hardening`, `legacy_migration_cleanup`, `graphify_path_absolute` | ✅ release |
 | v0.1.7 | `yaml_schema_drift_auto_migration`, `graphify_env_namespace_isolation` | ✅ release |
