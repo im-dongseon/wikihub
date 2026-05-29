@@ -128,9 +128,12 @@ fi
 # Update latest tag (force-update allowed)
 run_or_dry git tag -f latest "$MERGE_SHA"
 
-# Push main + tags
-run_or_dry git push origin main "$VERSION_TAG"
-run_or_dry git push origin latest --force 2>/dev/null || \
+# Push main + tags — explicit refspecs (issue #112): the version branch
+# (refs/heads/vX.Y.Z) and the annotated tag (refs/tags/vX.Y.Z) share a name, so a
+# bare `git push origin vX.Y.Z` is ambiguous ("src refspec matches more than one").
+run_or_dry git push origin main
+run_or_dry git push origin "refs/tags/$VERSION_TAG"
+run_or_dry git push origin "refs/tags/latest" --force 2>/dev/null || \
     warn "Latest tag force-push failed. Check GitHub tag protection rules."
 
 # --- Post-release state display ---
@@ -142,7 +145,7 @@ echo "  Description  : $TAG_MESSAGE"
 echo ""
 echo "Ref state after release:"
 echo "  main HEAD       = refs/tags/$VERSION_TAG = refs/tags/latest = $MERGE_SHA"
-echo "  $VERSION_BRANCH = $(git rev-parse "$VERSION_BRANCH" 2>/dev/null || echo 'N/A') (previous HEAD, preserved)"
+echo "  $VERSION_BRANCH = $(git rev-parse "refs/heads/$VERSION_BRANCH" 2>/dev/null || echo 'N/A') (previous HEAD, preserved)"
 echo "  canary tag      = previous canary target (preserved until next squash)"
 echo ""
 echo "Next step: Notify operators to run 'install.sh --branch latest'"
