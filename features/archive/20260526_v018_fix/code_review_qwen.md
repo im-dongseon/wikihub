@@ -151,10 +151,10 @@ Removes `wh-graphify` from the list of Telegram skill defaults. This is a docume
 
 **Rating**: 🟢 Informational
 
-- `docs/reports/250525_wikihub_v018_update_report.md` (244 lines)
-- `docs/reports/250526_wikihub_v018fix_report.md` (182 lines)
-- `docs/reviews/250526_v018fix_code_review.md` (56 lines)
-- `docs/reviews/250526_v018fix_code_review_kimi.md` (59 lines)
+- `250525_wikihub_v018_update_report.md` (244 lines)
+- `250526_wikihub_v018fix_report.md` (182 lines)
+- `code_review_minimax.md` (56 lines)
+- `code_review_kimi.md` (59 lines)
 
 These are documentation/review artifacts. No code impact.
 

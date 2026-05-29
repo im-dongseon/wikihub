@@ -35,7 +35,7 @@
 
 ---
 
-## Commit 3 — `28492eb`: new report `docs/reports/250526_wikihub_v018fix_report.md`
+## Commit 3 — `28492eb`: new report `250526_wikihub_v018fix_report.md`
 
 | 기준 | 평가 | 비고 |
 |------|------|------|

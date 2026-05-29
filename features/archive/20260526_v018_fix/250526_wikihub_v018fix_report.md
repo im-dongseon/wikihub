@@ -79,7 +79,7 @@ d0a6746 fix(lesson-2): align config.py lint_interval_hours default (24→3) with
 ## 참고
 
 - ADR-0035: gws_min_version 폐기
-- 원본 보고서: `docs/reports/250525_wikihub_v018_update_report.md`
+- 원본 보고서: `250525_wikihub_v018_update_report.md`
 
 ---
 
