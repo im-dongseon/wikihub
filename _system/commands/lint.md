@@ -49,13 +49,48 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 - `wiki/` 직속 파일 중 `index.md` 외 페이지 → `_lint/report.md`에 보고 (이동은 Step 7 에서 자동)
 - 4 카테고리·`_lint/`·vault별 `sources/{vault}/` 디렉토리 부재 시 생성
 
-### Step 2. ADR-0001 link 규약 검증 (자동, 보고만)
+### Step 1.5. alias index build (v0.1.10 — ADR-0042)
+
+본 cycle 의 Step 2 dangling 검사가 사용할 alias inverted index 를 1회 빌드. (Step 4.5 duplicate detection 은 별도 subprocess `detect_alias_duplicates.py` 가 wiki 자체 스캔으로 처리 — 본 index 와 독립.)
+
+```python
+alias_index: dict[str, str] = {}   # lowercase_alias → canonical_filename
+for category in ("entities", "concepts"):
+    for page in (wiki_root / category).glob("*.md"):
+        canonical = page.stem
+        fm = read_frontmatter(page)
+        for alias in (fm.get("aliases") or [canonical]):
+            key = alias.strip().lower()
+            if key in alias_index and alias_index[key] != canonical:
+                continue   # 충돌 — Step 4.5 가 duplicate 보고
+            alias_index[key] = canonical
+```
+
+비용: O(N) frontmatter read (N = entities + concepts 페이지 수). frontmatter 파싱 오류 발생 페이지는 skip + Step 4.5 가 결함 보고. 본 cycle 내 모든 resolver 호출이 같은 index 공유 (consistency).
+
+### Step 2. ADR-0001 link 규약 검증 (자동, 보고만 — ADR-0042 resolver 적용)
 
 전체 wiki 페이지의 `[[link]]` 추출 후:
 
 - **위반 1 — sources의 단축형 link**: source 카테고리 페이지 또는 source 페이지로 향하는 link 중 vault prefix 누락 (`[[report]]` 같은 형식) → 위반 항목 `_lint/report.md`에 기록
 - **위반 2 — 잘못된 vault prefix**: `[[unknown/path]]`에서 `unknown`이 `wikihub.yaml.vaults[*].id`에 없음 → 보고
 - **위반 3 — vault 존재하나 path 없음 (dangling)**: `[[gdrive/old/file]]`에서 `wiki/sources/gdrive/old/file.md` 부재 → 보고
+
+**entities / concepts 단축형 `[[<name>]]` dangling 검사 (ADR-0042 resolver)** — **category ∈ {entities, concepts} 한정**. sources 는 위반 1·2·3 path 그대로.
+
+```python
+def resolve_link(name, category):
+    # 호출 전제: category in {"entities", "concepts"}
+    exact = wiki_root / category / f"{name}.md"
+    if exact.is_file():
+        return exact
+    canonical = alias_index.get(name.strip().lower())
+    if canonical:
+        return wiki_root / category / f"{canonical}.md"
+    return None   # dangling
+```
+
+`[[<name>]]` 가 entities/concepts 단축형이면 `resolve_link(name, "entities")` 또는 `resolve_link(name, "concepts")` 호출 — alias 매핑된 canonical 페이지가 존재하면 valid (dangling 아님). 둘 다 부재 시 dangling 보고. 예: `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 resolve → 보고 안 함.
 
 검출만, 자동 수정 X (단축형의 의도된 동의어 가능성, dangling의 "나중에 만들 페이지" 의도 가능성).
 
@@ -84,22 +119,52 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 
 wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 탐지. **alias 기반 인식** — 단순 lowercase 비교가 아닌 frontmatter `aliases` 셋 비교 (ADR-0039 정합).
 
-**Alias migration** (idempotent, 매 cycle):
+**구현**: `scripts/_helpers/detect_alias_duplicates.py` (Python subprocess helper, token 0화). LLM 호출 대신 deterministic subprocess 로 동일한 알고리즘을 처리한다:
+
+```bash
+# WIKIHUB_HOME 기준 wiki/entities/ + wiki/concepts/ scan → JSON stdout
+python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+출력 JSON 구조:
+```json
+{
+  "case_variant": [
+    {
+      "alias": "minimax",
+      "category": "entity",
+      "category_dir": "entities",
+      "pages": [
+        {"path": "wiki/entities/MiniMax.md", "original": "MiniMax"},
+        {"path": "wiki/entities/minimax.md", "original": "minimax"}
+      ]
+    }
+  ],
+  "cross_category": [
+    {
+      "alias": "docker",
+      "pages": [
+        {"path": "wiki/entities/Docker.md", "original": "Docker", "category": "entity"},
+        {"path": "wiki/concepts/Docker.md", "original": "Docker", "category": "concept"}
+      ]
+    }
+  ]
+}
+```
+
+→ `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 결과를 변환해 기록. Step 7 에서 자동 처리.
+
+**검증 기준** (ADR-0039 정합):
+- 비교는 **alias 셋의 lowercase normalize** — `MiniMax` 와 `minimax` 의 alias 셋이 공통 lowercase form 1+ 공유하면 같은 entity (단일 page 내 변형 alias 들은 다른 page 와 분리).
+- case-variant = 같은 카테고리 내 2+ page 가 공통 lowercase form 보유.
+- cross-category = entity normalize 셋 ∩ concept normalize 셋 ≠ ∅.
+
+**Alias migration** (idempotent, 매 cycle — 기존 유지, Python subprocess 외 보조):
 - 각 entity/concept page 의 frontmatter `aliases` 부재 시 — `aliases: [<canonical>]` 자동 추가 (canonical = 페이지 파일명 base).
 - 빈 `aliases: []` 도 동일 처리.
 - **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (ingest.md:152) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
-
-**Case-variant duplicate** (같은 카테고리):
-- entity 또는 concept 각각의 page list — `aliases` 셋을 lowercase 로 normalize 한 셋끼리 비교.
-- 2+ page 의 normalize 셋이 1+ 공통 form 보유 + 다른 page → duplicate 보고.
-- 공통 form 없으면 정합 (단일 page 의 변형 alias 들이 다른 page 와 분리).
-
-**Cross-category duplicate** (entity ↔ concept):
-- entity 의 normalize 셋 ∩ concept 의 normalize 셋 = 비공집합 페어 → duplicate 보고.
-- 예: entities/Docker (aliases [Docker, docker]) + concepts/Docker (aliases [Docker]) → 공통 `docker` lowercase → duplicate.
-
-→ `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 보고. Step 7 에서 자동 처리.
 
 ### Step 5. wiki/index.md 재구성 (자동)
 
@@ -146,6 +211,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 
 각 페이지를 LLM으로 점검:
 
+- **idempotency (Issue #39)**: entity 페이지 frontmatter에 `merged_from` 필드 존재 시 → 해당 entity는 이미 cross-category merge 완료 상태. LLM merge(본문 갱신) 재호출 금지. 본문 불변, `referenced_by` 만 갱신 대상.
 - 페이지 간 모순되는 클레임
 - 더 최신 source로 무효화 가능성 있는 내용
 - 본문에 언급되지만 entity·concept 페이지가 없는 항목 (Step 3에서 자동 생성됐어야 하나 누락 케이스)
@@ -170,9 +236,13 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - wiki/ 전체 sed 치환: 변형 form 의 link `[[<variant>]]` → `[[<canonical>]]` (명시적 카테고리 prefix link 만 매칭. 단축형 `[[<name>]]` 은 link resolver 가 새 page 위치 자동 인식)
   - **idempotency**: archive 후 같은 form 의 page 가 ingest 사이클에서 재생성되지 않도록 ingest.md alias 인식 (Step 4) 정합 — 같은 alias 보유 시 stub 생성 skip
 - **cross-category duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
-  - entity 우선 — concept 페이지의 본문 + referenced_by + alias 셋을 entity 페이지로 LLM merge
+  - entity 우선 — concept 페이지의 본문 + referenced_by + alias 셋을 entity 페이지로 **LLM merge**
+  - **merge 수행 후 entity frontmatter에 `merged_from: [<concept-page-slug>]` 추가** (idempotency 마커, Issue #39)
   - concept 페이지를 `.archived/concepts/<name>-<utc_iso>.md` 이동
-  - **idempotency gate**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시에도 entity 본문 LLM merge 재호출 안 함 — concept 본문 + referenced_by 만 합집합 추가. entity 본문 git history churn 차단.
+  - **idempotency gate (Issue #39)**: archive 후 concept page 가 ingest cycle 의 새 source 변화로 재등장 시:
+    - entity frontmatter 에 `merged_from` 존재 → **entity 본문 LLM merge 재호출 안 함**
+    - concept 본문 + `referenced_by` + alias 만 합집합 추가 (entity 본문 git history churn 차단)
+    - `merged_from` 부재 시 (첫 merge) → LLM merge 정상 수행 후 `merged_from` 추가
 
 - **stale `wiki/graphify-out/` cleanup (v0.1.10 — graphify_path_absolute)**:
   - `$WIKIHUB_HOME/wiki/graphify-out/` 존재 감지 시 → `$WIKIHUB_HOME/graphify-out/.archived/wiki-graphify-out-<utc_iso>/` 로 이동 (recoverable archive — `rm -rf` 절대 금지, `mv` 만).

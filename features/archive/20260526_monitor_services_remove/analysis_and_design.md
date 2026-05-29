@@ -190,8 +190,8 @@ Phase A → Phase B 순. Phase A 가 같은 파일들을 touch 하므로 Phase B
 - [plan.md](plan.md)
 - [docs/adr/0037-alert-pipeline-architecture.md](../../docs/adr/0037-alert-pipeline-architecture.md)
 - [docs/adr/0024-fatal-alert-contract.md](../../docs/adr/0024-fatal-alert-contract.md)
-- [docs/reviews/250526_v018fix_code_review_glm-5.1.md](../../docs/reviews/250526_v018fix_code_review_glm-5.1.md)
-- [docs/reviews/250526_v018fix_code_review_mimo-v2.5-pro.md](../../docs/reviews/250526_v018fix_code_review_mimo-v2.5-pro.md)
+- [code_review_glm-5.1.md](../20260526_systemd_prefix_realign/code_review_glm-5.1.md)
+- [code_review_mimo-v2.5-pro.md](../20260526_systemd_prefix_realign/code_review_mimo-v2.5-pro.md)
 
 ---
 

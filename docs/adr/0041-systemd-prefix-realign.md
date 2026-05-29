@@ -98,4 +98,4 @@ v0.1.9 release window 의 commit `2ed01f8` (2026-05-26, `fix(systemd): rename un
 - **연계 정합**: [ADR-0040](0040-monitor-services-remove.md) — 직전 monitor services remove 의 systemd unit catalog 정합. 본 ADR 이 carry-over 표 narrative 의 unit name 갱신 책임.
 - **연계 정합**: [ADR-0030](0030-update-workflow-orchestration.md) — install.sh upgrade migration 의 stop/start orchestration. 본 ADR 의 legacy stop+disable 정합.
 - **본 ADR 의 분석 정본**: [features/20260526_systemd_prefix_realign/analysis_and_design.md](../../features/20260526_systemd_prefix_realign/analysis_and_design.md)
-- **이전 결정 context**: commit `2ed01f8` (fix(systemd): rename unit files wh-ingest@ / wh-lint for consistency with skill names) + 멀티모델 리뷰 docs/reviews/250526_v018fix_code_review_glm-5.1.md + mimo-v2.5-pro.md.
+- **이전 결정 context**: commit `2ed01f8` (fix(systemd): rename unit files wh-ingest@ / wh-lint for consistency with skill names) + 멀티모델 리뷰 features/archive/20260526_systemd_prefix_realign/code_review_glm-5.1.md + code_review_mimo-v2.5-pro.md.

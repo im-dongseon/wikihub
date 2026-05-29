@@ -19,12 +19,15 @@ last_failure (scope="mount") writer 책임을 직접 수행.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 from pathlib import Path
 
 from .exceptions import VaultSyncFatal, VaultSyncRetryable
 from .state import read_last_failure, save_last_failure, utc_now_iso
+
+log = logging.getLogger(__name__)
 
 
 # ADR-0035 — rclone OAuth error 패턴. SA 패턴 폐기 (gws·SA 자체 폐기).
@@ -79,9 +82,10 @@ def assert_mount_alive(
             capture_output=True, text=True, timeout=timeout_sec, check=False,
         )
         if result.returncode != 0:
+            stderr_snip = result.stderr[:200].replace("\n", " ").replace("\r", "")
             reason = (
                 f"mount path stat 실패 (rc={result.returncode}) — mount.service 미준비/dead: "
-                f"{mount_path}, stderr={result.stderr[:200]!r}"
+                f"{mount_path}, stderr={stderr_snip}"
             )
             _raise_mount_failure(vault_id, state_dir, reason)
     except subprocess.TimeoutExpired:
@@ -216,6 +220,16 @@ def vfs_refresh(
             joined = " ".join(str(v) for v in result_val.values() if v and v != "OK")
             if joined:
                 rc_error_msg = joined
+            # issue #12 — rclone rc API schema 변경 forensic: 알려지지 않은
+            # 상위 키(error, errors, failed 등) 감지 시 log.warning 출력.
+            # 정상 응답의 키는 "" (빈 문자열, root path) 또는 파일 경로(/. 포함).
+            for key in result_val:
+                if key and '/' not in key and '.' not in key:
+                    log.warning(
+                        "vfs/refresh rc API: unexpected schema key %r — "
+                        "rclone 버전 확인 권장 (issue #12)",
+                        key,
+                    )
         elif result_val is not None:
             # dict 도 None 도 아닌 경우 (`result: "..."` 같은 unexpected schema) — 전체를 error
             # 로 분류해서 regex 매칭에 위임. 운영자에게 surface.
@@ -233,6 +247,7 @@ def vfs_refresh(
     raw_full = result.stderr or rc_error_msg
     error_full = raw_full[-_ERROR_REGEX_SIZE_CAP:] if len(raw_full) > _ERROR_REGEX_SIZE_CAP else raw_full
     error_snippet = error_full[:500]
+    snippet = error_snippet[:200].replace("\n", " ").replace("\r", "")
     if _RCLONE_AUTH_PATTERNS.search(error_full):
         if state_dir is not None:
             now = utc_now_iso()
@@ -241,7 +256,7 @@ def vfs_refresh(
                 "exit_code": 2,
                 "severity": "fatal",
                 "scope": "mount",
-                "reason": f"rclone OAuth revoked/corrupt: {error_snippet[:200]!r}",
+                "reason": f"rclone OAuth revoked/corrupt: {snippet}",
                 "remediation": (
                     "setup.md §Step 5.5 — `rclone config` 재발급 (OAuth token) "
                     f"+ chmod 0600 ~/.config/rclone/rclone.conf "
@@ -255,7 +270,7 @@ def vfs_refresh(
             })
         raise VaultSyncFatal(
             vault_id=vault_id,
-            reason=f"rclone OAuth error (pattern matched): {error_snippet[:200]!r}",
+            reason=f"rclone OAuth error (pattern matched): {snippet}",
             remediation=(
                 f"rclone config 재발급 (setup.md §Step 5.5, ADR-0035) "
                 f"+ systemctl --user restart wikihub-mount@{vault_id}.service"
@@ -268,7 +283,7 @@ def vfs_refresh(
         vault_id=vault_id,
         retry_after_sec=120,    # 진단 메타
         reason=f"rclone rc vfs/refresh failed: rc={result.returncode}, "
-               f"error={error_snippet[:200]!r}",
+               f"error={snippet}",
     )
 
 

@@ -100,7 +100,7 @@ Status 변경 없음. 의미론 일관, 운영 scope 만 명시화.
 | `install.sh` | re-run / update |
 | `wikihub.yaml.example` | `/wh:setup` Step 0 의 template input (ADR-0031) |
 | `README.md` | 운영자 참고 (운영 진단 시 useful) |
-| `LICENSE` | legal · convention — MIT 의 redistribution scope 가 운영 타깃엔 strict 적용 안 되지만 OSS 관례로 포함 (LOW-S1 design review) |
+| `LICENSE` | legal · convention — **install ≠ redistribution**: MIT 라이선스의 redistribution 조항은 소스 코드 재배포에 적용되며, 운영 서버에 install.sh로 설치하는 행위는 redistribution이 아님. 단, OSS 관례·라이선스 고지 의무 준수 차원에서 포함 (LOW-S1 design review) |
 
 ### 제외 (의도)
 

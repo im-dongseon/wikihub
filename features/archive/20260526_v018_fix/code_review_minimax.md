@@ -33,7 +33,7 @@
 
 ## Commit 3 — `28492eb`: lessons learned report
 
-**파일**: `docs/reports/250526_wikihub_v018fix_report.md`
+**파일**: `250526_wikihub_v018fix_report.md`
 
 | 기준 | 평가 |
 |------|------|

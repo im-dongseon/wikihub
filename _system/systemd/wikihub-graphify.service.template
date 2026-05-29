@@ -21,8 +21,8 @@ ExecStart={wikihub_src}/scripts/wikihub_graphify.sh
 # wikihub-lint.service / wikihub-ingest@ 는 Python wrapper 가 75 변환하지만 bash + timeout 은 변환 없음.
 # 124 미포함 시 OnFailure=ops-alert 매번 발화 위험 — 124 추가.
 SuccessExitStatus=0 75 124
-# graphify_timeout_sec (default 900s) + 300s margin (LLM cloud latency + 후처리).
-TimeoutStartSec=1200
+# graphify_timeout_sec (default 900s) + 300s margin. Issue #36 profile-timeout override (max 1800s).
+TimeoutStartSec=2100
 SyslogIdentifier=wikihub-graphify
 
 # Restart= 미설정 — oneshot, lint Step 9 가 trigger 책임 (변경 감지 시만 fire, cost gate).

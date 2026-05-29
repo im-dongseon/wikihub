@@ -83,6 +83,19 @@ WIKIHUB_SRC="$(_abs_path "$WIKIHUB_SRC")"
 INSTALL_LOG="${WIKIHUB_HOME}/install.log"
 mkdir -p "$WIKIHUB_HOME"
 
+# POSIX-compatible timeout wrapper — handles macOS (gtimeout) and systems without timeout
+_timeout() {
+    if command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$@"
+    elif command -v timeout >/dev/null 2>&1; then
+        timeout "$@"
+    else
+        # noop fallback — warn at most once per session
+        warn "_timeout: 'timeout' 명령 없음 — grace limit 미적용"
+        "$@"
+    fi
+}
+
 # ─── Step 0a — env semantic check (ADR-0034 §sub-2 — v0.1.0 release 전 architectural refactor) ──
 # WIKIHUB_INSTANCE_ROOT env detect: ADR-0034 로 폐기. WIKIHUB_HOME 으로 통일.
 if [[ -n "${WIKIHUB_INSTANCE_ROOT:-}" ]]; then
@@ -111,7 +124,7 @@ _rotate_install_log() {
     if (( age_days >= 7 || size_mb >= 10 )); then
         # PID suffix 로 1초 안 중복 호출 collision 회피
         mv "$log" "${log}.$(date +%Y%m%d_%H%M%S)_$$"
-        ls -1t "${log}".*_* 2>/dev/null | tail -n +8 | xargs -r rm -f
+        ls -1t "${log}".*_* 2>/dev/null | tail -n +8 | while IFS= read -r f; do rm -f "$f"; done
     fi
 }
 _rotate_install_log
@@ -127,12 +140,19 @@ ORIGINAL_ARGS=("$@")
 while [ $# -gt 0 ]; do
     case "$1" in
         --skip-confirm) SKIP_CONFIRM=1; shift ;;
-        --branch) BRANCH="$2"; shift 2 ;;
+        --branch)
+            # CR2-LOW-2 (issue #32): leading `-` 거부 — git argparse 가 현재 거부하나 fragile.
+            if [[ "${2:-}" == -* ]]; then
+                err "--branch 인자는 leading '-' 불가 (예: --branch main)."
+                exit 1
+            fi
+            BRANCH="$2"; shift 2 ;;
         # ADR-0030 / HIGH-N3: --version 인자 강제 소비. no-arg 분기 없음.
         # version 조회는 `cat $WIKIHUB_SRC/_system/VERSION` 사용.
         --version)
-            if [[ -z "${2:-}" || "${2:0:2}" == "--" ]]; then
-                err "--version 인자 필요 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_SRC/_system/VERSION\`."
+            # CR2-LOW-2 (issue #32): leading `-` (-x / --x 둘 다) 거부 — git 이 거부하나 fragile.
+            if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+                err "--version 인자 필요 / leading '-' 불가 (예: --version v0.1.0). version 조회는 \`cat \$WIKIHUB_SRC/_system/VERSION\`."
                 exit 1
             fi
             EXPLICIT_VERSION="$2"
@@ -397,10 +417,13 @@ _install_uv() {
     ( cd "$tmpdir" && sha256sum -c "${asset}.sha256" )
     tar -C "$tmpdir" -xzf "$tmpdir/$asset"
     # uv tar 구조 가설: 최상위 또는 한 단계 깊이의 디렉토리 안에 `uv` binary
-    uv_bin="$(find "$tmpdir" -maxdepth 3 -name uv -type f -executable | head -1)"
+    uv_bin="$(find "$tmpdir" -maxdepth 3 -name uv -type f | head -1)"
+    if [ -n "$uv_bin" ] && [ ! -x "$uv_bin" ]; then
+        uv_bin=""
+    fi
     if [ -z "$uv_bin" ]; then
         err "uv binary 가 tar 내에 없음 — V8 hand-check 필요 (asset 구조 가설 실패)"
-        find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" -printf '  %P\n' >&2
+        find "$tmpdir" -maxdepth 3 -not -name "$asset" -not -name "${asset}.sha256" >&2
         exit 2
     fi
     mkdir -p "$LOCAL_BIN_DIR"
@@ -427,7 +450,6 @@ _step3_venv() {
     # venv 검증 — 정상 venv (bin/python + 버전 일치) = skip, 무효/부분 생성 = wipe + 재생성
     # (V8 결함 #2·#6 fix — `uv venv` 자체는 기존 venv 존재 시 error, 검증 분기 + 명시적 wipe 필요)
     mkdir -p "$(dirname "$VENV_PATH")"
-    local venv_was_recreated=0
     if [ -x "$VENV_PATH/bin/python" ] \
         && "$VENV_PATH/bin/python" --version 2>/dev/null | grep -q "Python $PYTHON_VERSION"; then
         info "venv 기존 사용: $VENV_PATH ($($VENV_PATH/bin/python --version))"
@@ -438,7 +460,6 @@ _step3_venv() {
         fi
         info "venv 생성: $VENV_PATH (Python $PYTHON_VERSION)"
         uv venv "$VENV_PATH" --python "$PYTHON_VERSION" --seed
-        venv_was_recreated=1
     fi
 
     # R10 MED-7: scripts/requirements.txt (운영 deps) 가 정본 — repo root requirements.txt 미존재.
@@ -448,7 +469,7 @@ _step3_venv() {
     local req_file="$WIKIHUB_SRC/scripts/requirements.txt"
     if [ -f "$req_file" ]; then
         info "deps 설치/갱신: scripts/requirements.txt (uv pip — idempotent)"
-        uv pip install --python "$VENV_PATH/bin/python" -r "$req_file"
+        uv pip install --require-hashes --python "$VENV_PATH/bin/python" -r "$req_file"
     else
         warn "scripts/requirements.txt 없음 — venv 생성만 (의존성 미설치)"
     fi
@@ -525,7 +546,7 @@ _install_rclone() {
 
     if command -v rclone >/dev/null 2>&1; then
         local current
-        current="$(rclone version 2>/dev/null | head -1 | awk '{print $2}' | sed 's/^v//')"
+        current="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//')"
         # 단순 string compare 로 충분 (v0.1.0 — semantic compare 는 v0.2.x)
         if [[ -n "$current" && "$current" == "$pinned" ]]; then
             ok "rclone $current 이미 설치됨 (pinned 일치) — skip"
@@ -642,49 +663,20 @@ _enforce_rclone_conf_perms() {
     fi
 }
 
-# ADR-0031 §Decision B (MED-S2 design review): install-time version fact 를 sidecar 에 기록.
-# ADR-0035: gws 키 제거. `/wh:setup` Step 0 의 gws_min_version 비교도 폐기.
-# stdout 파싱 brittleness 회피 (rclone --version 형식 변경 시 fallback 으로만 사용).
-#
-# atomic write (CR1-HIGH-3 review 반영): tmpfile + sync + mv. same-directory + PID suffix +
-# cleanup trap (errexit 또는 중단 시 orphan tmp 회수) + stale tmp 5분 이상 자동 정리.
+# Migrated to Python (issue-19): scripts/lib/sidecar.py.
+# Atomic write invariant (ADR-0031 §Decision A): tmpfile + fsync + os.replace,
+# matching state.py._atomic_write_json pattern.
 _write_installed_versions_sidecar() {
     local target="$WIKIHUB_SRC/_system/INSTALLED_VERSIONS.json"
-    local target_dir; target_dir="$(dirname "$target")"
-    local target_base; target_base="$(basename "$target")"
-    mkdir -p "$target_dir"
-    # Stale .tmp.* 5분 이상 자동 cleanup (이전 process 의 SIGTERM/errexit 흔적).
-    find "$target_dir" -maxdepth 1 -name "${target_base}.tmp.*" -mmin +5 -delete 2>/dev/null || true
-
-    local rclone_v graphify_v yq_v
-    rclone_v="$(rclone version 2>/dev/null | awk '/^rclone v/{print $2; exit}' | sed 's/^v//' || true)"
-    # ADR-0036 — graphify 도 INSTALLED_VERSIONS.json 의 fact 로 기록. graphify --version 형식 미보장 → 단순 last-field 추출.
-    graphify_v="$(graphify --version 2>/dev/null | awk '{print $NF; exit}' || true)"
-    # yq (mikefarah/yq go version) — `yq --version` 출력 last-field "v4.44.3" → v prefix strip.
-    yq_v="$(yq --version 2>/dev/null | awk '{print $NF; exit}' | sed 's/^v//' || true)"
-
-    local tmp="${target}.tmp.$$"
-    # 본 함수 ERR/RETURN 시 tmp 자동 회수 — set -e 환경에서 cat/sync fail 시 orphan 차단.
-    trap "rm -f '$tmp' 2>/dev/null || true" RETURN ERR
-    cat > "$tmp" <<EOF
-{
-  "schema_version": 1,
-  "rclone": "${rclone_v:-}",
-  "graphify": "${graphify_v:-}",
-  "yq": "${yq_v:-}",
-  "uv": "${UV_VERSION}",
-  "wikihub": "$(cat "$WIKIHUB_SRC/_system/VERSION" 2>/dev/null || echo unknown)",
-  "written_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
-    # Ubuntu 22.04+ coreutils 8.32 의 `sync -f <file>` 는 해당 파일 의 FS data 만 flush.
-    # 실패 시 fallback 으로 global sync (cost 증가하나 정합 유지).
-    sync -f "$tmp" 2>/dev/null || sync || true
-    mv "$tmp" "$target"
+    # cwd 고정 (issue #108): `-m scripts.lib.sidecar` 는 scripts 를 top-level 패키지로 import →
+    # curl-pipe 업데이트(cwd=$HOME, self-restart 후에도 유지)에서 ModuleNotFoundError. WIKIHUB_SRC
+    # 에서 실행해야 sys.path[0] 에 src 가 들어간다 (install.sh:325·1437 의 cwd 패턴 정합).
+    ( cd "$WIKIHUB_SRC" && "$VENV_PATH/bin/python3" -m scripts.lib.sidecar )
     info "Step 4.5 INSTALLED_VERSIONS.json 작성: $target"
 }
 
 _step45_rclone() {
+    info "rclone + graphify + yq 설치 (fresh/update 공통)"
     _install_rclone
     _enforce_rclone_conf_perms
     _install_graphify
@@ -726,6 +718,10 @@ _step5_instance_dirs() {
     local wh_env_file="$wh_config_dir/env"
     mkdir -p "$wh_config_dir"
     chmod 700 "$wh_config_dir"
+    # CR2-MED-6 (issue #17): wikihub.yaml 은 credential 동등 trust 파일 — permission 600 enforce
+    if [[ -f "$WIKIHUB_HOME/wikihub.yaml" ]]; then
+        chmod 600 "$WIKIHUB_HOME/wikihub.yaml"
+    fi
     if [[ ! -f "$wh_env_file" ]]; then
         cat > "$wh_env_file" <<'EOF'
 # wikihub 운영 자료 — systemd unit 의 EnvironmentFile= 가 lenient 로 읽음 (ADR-0036 + ADR-0038).
@@ -804,12 +800,14 @@ _migrate_agent_schema() {
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
 
-    # drift detect — yaml.example single source of truth 와 자동 sync (v0.1.8 update_path_fixes R2 fix).
-    # 운영자 yaml 의 operations + agent top-level field 가 yaml.example 의 default 와 비교 — 부재 시 flag.
-    # 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0). ADR-0031 §"후속 영향".
+    # PYEOF3 — 단일 heredoc: detect + write + backup (race window 제거, ruamel 일관 사용).
+    # 운영자 yaml 의 operations + agent top-level field 가 yaml.example 의 default 와 비교 —
+    # 부재 시 자동 추가. 신규 field 추가 시 yaml.example 갱신만으로 자동 (install.sh 변경 0).
+    # ADR-0031 §"후속 영향". flag format 의 space-safe.
     local drift_flags
     drift_flags="$("$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
-import sys, os, yaml as _yaml
+import sys, os, copy, shutil, ruamel.yaml
+from datetime import datetime
 path = sys.argv[1]
 example_path = sys.argv[2]
 
@@ -818,11 +816,14 @@ if not os.path.isfile(example_path):
     print(f"ERROR: yaml.example 부재 — {example_path}", file=sys.stderr)
     sys.exit(2)
 
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+yaml.indent(mapping=2, sequence=4, offset=2)
 try:
     with open(path, encoding="utf-8") as f:
-        data = _yaml.safe_load(f) or {}
+        data = yaml.load(f) or {}
     with open(example_path, encoding="utf-8") as f:
-        example = _yaml.safe_load(f) or {}
+        example = yaml.load(f) or {}
 except Exception as e:
     print(f"ERROR: yaml load 실패 — {e}", file=sys.stderr)
     sys.exit(2)
@@ -845,8 +846,6 @@ for top in ("operations", "agent"):
                 flags.append(f"B_sync:{top}.{k}")
 
 # Group A_yolo_missing — v0.1.4 era oneshot_args 에 --yolo 부재 detect (legacy_migration_cleanup 부분 inversion).
-# 본 fix 의 multipass v0.1.0 → v0.1.8 jump 실 surface — legacy_migration_cleanup 의 "운영자 base v0.1.4+ 가정" 위반.
-# oneshot_args list 가 명시되어 있으나 element --yolo 만 부재인 케이스 (yaml.example sync 의 list-atomic 동작 외).
 agent_args = agent.get("oneshot_args") or []
 if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
     flags.append("A_yolo_missing")
@@ -863,6 +862,41 @@ _profile = operations.get("graphify_profile")
 if _profile and not _re.match(r"^[a-z][a-z0-9_]*$", str(_profile)):
     flags.append(f"W_graphify_profile_invalid:{_profile}")
 
+if flags:
+    # backup — 변경 발생 시만 (atomic replace 전 원본 보존)
+    backup = path + ".wikihub-bak." + datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    shutil.copy2(path, backup)
+    print(f"_BACKUP:{backup}", file=sys.stderr)
+
+    # operations + agent top-level field 자동 sync (yaml.example 의 모든 default).
+    # Step 4 code_review_2 H1 흡수: copy.deepcopy — ruamel CommentedMap/CommentedSeq 의 reference assignment 회피.
+    for top in ("operations", "agent"):
+        example_top = example.get(top, {}) or {}
+        target_top = data.setdefault(top, {})
+        if isinstance(example_top, dict) and isinstance(target_top, dict):
+            for k, default_v in example_top.items():
+                if k not in target_top:
+                    target_top[k] = copy.deepcopy(default_v)
+
+    # Group A_yolo_missing: oneshot_args 의 --yolo element insert (legacy_migration_cleanup 부분 inversion).
+    agent = data.get("agent") or {}
+    agent_args = agent.get("oneshot_args")
+    if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
+        idx = agent_args.index("--query")
+        agent_args.insert(idx, "--yolo")
+
+    # Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
+    vaults = data.get("vaults") or []
+    for v in vaults:
+        if isinstance(v, dict) and "sync_interval_sec" not in v:
+            v["sync_interval_sec"] = 3600
+
+    # atomic replace
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+    os.replace(tmp, path)
+
 print("\n".join(flags))
 PYEOF
 )"
@@ -872,11 +906,9 @@ PYEOF
     # info log 출력 — 운영자가 어떤 drift 가 감지됐는지 surface
     info "schema drift detected — auto migration (PTY-safe, idempotent):"
     local f
-    # newline-separated flags — profile 값에 `,` 박힌 경우 안전 (code review 1 §M1)
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            # v0.1.8 update_path_fixes R2: yaml.example sync 일반화 (hardcoded case 폐기 — generic message)
             B_sync:*)                   info "  - [yaml.example sync] ${f#B_sync:} 부재 → wikihub.yaml.example default 자동 추가 (운영자 명시 값은 보존)" ;;
             A_yolo_missing)             info "  - [v0.1.4 ADR-0032] agent.oneshot_args 의 --yolo 부재 → --query 앞에 insert (hermes auto-approve 필수 — 큰 jump 운영자 대응, legacy_migration_cleanup 부분 inversion)" ;;
             B_vault_sync_interval_sec:*) info "  - [v0.1.6] vaults[${f#B_vault_sync_interval_sec:}].sync_interval_sec 부재 → 3600 추가 (default 1h)" ;;
@@ -884,69 +916,7 @@ PYEOF
         esac
     done <<< "$drift_flags"
 
-    # backup — 변경 발생 시만 (위 early return 통과한 경우)
-    local backup="$yaml.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
-    cp -p "$yaml" "$backup"
-    info "backup: $backup"
-
-    # ADR-0032 §Note (v0.1.5, 2026-05-20) — prompt 분기 제거. `[[ -t 0 ]]` 가 Hermes PTY
-    # 환경에서 거짓 양성 (subprocess 에 pty slave 할당 → stdin terminal-like) 으로 v0.1.3 →
-    # v0.1.4 cycle 의 root cause. backup (.wikihub-bak.<utc_iso>) 가 의도 override safety
-    # net — 운영자가 의도와 다르면 cp 1회로 즉시 복원. **값 변경은 자동 회피** — 운영자 의도
-    # (또는 schema drift) 구분 불가 → 보수적으로 운영 값 보호 (예: vaults[].sync_interval_sec,
-    # operations.lint_interval_hours).
-
-    "$VENV_PATH/bin/python3" - "$yaml" "$WIKIHUB_SRC/wikihub.yaml.example" <<'PYEOF'
-import sys, os, copy, ruamel.yaml
-path = sys.argv[1]
-example_path = sys.argv[2]
-
-# R2 fix: yaml.example single source of truth — 운영자 yaml 의 부재 field 자동 추가.
-# 깊이 제한: operations + agent top-level dict 만. vaults[] array 별도 (배열 semantics).
-yaml = ruamel.yaml.YAML(typ="rt")
-yaml.preserve_quotes = True
-yaml.indent(mapping=2, sequence=4, offset=2)
-with open(path, encoding="utf-8") as f:
-    data = yaml.load(f)
-with open(example_path, encoding="utf-8") as f:
-    example = yaml.load(f)
-
-# operations + agent top-level field 자동 sync (yaml.example 의 모든 default).
-# Step 4 code_review_2 H1 흡수: copy.deepcopy — ruamel CommentedMap/CommentedSeq 의 reference assignment 회피.
-# (운영자 yaml 의 dict 가 yaml.example 의 dict 와 reference 공유 시 한쪽 modify 가 다른쪽 영향)
-for top in ("operations", "agent"):
-    example_top = example.get(top, {}) or {}
-    target_top = data.setdefault(top, {})
-    if isinstance(example_top, dict) and isinstance(target_top, dict):
-        for k, default_v in example_top.items():
-            if k not in target_top:
-                target_top[k] = copy.deepcopy(default_v)
-
-# Group A_yolo_missing: oneshot_args 의 --yolo element insert (legacy_migration_cleanup 부분 inversion).
-# yaml.example sync 가 list-atomic 이라 element-level 보강 안 함 — 별도 처리.
-agent = data.get("agent") or {}
-agent_args = agent.get("oneshot_args")
-if isinstance(agent_args, list) and "--query" in agent_args and "--yolo" not in agent_args:
-    idx = agent_args.index("--query")
-    agent_args.insert(idx, "--yolo")
-
-# Group B per-vault — sync_interval_sec 부재 vault 자동 추가 (yaml.example v0.1.6 default 1h)
-# vaults[] array 는 top-level sync 외 별도 처리 (배열 semantics — 개수/식별자 운영자 의존).
-vaults = data.get("vaults") or []
-for v in vaults:
-    if isinstance(v, dict) and "sync_interval_sec" not in v:
-        v["sync_interval_sec"] = 3600
-
-tmp = path + ".tmp"
-with open(tmp, "w", encoding="utf-8") as f:
-    yaml.dump(data, f)
-import os
-os.replace(tmp, path)
-PYEOF
-
-    ok "schema migration 완료 (backup: $backup)"
-    info "  운영자 의도 영향 field (sync_interval_sec, lint_interval_hours 등) 의 새 default 적용은"
-    info "  wikihub.yaml.example 참조 후 manual edit + install.sh 재실행 권장."
+    ok "schema migration 완료"
 }
 
 # `_system/skills/_generated/wh-<cmd>/SKILL.md` 5건 materialized.
@@ -1293,14 +1263,7 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
 
 업데이트는 같은 명령 한 번 더 (ADR-0010 + ADR-0030):
   curl -fsSL https://raw.githubusercontent.com/im-dongseon/wikihub/latest/install.sh | bash
-
-[install/update 동작 — dual-mode (ADR-0030)]
-  detect: $WIKIHUB_SRC/_system/VERSION + .git AND → update path / 미만족 → fresh path.
-  update path: unstaged guard → systemd stop (15min grace) → git fetch + reset → render →
-               daemon-reload → systemd start → verify. 실패 시 자동 rollback (직전 ref 복귀).
-  fresh path: clean wipe + clone (ADR-0023 보존). user 파일 (instance.root) 미터치.
-  명시적 재설치: install.sh --force-fresh (5초 confirm + 3중 safety guard).
-  특정 버전 pin: install.sh --version v0.1.0 (rollback 포함).
+  (detect: $WIKIHUB_SRC/_system/VERSION + .git 존재 → update path 자동 진입)
 
 [운영 진단 명령 — R10 HIGH-2 + R16-M6·L3]
   vault sync 로그:    journalctl --user -t wikihub-ingest-<vault_id> --since '24h ago'
@@ -1454,8 +1417,12 @@ _step2_update() {
     trap '_rollback_if_failed' ERR EXIT INT TERM HUP
 
     info "[detected wikihub at $WIKIHUB_SRC]"
-    local current_version=""
-    IFS= read -r current_version < "$WIKIHUB_SRC/_system/VERSION" || current_version=""
+    # current_version capture: self-restart 전에 export 해야 child process 가 pre-reset version 보존 (Issue #86)
+    if [[ -z "${INSTALL_OLD_VERSION:-}" ]]; then
+        IFS= read -r INSTALL_OLD_VERSION < "$WIKIHUB_SRC/_system/VERSION" || INSTALL_OLD_VERSION=""
+        export INSTALL_OLD_VERSION
+    fi
+    local current_version="$INSTALL_OLD_VERSION"
     if [[ -z "$current_version" ]]; then
         err "_system/VERSION empty — 파일 손상 의심. \`--force-fresh\` 로 재설치 또는 수동 복구."
         exit 1
@@ -1588,8 +1555,12 @@ _rollback_if_failed() {
     _apply_sparse_checkout \
         || warn "rollback 후 sparse re-apply fail — working tree 일관성 확인 필요"
     # CRIT-N1: 직전 ref 의 template 으로 systemd unit 재render → daemon-reload → start
-    _step8_systemd_render \
-        || warn "rollback systemd render 실패 — 수동 (systemctl daemon-reload 직접 호출)"
+    if ! _step8_systemd_render; then
+        # CR1-LOW-6 (issue #32): render 실패 분기에서 daemon-reload 만이라도 자동 fallback —
+        # CRIT-N2 의 stop 직후 daemon-reload 와 대칭. stale unit 으로 start 시도하는 위험 차단.
+        warn "rollback systemd render 실패 — daemon-reload fallback 호출 (운영자 추가 확인 필요)"
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
     _systemd_start_after_update \
         || warn "rollback systemd 재기동 실패 — 수동 복구"
     exit $exit_code
@@ -1607,15 +1578,40 @@ _enabled_vaults_yaml() {
         return $?
     fi
     # MED-N1: venv 부재 시 bash fallback (best-effort yaml parse)
+    # CR1-LOW-1 (issue #32): vault entry 의 `enabled: false` 항목 필터링 추가 — rollback 시
+    # venv 손상 분기에서 비활성 vault 까지 start 시도하는 spurious failure 차단.
+    #
+    # 한계 (best-effort):
+    #   1. `enabled:` regex 는 indent 무관 매칭 — 현 schema 에 nested `enabled:` 없음.
+    #      schema 에 nested enabled 추가 시 indent column 비교로 분기 필요.
+    #   2. YAML 1.1 boolean variant (`False`/`FALSE`/`"false"`/`'false'`/`No`) 도 false 의미 —
+    #      tolower + quote/whitespace strip + (false|no) 매칭으로 cover.
     warn "venv helper 미가용 — yaml bash fallback parse (기능 제한)"
     awk '
-        /^vaults:/ {in_vaults=1; next}
-        in_vaults && /^[^[:space:]]/ {in_vaults=0}
-        in_vaults && /^[[:space:]]*-[[:space:]]*id:/ {
-            gsub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "")
-            gsub(/[[:space:]]*#.*/, "")
-            print
+        function norm(v,   r) {
+            r=tolower(v)
+            gsub(/[[:space:]"]/, "", r)
+            gsub(/'\''/, "", r)
+            return r
         }
+        function is_disabled(v,   n) { n=norm(v); return (n == "false" || n == "no") }
+        function flush() { if (id != "" && !is_disabled(enabled)) print id }
+        /^vaults:/ {in_vaults=1; next}
+        in_vaults && /^[^[:space:]]/ {flush(); in_vaults=0; id=""; enabled=""}
+        in_vaults && /^[[:space:]]*-[[:space:]]*id:/ {
+            flush()
+            line=$0
+            gsub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "", line)
+            gsub(/[[:space:]]*#.*/, "", line)
+            id=line; enabled=""; next
+        }
+        in_vaults && /^[[:space:]]*enabled:[[:space:]]*/ {
+            line=$0
+            gsub(/^[[:space:]]*enabled:[[:space:]]*/, "", line)
+            gsub(/[[:space:]]*#.*/, "", line)
+            enabled=line
+        }
+        END { flush() }
     ' "$yaml"
 }
 
@@ -1633,7 +1629,7 @@ _systemd_stop_before_update() {
     # 후속 daemon-reload + render 로 신규 이름 unit (wikihub-ingest@*, wikihub-lint.*) 만 active 유지.
     for v in $all_vaults; do
         systemctl --user stop "wikihub-vault@${v}.timer" "wh-ingest@${v}.timer" 2>/dev/null || true
-        timeout 5 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null || true
+        _timeout 5 systemctl --user stop "wikihub-vault@${v}.service" 2>/dev/null || true
     done
     systemctl --user stop wh-lint.timer wh-lint.service 2>/dev/null || true
     # timer 정지 — 새 fire 차단 (operational unit names: wikihub-ingest@, wikihub-lint)
@@ -1646,7 +1642,7 @@ _systemd_stop_before_update() {
     # MED-N4: progress info — 운영자 visual 안심
     for v in $all_vaults; do
         info "  stopping wikihub-ingest@${v} (max 15min grace for mid-sync)"
-        timeout 900 systemctl --user stop "wh-ingest@${v}.service" "wikihub-ingest@${v}.service" 2>/dev/null \
+        _timeout 900 systemctl --user stop "wh-ingest@${v}.service" "wikihub-ingest@${v}.service" 2>/dev/null \
             || warn "wikihub-ingest@${v} stop timeout — 강제 abort"
     done
     systemctl --user stop wikihub-lint.service 2>/dev/null || true
@@ -1694,8 +1690,13 @@ _systemd_start_after_update() {
     for v in $desired_vaults; do
         systemctl --user start "wikihub-ingest@${v}.timer" 2>/dev/null \
             || warn "wikihub-ingest@${v}.timer start 실패"
+        # Issue #34: enable — reboot 후 timer 자동 시작 보장
+        systemctl --user enable "wikihub-ingest@${v}.timer" 2>/dev/null \
+            || warn "wikihub-ingest@${v}.timer enable 실패"
     done
     systemctl --user start wikihub-lint.timer 2>/dev/null || warn "wikihub-lint.timer start 실패"
+    # Issue #34: enable — reboot 후 timer 자동 시작 보장
+    systemctl --user enable wikihub-lint.timer 2>/dev/null || warn "wikihub-lint.timer enable 실패"
     ok "systemd start sequence 완료"
 }
 
@@ -1768,6 +1769,15 @@ _step8_wh_setup_skill_meta() {
         info "agent.binary ($agent_binary) 미설치 — /wh-setup skill 메타 갱신 skip"
         return 0
     fi
+    # CR2-MED-6 (issue #17): agent.binary allowlist — known compatible agent paths 만 허용
+    local _ab_allowed=0
+    case "$agent_binary" in
+        */hermes|*/claude|*/gemini|*/opencode) _ab_allowed=1 ;;
+    esac
+    if [[ "$_ab_allowed" -ne 1 ]]; then
+        warn "agent.binary ($agent_binary) 가 알려진 허용 경로(hermes/claude/gemini/opencode)와 일치하지 않음 — /wh-setup skip"
+        return 0
+    fi
     info "agent skill 메타 갱신 (best-effort) — $agent_binary chat --skills wh-setup --quiet --yolo --query \"/wh-setup\" (timeout=${timeout_sec}s)"
     WIKIHUB_NONINTERACTIVE=1 timeout "$timeout_sec" "$agent_binary" \
         chat --skills wh-setup --quiet --yolo --query "/wh-setup" \
@@ -1798,9 +1808,24 @@ _step10_verify() {
             warn "  필요 시 수동 rollback: install.sh --version <prev-tag>"
             verify_failed=1
         fi
+        # CR2-LOW-3 (issue #32): vault@.timer (= wikihub-ingest@<v>.timer) 도 verify.
+        # timer 자체는 enable 후 active 가 정상. timer 부재 시 silent no-sync 회피.
+        # service 는 timer-fired 라 install 단계에 inactive 가 정상 — 검증 대상 아님 (CR1-LOW-5).
+        local timer_unit="wikihub-ingest@${v}.timer"
+        if ! systemctl --user is-active "$timer_unit" >/dev/null 2>&1; then
+            warn "$timer_unit not active — timer enable 누락 가능 (silent no-sync 위험)"
+            warn "  journalctl --user -u $timer_unit -n 50"
+            verify_failed=1
+        fi
     done
+    # CR2-LOW-3 (issue #32): lint.timer 도 verify (singleton, 3h 주기). enable 누락 시 lint silent skip.
+    if ! systemctl --user is-active wikihub-lint.timer >/dev/null 2>&1; then
+        warn "wikihub-lint.timer not active — timer enable 누락 가능 (lint silent skip 위험)"
+        warn "  journalctl --user -u wikihub-lint.timer -n 50"
+        verify_failed=1
+    fi
     if (( verify_failed )); then
-        warn "Step 10 verify: 일부 mount@ inactive — install.sh 는 정상 종료 (git rollback 안 함)"
+        warn "Step 10 verify: 일부 mount@/timer inactive — install.sh 는 정상 종료 (git rollback 안 함)"
     else
         ok "Step 10 systemd verify ok"
     fi

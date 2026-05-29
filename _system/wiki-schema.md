@@ -191,6 +191,7 @@ type: entity                                  # 'entity' | 'concept' | 'analysis
 created: 2026-05-13
 updated: 2026-05-13
 aliases: [홍길동]                              # v0.1.8 ADR-0039 — duplicate detection 정합 + LLM 재생성 무한 loop 차단
+merged_from: [<concept-slug>]              # (v0.1.10) cross-category merge 출처. lint Step 7 가 merge 시 추가. 재호출 idempotency guard (Issue #39).
 referenced_by:                                # /wh-lint 가 갱신, wikihub-graphify.service 는 무관 (v0.1.8 update_path_fixes — referenced_by 는 lint Step 4 책임)
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/notes/promotion-plan
@@ -215,6 +216,7 @@ tags: [team-lead]
 | LLM 재생성 무한 loop 차단 | ingest 스킬 + lint Step 3 가 stub 생성 전 기존 page 의 aliases 확인. 본문 form 의 lowercase 가 기존 셋과 겹치면 stub 생성 skip + referenced_by 만 갱신. |
 | duplicate detection | lint Step 4.5 가 case-variant + cross-category duplicate 를 alias 셋 비교로 식별. `--apply` 시 canonical 보존 + alias 합집합 + 다른 form page archive. |
 | cross-category 정책 (v0.1.8) | entity vs concept 동명 + alias 공유 시 — entity 우선 merge (concept 본문 LLM merge → entity, concept page archive). 운영자 정책 override 는 v0.2.x 검토. |
+| merged_from 마커 (v0.1.10, Issue #39) | entity 가 cross-category merge 의 대상이 된 경우 frontmatter 에 `merged_from: [concept-slug]` 자동 추가. 존재 시 lint Step 6/7 에서 LLM merge 재호출 금지 — entity 본문 git history churn 차단. |
 
 ### `analyses/<slug>.md` (agent 작성, /wh-query 자동 저장)
 
@@ -272,6 +274,18 @@ frontmatter 없음 — overwrite (진단 성격). 형식은 /wh-lint Step 8 참�
 - 확장자는 wiki 파일의 `.md` 생략. **source는 원본 확장자 포함** (예: `.pptx`) — 단일 파일 모델에서 파일명이 `{path}.{ext}.md`이므로 트레일링 `.md`만 생략
 - sources의 vault-prefix는 **필수**. 단축형 `[[meetings/2026-Q1.pptx]]` 사용 금지 → /wh-lint Step 2가 위반 보고
 - entities/concepts/analyses의 단축형 (vault·카테고리 prefix 없음) 허용
+
+**resolver 알고리즘 (entities / concepts 한정) — ADR-0042 정본**:
+
+본 resolver 는 `category ∈ {entities, concepts}` 의 단축형 `[[<name>]]` 에만 적용. sources `[[<vault>/<path>]]` 는 vault-prefix 필수 + alias 개념 없음 (ADR-0001) — 기존 path 그대로.
+
+`[[<name>]]` link 를 wiki 페이지로 매핑할 때 다음 순서로 resolve:
+
+1. **case-sensitive exact match** — `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 시 → 그 페이지.
+2. **alias index lookup** — 부재 시 alias index (`Dict[lowercase_alias, canonical_filename]`) 에서 `<name>.strip().lower()` 조회 → 매핑 canonical 페이지로 resolve. 예: `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 resolve.
+3. **dangling** — 둘 다 부재 시 dangling link (lint Step 2 보고 대상).
+
+**alias index 구축**: lint cycle 시작 시 (Step 1 직후, Step 2 진입 전) `wiki/entities/` + `wiki/concepts/` 의 모든 page frontmatter `aliases` 를 lowercase normalize 한 inverted index 빌드. 동일 cycle 내 모든 resolver 호출이 같은 index 공유. alias `aliases[0]` 는 ADR-0039 정합 — canonical name = 파일명 stem. 충돌 (같은 lowercase alias 의 2+ canonical) 은 lint Step 4.5 가 duplicate 로 보고.
 
 **entities/concepts 동명 충돌 정책** (현 v0.1.0):
 - 동일 카테고리에 동명이 발생할 경우 `<name> (disambiguator).md` 형식으로 disambiguator 추가 (Wikipedia 스타일)

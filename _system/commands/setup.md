@@ -2,6 +2,8 @@
 
 `wikihub.yaml`(운영 정본) **생성 + 검증**, wiki/`_state/` 디렉토리 ensure, systemd unit 동기화, agent skill 메타 갱신. **install.sh가 1회 bootstrap을 끝낸 뒤** 호출.
 
+> **보안**: `wikihub.yaml` 은 `agent.binary` (임의 코드 실행 경로), `fatal_webhook_url` (자격증명), `rclone_remote_name` (OAuth token 참조) 등 민감 정보 포함. 설치 시 [`install.sh: `_step5_instance_dirs` 가 `chmod 600` 자동 enforce](https://github.com/im-dongseon/wikihub/issues/17) — `.credentials` 와 동일한 trust 모델. 운영자는 수동 편집 후 권한 유지에 유의.
+
 ## 호출
 
 ```
@@ -58,7 +60,8 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
 2. **Derived 필드 patching** (ADR-0031 §Decision B catalog, ADR-0035 — credentials_path/gws_min_version 폐기):
    - `instance.root` → `$WIKIHUB_HOME` env
    - `vaults[*].local_path` → `<instance.root>/vault/<vault.id>`
-3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data, round_trip=True)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os.replace).
+   - **비교 시 `os.path.expanduser()` 적용 필수** — `~/wikihub` vs `/home/user/wikihub` 등 tilde 확장 표현 차이로 인한 false drift 방지
+3. `yaml_writer.atomic_yaml_write($WIKIHUB_HOME/wikihub.yaml, data)` (`scripts/lib/yaml_writer.py` — PID-suffix `.tmp` + fsync + os_replace, round-trip only).
 4. 보고:
    ```
    wikihub.yaml 생성 완료 (.example → operational, derived 필드 patching 적용).
@@ -83,7 +86,7 @@ v1 → v1 만 지원 (v0.1.0). v2 도입 시 별도 ADR.
        위 변경은 install-time env 값으로 yaml 을 덮어씁니다.
        메인테이너 hand-edit 가 있으면 N 선택. [y/N] (default N)
        ```
-     - `Y` → `yaml_writer.atomic_yaml_write(target, data, round_trip=True)` 재기록.
+     - `Y` → `yaml_writer.atomic_yaml_write(target, data)` 재기록.
      - `N` → 보존 + "재호출 시 다시 prompt" 안내. Step 1 진입 (exit 0).
    - **비대화 모드** (`WIKIHUB_NONINTERACTIVE=1` 또는 `/dev/tty` 부재):
      - drift 보고 (stderr) + 보존.
@@ -153,6 +156,8 @@ agent별 메커니즘은 install.sh가 1회 등록 시 결정. /wh-setup은 그 
 - `systemctl --user daemon-reload`
 - `--enable` 플래그 시: `wikihub-lint.timer` **만** `enable --now`. **wikihub-ingest@<vid>.timer 는 Step 6 결과에 위임** — 첫 ingest 성공한 vault 만 enable.
 - 미플래그 시: 권장 액션 출력만.
+
+> **update path (install.sh `_systemd_start_after_update`)**: v0.1.10+ 부터 `install.sh` 의 update path 에서 timer start 직후 `systemctl --user enable` 을 자동 수행. 재부팅 후 timer 자동 시작 보장. `--enable` 플래그 없는 install.sh update 에서도 timer 가 enable 처리됨.
 
 ### Step 5. 보고
 
@@ -269,6 +274,7 @@ ADR-0022 (첫 ingest 진입점) 와 정합 — Step 5.5 가 끝나야 Step 6 진
 | 실패 시점 | 동작 |
 |---|---|
 | wikihub.yaml 스키마 위반 | stdout 보고 + exit 1. unit 동기화 안 함 |
+| schema version mismatch (operational v ≠ example v) | stdout 보고 + exit 2 + ops-alert 트리거. unit 동기화 안 함 (ADR-0031 §Decision E) |
 | rclone.conf 무효 (일부 vault) | 해당 vault의 unit은 생성하되 enable 권장에서 제외. 보고 + exit 0 |
 | rclone.conf 무효 (모든 vault) | 보고 + exit 1 (운영 시작 불가 상태) |
 | systemd unit 파일 쓰기 실패 | exit 2 (권한 의심) |

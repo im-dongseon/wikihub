@@ -33,7 +33,7 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 
 ## 사전 조건
 
-- `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, ADR-0036)
+- `graphify` CLI 실행 가능 — install.sh `_install_graphify` 가 `$VENV_PATH/bin/pip install "graphifyy>=0.8.0,<1.0.0"` 으로 venv 에 설치 (PyPI 패키지 `graphifyy`, ADR-0036). **fresh/update 경로 모두 install.sh `_step45_rclone` 에서 자동 설치** (v0.1.0 업데이트 시에도 graphify 자동 추가, Issue #43).
 - `wiki/` 디렉토리 존재 (페이지 0개여도 OK — 빈 그래프 생성)
 - `instance.root`/`graphify-out/` 쓰기 권한
 - `~/.config/wikihub/env` 의 active profile bundle 채워짐 (ADR-0038 v0.1.7 follow-up — namespace 격리). yaml `operations.graphify_profile` 이 가리키는 env keyset (`WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL>`) 가 호출 시점에 backend-native env (OLLAMA_HOST/ANTHROPIC_API_KEY 등) 로 explicit 변환 주입 — 추가 profile cookbook → `docs/graphify-backend-test-reference.md` §6
@@ -45,14 +45,22 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 | `operations.graphify_enabled` | `true` | false 시 lint Step 9 가 graphify trigger 안 함 (운영자 cost / API key 부재 대응) |
 | `operations.graphify_backend` | `""` (auto-detect 또는 명시) | `ollama` / `openai` / `claude` / `gemini` / `deepseek` / `kimi` 중 하나 |
 | `operations.graphify_profile` | `ollama_gemma` | env namespace prefix (lowercase, ^[a-z][a-z0-9_]*$) — ADR-0038 |
-| `operations.graphify_timeout_sec` | `900` (15분) | graphify CLI wrapper timeout — ADR-0036 §"후속 영향" |
+| `operations.graphify_profiles.<profile>.timeout_sec` | (미설정) | **(v0.1.10)** profile-specific timeout. 지정 시 `graphify_timeout_sec` 보다 우선. Issue #36. |
+| `operations.graphify_timeout_sec` | `900` (15분) | graphify CLI wrapper timeout — ADR-0036 §"후속 영향". profile-specific 미설정 시 fallback. |
 | `operations.graphify_partial_failure_threshold` | `0.5` | N/M ratio threshold (Pass 3 silent partial failure 가드) |
 | `operations.graphify_min_version` / `graphify_max_version` | `0.8.0` / `0.99.99` | graphify CLI 버전 범위 |
 
 ## 운영 흐름
 
 - **timer 자동**: lint cycle 의 Step 9 가 trigger 책임. lint cycle 자체가 wikihub-lint.timer (3h 주기) 로 fire — graphify chain 은 변경 시만 fire (cost gate).
-- **메인테이너 수동**: `systemctl --user start wikihub-graphify.service` — 즉시 graph 갱신 필요 시. 또는 `WIKIHUB_HOME=... WIKIHUB_YAML=... scripts/wikihub_graphify.sh --rebuild` (force full rebuild).
+- **메인테이너 수동**: `systemctl --user start wikihub-graphify.service` — lint Step 9 분기와 동일한 systemd 경로. graph.json 이 손상되지 않은 일반 갱신용.
+- **강제 rebuild** (`--rebuild`): systemd ExecStart 는 인자 전달 불가. 직접 script 호출 필요:
+  ```bash
+  cd "$WIKIHUB_HOME"
+  source ~/.config/wikihub/env                    # ADR-0038 profile bundle (WIKIHUB_GRAPHIFY_<PROFILE>_*)
+  scripts/wikihub_graphify.sh --rebuild
+  ```
+  `WIKIHUB_HOME`, `WIKIHUB_YAML`, `WIKIHUB_SRC`, `PATH` 가 설정된 shell 에서 실행. 위 `source ~/.config/wikihub/env` 로 두 env 를 직접 설정하지 않아도 systemd 의 EnvironmentFile 과 동일한 profile bundle env 가 로드됨. graph.json 손상·stale 데이터 강제 재생성 시 사용.
 
 ## 산출물
 
@@ -69,7 +77,7 @@ wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
 | profile bundle 부재 (env model var unset, exit 2) | OnFailure=ops-alert 발화 — `~/.config/wikihub/env` 확인 |
 | graphify extract timeout (exit 124) | SuccessExitStatus 정합 (75 분류 안 됨, 124 fail — ops-alert) |
 | graph.json invalid JSON (partial write) | scripts/wikihub_graphify.sh 가 자동 삭제 + exit 1 (force clean) |
-| N/M ratio < threshold | journal WARNING surface — ops-alert trigger 는 BL 등록 (현행 stderr warn 만) |
+| N/M ratio < threshold | `_state/_graphify/last_failure.json` 기록 + journal WARNING. ops-alert 가 다음 주기 collect (v0.1.10, Issue #42). |
 
 ## 관련 ADR
 

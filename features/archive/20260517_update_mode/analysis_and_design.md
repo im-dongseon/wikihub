@@ -493,6 +493,12 @@ _enabled_vaults_yaml() {
 
 ### Step 10 — verify (**R2-LOW-4 linger 검사 + H2 unit 존재 검증**)
 
+**Verify 범위 (CR1-LOW-5 / CR2-LOW-3, issue #32)** —
+- `wikihub-mount@<vault>.service` — install 시점에 **active 여야 정상** (rclone mount FUSE). inactive 시 warn (transient slow-start 가능성, V10 호환).
+- `wikihub-ingest@<vault>.timer` — install 시점에 **active 여야 정상** (timer 자체는 enable 후 즉시 active, 시간 trigger 와 무관). inactive 시 silent no-sync 위험 → warn.
+- `wikihub-lint.timer` — install 시점에 **active 여야 정상** (singleton, 3h 주기). inactive 시 lint silent skip 위험 → warn.
+- `wikihub-ingest@<vault>.service` — install 시점에 **inactive 가 정상** (timer 가 시간 trigger 로 깨움, install 단계 직후엔 fire 전). 검증 대상 아님.
+
 ```bash
 _step10_verify() {
     if [[ "$(loginctl show-user --property=Linger --value $USER)" != "yes" ]]; then
@@ -500,15 +506,33 @@ _step10_verify() {
         return 0
     fi
     local desired_vaults; desired_vaults="$(_enabled_vaults_yaml)"
+    local verify_failed=0
+    # CR2-HIGH-4 정합: 실패는 warn-only — git rollback 분리. transient slow-start 가 git rollback
+    # 을 trigger 하면 새 vault@ 가 이미 state 손댄 상태에서 fire → invariant #1 위배. warn 만으로
+    # 운영자가 journalctl 진단 + 필요 시 수동 `install.sh --version <prev>` rollback 유도.
     for v in $desired_vaults; do
         local unit="wikihub-mount@${v}.service"
         if ! systemctl --user is-active "$unit" >/dev/null; then
-            err "$unit not active"
-            err "  진단: journalctl --user -u $unit -n 50"
-            exit 2
+            warn "$unit not active — 진단 필요 (transient slow-start 가능성)"
+            warn "  journalctl --user -u $unit -n 50"
+            verify_failed=1
+        fi
+        # CR2-LOW-3 (issue #32) — vault@.timer (= wikihub-ingest@<v>.timer) 도 verify.
+        local timer="wikihub-ingest@${v}.timer"
+        if ! systemctl --user is-active "$timer" >/dev/null; then
+            warn "$timer not active — timer enable 누락 가능 (silent no-sync 위험)"
+            warn "  journalctl --user -u $timer -n 50"
+            verify_failed=1
         fi
     done
-    ok "systemd verify ok"
+    # CR2-LOW-3 (issue #32) — lint.timer 도 verify.
+    if ! systemctl --user is-active wikihub-lint.timer >/dev/null; then
+        warn "wikihub-lint.timer not active — timer enable 누락 가능 (lint silent skip)"
+        warn "  journalctl --user -u wikihub-lint.timer -n 50"
+        verify_failed=1
+    fi
+    (( verify_failed )) && warn "Step 10: 일부 unit inactive — install.sh 정상 종료 (git rollback 안 함)"
+    return 0   # CR2-HIGH-4 — 항상 success, auto rollback 회피.
 }
 ```
 
@@ -594,8 +618,10 @@ main() {
 
 ### `_resolve_ref()` 우선순위
 
-1. `--version <tag>` flag 명시 + tag 존재 → `refs/tags/<tag>`. tag 부재 시 fatal exit. `EXPLICIT_VERSION_FLAG=1` set. (HIGH-N3: 인자 강제 소비, no-arg 분기 없음 — 다음 토큰 부재 또는 `--` 시작 시 fatal)
+1. `--version <tag>` flag 명시 + tag 존재 → `refs/tags/<tag>`. tag 부재 시 fatal exit. `EXPLICIT_VERSION_FLAG=1` set. (HIGH-N3: 인자 강제 소비, no-arg 분기 없음 — 다음 토큰 부재 또는 leading `-` (예: `-x`, `--x`) 시 fatal — CR2-LOW-2 정합).
+   - **fresh path / update path 분기 (CR1-LOW-3, issue #32)**: tag 부재 fatal check 는 **update path 에만 동작** — local clone 의 `git rev-parse refs/tags/<tag>` 로 검증. fresh path 는 clone 전이라 local check 불가능, `git clone --branch <tag>` 의 native error 위임 (메시지: `fatal: Remote branch <tag> not found in upstream origin`). 운영자 진단 surface 차이는 의도된 동작.
 2. `BRANCH` env / `--branch <name>` 명시 + branch 존재 → branch name. fallback 안 함 (의도 명시).
+   - **fresh path / update path prefix 정합 (CR1-LOW-2, issue #32)**: fresh path 의 `_step2_clone` 는 `git clone --branch X` bare name 요구 → `origin/` strip. update path 의 `git reset --hard X` 는 remote-tracking ref 요구 → `origin/` prepend. 동일 BRANCH env 가 두 코드패스에서 정반대로 변환되는 게 정합 (bare name vs remote-tracking ref). `--branch feature/foo` 는 두 path 모두 `feature/foo` (fresh) / `origin/feature/foo` (update) 로 해석.
 3. (default) tag `latest` 존재 → `refs/tags/latest`. ADR-0010 정본 — 메인테이너 release 시 `git tag -f latest <commit> && git push -f origin latest`.
 4. (network fallback) `git ls-remote` fail 시 local cache: `git for-each-ref --sort=-v:refname 'refs/tags/v*' | head -1` — **semver `v*` tag 의 max 값만** 사용. mutable `latest` 의 stale cache 는 비사용 (의미 불안정). banner 에 "[network offline — using local semver max tag (not 'latest')]". 운영자가 `latest` 의 직전 값을 원하면 `--version <tag>` 명시.
 5. (bootstrap fallback) tag `latest` 부재 (v0.1.0 spec 완성 전) → `origin/main` HEAD. banner 에 "[no `latest` tag — using main HEAD]".
@@ -701,10 +727,12 @@ options:
 3. template type 분류:
    - `wikihub-mount@.service.template` / `wikihub-vault@.service.template` / `wikihub-vault@.timer.template` — **per-vault instantiated**. enabled vault 마다 1회 render → `wikihub-<type>@<vault_id>.service` 또는 `.timer`.
    - 그 외 (`wikihub-lint.timer.template` · `ops-alert.service` 등) — **singleton**. 1회 render → 동일 stem.
-4. **2-pass substitution** (setup.md L72-81 의 spec lift):
-   - **Pass 1** (per-vault key): yaml `vaults[*]` 의 각 vault 에 대해 vault-scoped key 산출 — `{vault_id}`, `{mount_path}`, `{rclone_rc_port}`, `{credentials_path}`, `{sync_interval_sec}` 등.
-   - **Pass 2** (instance-wide key): yaml `instance.*` · `operations.*` · `agent.*` 의 key 산출 — `{instance_root}`, `{agent_binary}`, `{agent_oneshot_args}`, `{wikihub_home}`, `{venv_path}`, `{rclone_min_version}` 등.
-   - substitution 은 `str.format_map` 으로 1-pass execution — 두 pass 의 key 가 disjoint 여야 함 (`render_systemd_units.py` 가 동일 key 명 중복 시 fatal).
+4. **Multi-group substitution** (4 groups — `_current_vault_subs` · `_cross_vault_subs` · `_instance_wide_subs`):
+   - **current-vault scalar** (`_current_vault_subs`): `{sync_interval_sec}` — 각 vault 의 현재 instance render 에만 적용. `{credentials_path}` 는 ADR-0035 로 폐기됨.
+   - **cross-vault** (`_cross_vault_subs`): `{remote_name_for_<vid>}`, `{remote_path_for_<vid>}`, `{rc_port_for_<vid>}` — `%i → vault_id` 변환 후 lookup. template 에 `{remote_name_for_%i}` 형태로 사용.
+   - **instance-wide** (`_instance_wide_subs`): `{wikihub_home}`, `{wikihub_src}`, `{instance_root}`, `{venv_path}`, `{rclone_config_path}`, `{rclone_bin}`, `{vfs_cache_max_size}`, `{lint_interval_hours}`, `{agent_invocation}`, `{skill_prefix}`, `{timeout_start_sec}`, `{agent_invocation_for_<skill>}`.
+   - **systemd-native** (`%i`): `{vault_id}`, `{mount_path}` — helper 미산출. template 의 systemd `%i` instantiation 으로 직접 처리. vault_id 는 `WikihubMount@.service` · `WikihubVault@.service` 의 unit instance 식별자로 사용되며, mount_path 는 `--get-mount-path` CLI 로 조회.
+   - 모든 key group 이 **disjoint** 여야 함 (`render_systemd_units.py` 가 동일 key 명 중복 시 fatal). 총 4개 그룹의 합집합이 template 접근 가능한 전체 key space.
 5. **idempotency**: 기존 output file 이 존재하고 byte-equal 이면 **rewrite skip** (mtime preserve). 다르면 atomic write — `<output>.tmp` 작성 후 `os.rename` (POSIX rename atomic).
 6. enabled=false vault 의 직전 render 가 disk 에 있으면 — **`enabled: false` 진입 시 명시 삭제** (file_map 의 desired state 정합). 단 user 데이터인 mount point 디렉토리 자체는 보존.
 
@@ -729,7 +757,7 @@ options:
 
 ### `--get-mount-path` 동작
 
-`vaults[*]` 에서 id 가 매칭되는 첫 entry 의 `options.mount_path` 출력 (path 그대로 — `~` expansion 은 호출자 책임). 미발견 시 exit 1 + stderr 명시.
+`vaults[*]` 에서 id 가 매칭되는 첫 entry 의 `options.mount_path` 출력 (path 그대로 — `~` expansion 은 호출자 책임). `options.mount_path` 부재 시 vault top-level `local_path` 로 fallback (ADR-0019 의 alias — yaml.example 에서 두 필드 동일값 권장). 두 필드 모두 부재 시 exit 1 + stderr 명시. (CR1-LOW-4, issue #32: fallback 동작 spec 정본화.)
 
 ---
 
@@ -805,17 +833,46 @@ backlog 후보 (본 feature 스코프 밖):
 | V3a | `WIKIHUB_HOME=/ --force-fresh` | guard fatal exit (confirm 도달 안 함) |
 | V4 | vault@.service mid-sync 중 update | 15min in-flight grace, fetch 도중 timer fire 0건 |
 | V5a | `--version <older>` (의도 rollback) | warn + 진행 |
-| V5b | `_system/VERSION` 위조 후 update (no --version) | fatal exit |
+| V5b | `_system/VERSION` 위조 후 update (no --version) | warn 발화 (`_verify_version_tag_integrity`) + 진행. VERSION 위조와 dev branch (VERSION 미tag 상태) 가 distinguishable 하지 않아 fatal exit 안 함 |
 | V6 | install.log > 10MB 호출 | rotation + 새 file. 8번째 prune |
 | V7 | requirements.txt 변경된 ref | venv keep, pip install 재실행. 미변경 → skip |
 | V8 | tag latest 부재 + ls-remote 정상 → main HEAD fallback. ls-remote fail → local cache | banner 에 명시 |
-| V9a | `--version <존재 tag>` → checkout. `--version <부재 tag>` → fatal |  |
+| V9a | `--version <존재 tag>` → checkout. `--version <부재 tag>` → fatal | 존재 tag 시 `_resolve_ref` path 1 (`refs/tags/<tag>`) 으로 reset --hard + full install pipeline 진행. 부재 tag 시 `_resolve_ref` 가 `--version <tag>: tag 부재.` ERROR 출력 + exit 1 + trap rollback (systemd 재기동) |
 | V10 | template fixture commit (e.g. mount@ 의 placeholder 한 줄 추가) → update → active service 의 `systemctl show` 에 반영 | render_systemd_units.py 가 정합 |
 | V11 | `uv pip install` 강제 실패 (PyPI 401 또는 invalid requirement) → trap rollback | PRE_UPDATE_REF 복귀 + render 재호출 + systemd 재기동. **rollback 후 active unit content 가 직전 ref render 결과와 byte-equal** (CRIT-N1 검증) |
 | V12 | `git reset --hard` 중 disk full (`fallocate` 시뮬) → fatal + 진단 | trap rollback (PRE_UPDATE_REF 미변경 분기) |
 | V13 | 동시 두 install.sh 호출 | 둘째 즉시 fatal (lock). curl-pipe + update 호출 시 bootstrap exec 후 새 process 가 fresh lock 잡음 (HIGH-N4 검증) |
 | V14 | `render_systemd_units.py` contract — yaml malformed (`--render` exit 2), `--list-enabled` (enabled vault stdout), `--get-mount-path` (미발견 exit 1), idempotent (동일 yaml 재호출 시 byte-equal skip — `stat -c %Y` mtime 보존) | HIGH-N1 contract 정합 |
 | V15 | stop sequence 중간 Ctrl+C (SIGINT) | rollback trap 의 SIGINT 분기 진입 + systemd 재기동 자동 (MED-N4 검증) |
+
+### 9.2.1 Acceptance gate 수행 결과 (issue #33, 2026-05-28)
+
+OCI ARM Ubuntu 24.04 multipass VM 에서 v0.1.10 install.sh 호출. update path 검증 결과.
+
+| ID | 검증 방법 | 결과 | 관찰 |
+|---|---|---|---|
+| V1 | (이전 archive 시점 VM-test) | PASS | F4 backport — 변경 없음 |
+| V2a | (이전 archive 시점 VM-test) | PASS | unstaged guard L1432 동작 |
+| V2b | (이전 archive 시점 VM-test) | PASS | index.lock guard L1427 동작 |
+| V3 | code-read (`_confirm_force_fresh_wipe` L338-344, `_rollback_if_failed` SIGINT 분기 L1518-1528) | PASS (코드 정합) | wipe 5초 confirm = `sleep 5`. Ctrl+C → exit 130 + systemd 재기동 trap |
+| V4 | code-read (`_systemd_stop_before_update` L1610-1659, `_timeout 900 systemctl stop` L1637) | PASS (코드 정합) | 15min grace = `_timeout 900`. mid-sync 실제 시뮬은 OAuth + vault data 필요라 운영자 별도 검증 |
+| V5a | VM-test (`--version v0.1.8` from v0.1.9) | **FAIL** | `intentional downgrade` warn (L1496) 미발화. 원인: self-restart (L1479-1487) 후 child process 가 `current_version` 을 git reset 후 read 해서 항상 `current_version == new_version` (idempotent 분기 hit). transition reporting 도 동일 원인으로 "vX → vX" 잘못 표시. **follow-up issue 필요** |
+| V5b | VM-test (VERSION 0.0.1 위조) + code-read + spec 정합 (#87) | PASS | `_verify_version_tag_integrity` (L1326-) 가 warn 발화 ✓ (fatal exit 는 unstaged guard 의 부수 효과였음). 본 §9.2 V5b 기대를 "warn + 진행" 으로 정정 완료. |
+| V6 | VM-test (`dd 11MB padding` → `install.sh` 호출) | PASS | install.log 12MB → 15KB 새 file + `install.log.20260528_232053_4074` 로 rotate. 8번째 prune 는 1회 호출로 미검증 (8회 누적 필요) |
+| V7 | code-read (`_step3_venv` venv age + requirements.txt diff 분기) | PASS (코드 정합) | venv keep + pip install 재실행. 운영 환경 시뮬은 별도 commit + push 권한 필요 |
+| V8 | code-read (`_resolve_ref` path 4·5 L1382-1395) | PASS (코드 정합) | latest tag 부재 + ls-remote fail → local semver max tag. local cache 도 부재 → `origin/main` HEAD + banner. 운영 시뮬은 origin 의 latest tag 삭제 권한 필요 |
+| V9a 존재 | VM-test (`--version v0.1.9` same-ref) | PASS | full install pipeline 통과. `Step 10 systemd verify ok` |
+| V9a 부재 | VM-test (`--version v999.0.0`) | PASS | `--version v999.0.0: tag 부재.` ERROR + exit 1 + trap rollback (systemd 재기동) |
+| V10 | partial VM-test (V9a 존재 케이스에서 `_step8_systemd_render` 정상 호출) + code-read | PASS (코드 정합) | `render ok: written=0 skipped=7 removed_stale=0 enabled_vaults=['gdrive']` (idempotent). 실제 template fixture commit 시뮬은 push 권한 필요 |
+| V11 | (이전 archive 시점 VM-test) | PASS | CRIT-N1 검증 |
+| V12 | code-read (`_rollback_if_failed` PRE_UPDATE_REF 미변경 분기 L1530-1538) | PASS (코드 정합) | `current_ref == PRE_UPDATE_REF` 일 때 reset 생략, render + systemd 재기동만. 실제 disk full 시뮬은 VM disk 공간/위험 |
+| V13 | (이전 archive 시점 VM-test) | PASS | install.lock 정합 |
+| V14 | (이전 archive 시점 VM-test) | PASS | render_systemd_units.py contract |
+| V15 | (이전 archive 시점 VM-test) | PASS | SIGINT 분기 정합 |
+
+**결함 발견 (V5a)** — self-restart 후 `current_version` 재read 로 인해 downgrade warn / transition reporting 항상 same-version 표시. issue #33 본 acceptance gate 의 명시적 FAIL 발견. follow-up fix 이슈 권고:
+- 원인: install.sh L1417 (current_version 첫 read) 가 self-restart 전 호출인데, self-restart 후 같은 line 이 다시 hit (이번엔 reset 후 VERSION = target).
+- 권장 fix: self-restart 전 `INSTALL_OLD_VERSION` 을 export → child process 에서 그대로 신뢰. 또는 PRE_UPDATE_REF 와 같이 ORIGINAL_VERSION 도 export.
 
 ### 9.3 review (Step 4)
 
@@ -898,3 +955,22 @@ MED·LOW 처리:
 | LOW-N1 | R3 신규 | §3 main flow 단일 wipe — `_step2_clone` 이 wipe 책임 단일화 |
 | LOW-N2 | R3 신규 | §3 Step -1 prune 카운트 8 의 의미 주석 |
 | LOW-N3 | R3 신규 | §3 `_step2_update` 진입 즉시 trap 등록 + VERSION empty 검증 |
+
+---
+
+## v3.1 closure trace — VM 테스트 4 fix
+
+VM 테스트(V1·V2·V13·V14) 수행 도중 surface 된 fix 4건. install.sh 코드에는 반영됐으나 본 설계서 v3 시점에는 미포함. 하단에 closure trace.
+
+| # | 영역 | 설계 위치 | 변경 요지 | 사유 | install.sh 위치 |
+|---|---|---|---|---|---|
+| 1 | refspec | §3 Step 2d | `git config --replace-all remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'` 추가 | `git clone --branch X --depth 1` 은 single-branch 로 제한되어 update path 에서 다른 ref (tag 등) fetch 불가능. 설계 §3 Step 2d 의사코드는 `git fetch origin --tags` 만 명시 | `install.sh:909~910` |
+| 2 | `origin/` prefix normalize | §4 path 2 | `_resolve_ref` path 2 가 BRANCH env 에 `origin/` prepend. fresh path 는 반대로 strip | 동일 BRANCH env 에 대해 fresh path 와 update path 가 정반대 변환 적용. 설계 §4 path 2 는 "branch name" 만 명시하며 prefix 운용 미명시 | `install.sh:838~842` |
+| 3 | unshallow fetch | §3 Step 2d | `git fetch --unshallow 2>/dev/null \|\| true` | shallow clone 상태에서 arbitrary ref fetch 불가 — --unshallow 로 전체 히스토리 확보 후 fetch | `install.sh:912` |
+| 4 | pip install skip 제거 | §3 Step 3 | 설계 §3 Step 3 MED-N3 의 "requirements.txt 변경 없을 때 pip skip" 최적화 제거 — venv partial install state 결함으로 제거 | partial install state (venv 는 있으나 deps 미설치) 에서 skip 분기가 pip 설치를 건너뛰어 결함 발생. 항상 `uv pip sync` 실행으로 변경 | `install.sh:386~395` |
+
+**추가 fix**:
+
+| 항목 | 설계 위치 | 변경 | 사유 | 코드 위치 |
+|---|---|---|---|---|
+| `.venv_path` `.gitignore` 등록 | §3 Step 2a | `.gitignore` 에 `.venv_path` 행 추가 | `git status --porcelain` 의 dirty 분류 방지 — unstaged guard 정합 fix | `.gitignore:22` |

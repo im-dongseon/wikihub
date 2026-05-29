@@ -9,6 +9,11 @@ ruamel.yaml 의 round-trip 모드 (`YAML(typ='rt')`) 가 주석·key 순서·ind
 
 atomic write 패턴은 `scripts/lib/state.py` 의 `_atomic_write_json` 와 정합 — tmpfile 은
 target 의 same-directory + PID suffix, fsync 후 os.replace.
+
+**Thread-safety**: `_yaml_rt` 는 module-level singleton (`YAML(typ="rt")` 인스턴스) 으로,
+ruamel.yaml 공식 문서 기준 thread-safe 하지 않음. 본 helper 는 single-threaded 호출을 가정한다.
+v0.2.x multi-thread 도입 시 function-local instance 또는 `threading.Lock` 보호 필요
+(ADR-0031 §Decision A single-writer invariant 범위 확장 검토).
 """
 from __future__ import annotations
 
@@ -23,7 +28,7 @@ _yaml_rt.preserve_quotes = True
 _yaml_rt.indent(mapping=2, sequence=4, offset=2)
 
 
-def atomic_yaml_write(path: Path, data: Any, *, round_trip: bool = True) -> None:
+def atomic_yaml_write(path: Path, data: Any) -> None:
     """yaml 을 atomic 으로 write (ADR-0031 §Decision A · D 정합).
 
     - **tmpfile 위치**: `path.parent / f".{path.name}.tmp.{os.getpid()}"` — same-directory
@@ -34,12 +39,12 @@ def atomic_yaml_write(path: Path, data: Any, *, round_trip: bool = True) -> None
     - **stale .tmp cleanup**: 본 helper 진입 시 자신의 PID 와 다른 `.<name>.tmp.*` 발견 시
       unlink (SIGTERM mid-write 후 다음 호출에서 cleanup). 단 same PID 의 tmpfile (동시 호출)
       은 보호.
+    - **round-trip only**: ruamel YAML(typ='rt') 로 dump — 주석·key 순서·indent 보존.
+      `round_trip=False` 분기는 v0.1.0 기준 호출처 없어 제거됨 (issue-13).
 
     Args:
         path: 최종 yaml 파일 경로.
-        data: ruamel.yaml round-trip load 결과 또는 dict (round_trip=False 시).
-        round_trip: True 면 ruamel YAML(typ='rt') 로 dump (주석 보존). False 면 safe dump
-            (주석 손실 — `state.py` 같은 internal state file 용도).
+        data: ruamel.yaml round-trip load 결과.
 
     Raises:
         OSError: tmpfile write 또는 rename 실패.
@@ -52,13 +57,7 @@ def atomic_yaml_write(path: Path, data: Any, *, round_trip: bool = True) -> None
     tmp = path.parent / f".{path.name}.tmp.{os.getpid()}"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            if round_trip:
-                _yaml_rt.dump(data, f)
-            else:
-                # round_trip=False 분기는 future-proof — v0.1.0 사용처 없음 (Step 0·Step 6 둘 다 rt)
-                import yaml as _pyyaml
-
-                _pyyaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+            _yaml_rt.dump(data, f)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -88,6 +87,8 @@ def _cleanup_stale_tmp(path: Path) -> None:
     try:
         for entry in path.parent.iterdir():
             if not entry.name.startswith(prefix):
+                continue
+            if not entry.is_file():
                 continue
             try:
                 stale_pid = int(entry.name[len(prefix):])

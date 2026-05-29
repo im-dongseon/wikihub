@@ -109,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         # vfs_refresh_mode=none — refresh skip (운영자가 명시적으로 off, 위험 인지)
 
         # 동시 invocation 방지 — state_dir/.lock 에 LOCK_EX|LOCK_NB.
+        # 경고: fcntl.flock(2) 는 NFS 등 네트워크 파일시스템에서 동작이 보장되지 않음.
+        # v0.1.0 단일 서버(OCI ARM 로컬 디스크) 모델에서는 문제없으나,
+        # 분산 배포(여러 인스턴스가 동일 NFS state_dir 공유) 시 race 가능.
+        # 분산 배포 전환 시 server-id prefix 로 state_dir 격리 또는 외부 lock 으로 대체 필요.
         lock_path = state_dir / ".lock"
         with open(lock_path, "w") as lock_fd:
             try:

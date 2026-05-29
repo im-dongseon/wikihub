@@ -151,6 +151,6 @@ install.sh `_systemd_stop_before_update` 의 monitor migration block (1629-1633)
 
 - [plan.md](plan.md)
 - commit 2ed01f8 (`fix(systemd): rename unit files wh-ingest@ / wh-lint for consistency with skill names`)
-- [docs/reviews/250526_v018fix_code_review_glm-5.1.md](../../docs/reviews/250526_v018fix_code_review_glm-5.1.md)
-- [docs/reviews/250526_v018fix_code_review_mimo-v2.5-pro.md](../../docs/reviews/250526_v018fix_code_review_mimo-v2.5-pro.md)
+- [code_review_glm-5.1.md](code_review_glm-5.1.md)
+- [code_review_mimo-v2.5-pro.md](code_review_mimo-v2.5-pro.md)
 - [docs/adr/0033-skill-prefix-hyphen-lock.md](../../docs/adr/0033-skill-prefix-hyphen-lock.md)

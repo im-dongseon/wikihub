@@ -95,9 +95,9 @@ F4 `install_runtime` 와 `update_mode` 까지 v0.1.0 의 install + update 흐름
 
 | 필드 | source | patching 조건 |
 |---|---|---|
-| `instance.root` | `$WIKIHUB_INSTANCE_ROOT` env (install.sh export 또는 `/wh:setup` 호출 env) | env 값과 yaml 값 불일치 시 |
-| `vaults[*].local_path` | `<instance.root>/vault/<vault.id>` | 파생값과 yaml 값 불일치 시 |
-| `vaults[*].options.credentials_path` | `<instance.root>/.credentials/sa_<vault.id>.json` | 파생값과 yaml 값 불일치 시 |
+| `instance.root` | `$WIKIHUB_INSTANCE_ROOT` env (install.sh export 또는 `/wh:setup` 호출 env) | env 값과 yaml 값 불일치 시 (**비교 전 양쪽 `os.path.expanduser()` 적용 — `~/wikihub` vs `/home/user/wikihub` 표현 차이 방지**) |
+| `vaults[*].local_path` | `<instance.root>/vault/<vault.id>` | 파생값과 yaml 값 불일치 시 (동일 `os.path.expanduser` 적용) |
+| `vaults[*].options.credentials_path` | `<instance.root>/.credentials/sa_<vault.id>.json` | 파생값과 yaml 값 불일치 시 (동일 `os.path.expanduser` 적용) |
 | `operations.gws_min_version` | **`$WIKIHUB_HOME/_system/INSTALLED_VERSIONS.json` 의 `gws` 필드** (install.sh `_install_gws` 가 작성) — file 부재 시 `gws --version` stdout fallback | yaml 값이 빈 문자열 또는 install gws 보다 낮을 때 |
 
 **v2 변경 사유**:

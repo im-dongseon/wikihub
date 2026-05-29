@@ -17,7 +17,7 @@ Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
 EnvironmentFile=-%h/.config/wikihub/env
 ExecStart={agent_invocation_for_wh_lint} "/wh-lint"
 SuccessExitStatus=0 75
-TimeoutStartSec={timeout_start_sec}sec
+TimeoutStartSec={lint_timeout_start_sec}sec
 SyslogIdentifier=wikihub-lint
 
 # Restart= 미설정 (F1 §4.8.2 정합) — oneshot 의 재시도는 timer 책임.
