@@ -81,6 +81,29 @@ def _get_yq_version() -> str:
         return ""
 
 
+def _get_uv_version() -> str:
+    """Extract uv version from ``uv --version`` output.
+
+    Matches bash::
+        uv --version 2>/dev/null | awk '{print $2; exit}'
+
+    Falls back to the ``UV_VERSION`` env var when ``uv`` isn't on PATH — uv lives at
+    ~/.local/bin/uv, outside the venv, so the prior env-only lookup left this empty (issue #109).
+    """
+    try:
+        result = subprocess.run(
+            ["uv", "--version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split()
+            if len(parts) >= 2:
+                return parts[1].lstrip("v")
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return os.environ.get("UV_VERSION", "")
+
+
 def _read_wikihub_version(src_dir: Path) -> str:
     """Read wikihub version from ``_system/VERSION`` file.
 
@@ -102,7 +125,7 @@ def write_installed_versions(target_path: Path) -> None:
     - **rclone**: parsed from ``rclone version`` output
     - **graphify**: parsed from ``graphify --version`` output
     - **yq**: parsed from ``yq --version`` output
-    - **uv**: ``UV_VERSION`` environment variable
+    - **uv**: parsed from ``uv --version`` output (falls back to ``UV_VERSION`` env)
     - **wikihub**: ``_system/VERSION`` file content
     - **written_at**: current UTC timestamp
     """
@@ -113,7 +136,7 @@ def write_installed_versions(target_path: Path) -> None:
         "rclone": _get_rclone_version(),
         "graphify": _get_graphify_version(),
         "yq": _get_yq_version(),
-        "uv": os.environ.get("UV_VERSION", ""),
+        "uv": _get_uv_version(),
         "wikihub": _read_wikihub_version(src_dir),
         "written_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
