@@ -2,11 +2,12 @@
 # release.sh — Actions 4-5 of Step 5 deployment workflow
 #   Merge version branch → main, create annotated tag, push
 #
-# Usage: release.sh [--dry-run] <version_branch> [description]
+# Usage: release.sh [--dry-run] [--skip-doc-check] <version_branch> [description]
 #
 #   <version_branch>  Version branch to release (e.g., v0.1.10)
 #   [description]     Optional release description (e.g., "2026-05-28 batch")
 #                     If omitted, uses current date.
+#   --skip-doc-check  Bypass the release-doc preflight (issue #114). Escape hatch only.
 #
 # Example: release.sh v0.1.10 "2026-05-28 batch"
 #
@@ -16,6 +17,7 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 DRY_RUN=false
+SKIP_DOC_CHECK=false
 
 usage() {
     sed -n '3,13p' "$0" | sed 's/^#//'
@@ -44,10 +46,51 @@ run_or_dry() {
     fi
 }
 
+# Release-doc preflight (issue #114) — verify the release-doc set is updated on the
+# version branch BEFORE the irreversible merge/tag. Reads the branch tree via `git show`
+# (no checkout). HARD-fails on deterministic signals (VERSION / changelog / README badge),
+# WARNs on prose docs (roadmap / HISTORY). `--skip-doc-check` is the escape hatch.
+# Checklist 정본: docs/agent_dev_guide.md §Step 5.
+_preflight_release_docs() {
+    if "$SKIP_DOC_CHECK"; then
+        warn "Release-doc preflight 생략 (--skip-doc-check)."
+        return 0
+    fi
+    info "=== Release-doc preflight (issue #114) ==="
+    local ref="origin/$VERSION_BRANCH" ver="${VERSION_TAG#v}"
+    local vfile changelog readme badge
+
+    # HARD 1 — _system/VERSION == release tag
+    vfile="$(git show "$ref:_system/VERSION" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    [[ "$vfile" == "$ver" ]] || die "preflight: _system/VERSION ('${vfile:-<empty>}') != $VERSION_TAG. VERSION 파일을 $ver 로 갱신 후 재시도 (또는 --skip-doc-check)."
+
+    # HARD 2 — docs/changelog.md 에 released (non-canary) entry 존재
+    changelog="$(git show "$ref:docs/changelog.md" 2>/dev/null || true)"
+    local cl_line
+    cl_line="$(printf '%s\n' "$changelog" | grep -m1 "^## \[$VERSION_TAG\]" || true)"
+    [[ -n "$cl_line" ]] || die "preflight: docs/changelog.md 에 '## [$VERSION_TAG]' entry 부재 — changelog 갱신 후 재시도."
+    printf '%s' "$cl_line" | grep -qi "canary" && die "preflight: docs/changelog.md '$VERSION_TAG' entry 가 아직 (canary) — (released) + 날짜로 갱신 후 재시도."
+
+    # HARD 3 — README Status 배지가 이 버전을 released 로 반영
+    readme="$(git show "$ref:README.md" 2>/dev/null || true)"
+    badge="$(printf '%s\n' "$readme" | grep -i 'img.shields.io/badge/Status' | head -1 || true)"
+    printf '%s' "$badge" | grep -q "$VERSION_TAG" || die "preflight: README.md Status 배지가 $VERSION_TAG 미반영 ('${badge:-<none>}') — 배지 갱신 후 재시도."
+    printf '%s' "$badge" | grep -qi "canary" && die "preflight: README.md Status 배지가 아직 canary — released 로 갱신 후 재시도."
+
+    # WARN — roadmap / HISTORY (prose, 기계 단정 어려움 — 존재 힌트만)
+    printf '%s\n' "$(git show "$ref:docs/roadmap.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
+        || warn "preflight: docs/roadmap.md 에 $VERSION_TAG 언급 없음 — 누적완료 이동 확인 권장."
+    printf '%s\n' "$(git show "$ref:features/HISTORY.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
+        || warn "preflight: features/HISTORY.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
+
+    info "Release-doc preflight 통과 (HARD 3종 OK)."
+}
+
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
+        --skip-doc-check) SKIP_DOC_CHECK=true; shift ;;
         -h|--help) usage ;;
         *) break ;;
     esac
@@ -96,6 +139,9 @@ elif git rev-parse --verify "$VERSION_BRANCH" 2>/dev/null; then
 else
     die "Version branch '$VERSION_BRANCH' not found. Has promote_canary.sh been run?"
 fi
+
+# Release-doc preflight — BEFORE the irreversible merge (issue #114)
+_preflight_release_docs
 
 # Perform merge --no-ff
 run_or_dry git merge --no-ff "$VERSION_BRANCH" -m "Merge branch '$VERSION_BRANCH' into main"

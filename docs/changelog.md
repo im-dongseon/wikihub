@@ -6,6 +6,16 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
+## [v0.1.11] — (canary, 진행 중)
+
+### 수정 (Fixed)
+- **release.sh push refspec** — 버전 브랜치(`refs/heads/vX.Y.Z`)와 annotated 태그(`refs/tags/vX.Y.Z`) 동일명으로 인한 `git push origin main vX.Y.Z` 모호성 → 명시적 refspec 분리 (issue #112)
+
+### 추가 (Added)
+- **릴리스 문서 preflight** — `release.sh` 가 merge 전 `_system/VERSION`·`docs/changelog.md`·`README.md` 배지를 검증(HARD), roadmap/HISTORY 경고(WARN). 릴리스 문서 체크리스트를 `docs/agent_dev_guide.md §Step 5` 에 정본화 (issue #114)
+
+---
+
 ## [v0.1.10] — 2026-05-30 (released)
 
 ### 추가 (Added)

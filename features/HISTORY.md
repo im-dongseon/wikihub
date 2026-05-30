@@ -371,3 +371,20 @@
 - **트레이드오프**: regex `^graphify-out/?$` 의 매칭 범위 보수적 — 운영자가 `# graphify-out/` comment-out 형태로 작성한 경우 매칭 안 함 → migration 가 append (중복 가능). 운영자가 의도적 comment-out 했다면 본 line 의 추가는 redundant 이나 idempotent 정합 깨지지 않음.
 - **결론**: install.sh 1 fn + setup.md 1 bullet + ADR-0036 §Note 1줄. multipass 검증 통과 — 첫 실행 시 `wiki/.graphifyignore migration: graphify-out/ append (graphify_path_absolute layer 3 회복)` 출력 + 재실행 시 no-op (idempotent).
 - **참조**: features/archive/20260527_graphifyignore_migration/ (예정)
+
+## [2026-05-30] v0.1.10 release (통합 기록)
+
+> 다수 feature 묶음 release — 개별 항목은 각 feature 의 `features/archive/...` + ADR 참조. 본 항목은 release 시점 §3.5 backfill (issue #114 — 당시 누락분 소급).
+
+- **목적**: v0.1.9 → v0.1.10 누적 release. 외부 read-only 접근(MCP) + wiki 링크 alias resolve + install/update 경로 hardening + release helper.
+- **로직 (주요 묶음)**:
+  - **MCP server** (ADR-0043) — `scripts/wikihub_mcp.py` read-only (4 resource + 5 tool), stdio + SSH spawn, `docs/mcp-setup.md`.
+  - **alias-aware link resolver** (ADR-0042, issue #37) — lint Step 1.5 alias index.
+  - **install/update hardening** — self-restart current_version 보존(#86), per-vault flock(#61), reboot timer enable(#34), mount fallback diagnostic env scrub fix(#29), graphify partial-failure alert(#42).
+  - **systemd TimeoutStartSec yaml-driven**(#104), **sidecar cwd fix**(#108), **sidecar uv 탐지**(#109).
+  - **deployment helpers** — `scripts/promote_canary.sh` + `release.sh`.
+  - **docs** — README 사용자 중심 재작성(#103) + changelog/roadmap 신설 + web-ui-setup(#107 검토) + docs/reviews·reports → features/archive 이관.
+- **생성 ADR**: ADR-0042 (alias resolver), ADR-0043 (MCP integration).
+- **트레이드오프**: MCP Phase 1 은 stdio+SSH 한정 (SSE/HTTP·write tool 은 Phase 2 deferred). release.sh 는 첫 실사용에서 branch+tag 동일명 push 모호성 발견(#112, v0.1.11 fix).
+- **결론**: main merge `fb50872` + annotated tag `v0.1.10` + `latest` (2026-05-30). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.10 entry.
+- **참조**: `docs/changelog.md` [v0.1.10], `docs/adr/0042`·`0043`, features/archive/20260529_mcp_integration/ 등.
