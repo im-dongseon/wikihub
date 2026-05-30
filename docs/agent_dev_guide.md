@@ -173,6 +173,18 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 **진입 조건**: Step 4 DoD 전항목 충족 (Step 4 생략 시 Step 3 자가 검증 + 사용자 승인으로 대체) + 사용자 최종 승인 (`"배포 진행해줘"` 또는 `"Step 5 시작해줘"`)
 **산출물**: `features/HISTORY.md` — release(액션 4~5) 시점에 한 번 append
 
+**릴리스 문서 체크리스트 (액션 4~5 전 — 일부는 `release.sh` preflight 가 강제, issue #114)**:
+
+| 문서 | 릴리스 시 갱신 | `release.sh` preflight |
+|---|---|---|
+| `_system/VERSION` | `= X.Y.Z` | **HARD** (== release tag) |
+| `docs/changelog.md` | `## [vX.Y.Z]` `(canary)`→`(released)` + 날짜 | **HARD** (entry 존재 & not canary) |
+| `README.md` 배지 | Status/Version `canary`→`vX.Y.Z` released | **HARD** (Status 배지에 버전 반영 & not canary) |
+| `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" + 다음 버전 현행화 | WARN |
+| `features/HISTORY.md` | 버전 feature 항목 append (아래 형식) | WARN |
+
+`release.sh` 는 HARD 3종 미충족 시 비가역 merge 전에 `die` 한다 (escape hatch: `--skip-doc-check`). WARN 2종은 경고만 — 운영자가 체크리스트로 보장. 이 표가 "릴리스 시 무엇을 갱신해야 하는가"의 정본.
+
 **생략 가능 조건** (어느 하나라도 해당):
 
 | 항목 | 조건 |

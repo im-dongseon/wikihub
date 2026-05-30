@@ -198,6 +198,8 @@ flowchart TD
 
 **수행 시 산출물**: `features/HISTORY.md` — release(액션 4~5) 시점에 한 번 append
 
+> **릴리스 문서 세트**: 릴리스 시 `HISTORY.md` 외에도 `_system/VERSION`·`docs/changelog.md`·`README.md` 배지·`docs/roadmap.md` 를 함께 갱신해야 한다. 정본 체크리스트는 [docs/agent_dev_guide.md §Step 5](docs/agent_dev_guide.md#step-5-deployment-배포--조건부-생략-가능). `scripts/release.sh` 가 VERSION/changelog/README 를 merge 전 preflight 로 강제한다 (issue #114).
+
 **HISTORY.md 항목 형식**:
 ```markdown
 ## [YYYY-MM-DD] feat_id
