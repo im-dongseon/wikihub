@@ -280,21 +280,94 @@ def _cross_vault_subs(vault: dict) -> dict[str, str]:
     """
     vid = vault["id"]
     opts = vault.get("options") or {}
-    return {
-        f"remote_name_for_{vid}": str(opts.get("rclone_remote_name", vid)),
-        f"remote_path_for_{vid}": str(opts.get("rclone_remote_path") or ""),
-        f"rc_port_for_{vid}": str(opts.get("rclone_rc_port", 5572)),
-    }
+    vault_type = str(vault.get("type", "gdrive_api")).strip()
+    
+    # vault_type에 따라 분기
+    if vault_type == "nas":
+        # NAS vault: rc 미사용, Tailscale 경유, read-only mount
+        return {
+            f"remote_name_for_{vid}": str(opts.get("rclone_remote_name", vid)),
+            f"remote_path_for_{vid}": str(opts.get("rclone_remote_path") or ""),
+            f"rc_port_for_{vid}": str(opts.get("rclone_rc_port", 5572)),  # NAS는 미사용하지만 템플릿 호환
+        }
+    else:
+        # Drive vault: 기존 동작
+        return {
+            f"remote_name_for_{vid}": str(opts.get("rclone_remote_name", vid)),
+            f"remote_path_for_{vid}": str(opts.get("rclone_remote_path") or ""),
+            f"rc_port_for_{vid}": str(opts.get("rclone_rc_port", 5572)),
+        }
 
 
 def _current_vault_subs(vault: dict) -> dict[str, str]:
     """Current-vault scalar keys (suffix 없음) — 본 vault 의 render 결과에만 적용.
 
     ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
+    vault_type에 따라 mount 옵션 분기.
     """
-    return {
-        "sync_interval_sec": str(vault.get("sync_interval_sec", 3600)),   # v0.1.6 default 1h (was 600 — v0.1.5 era stale)
-    }
+    vault_type = str(vault.get("type", "gdrive_api")).strip()
+    opts = vault.get("options") or {}
+    
+    if vault_type == "nas":
+        # NAS vault: Tailscale 경유, read-only, rc 미사용
+        sftp_host = str(opts.get("sftp_host", ""))
+        sftp_port = str(opts.get("sftp_port", 22))
+        
+        # TCP 체크 ExecStartPre (Tailscale 연결 대기)
+        tcp_check_pre = (
+            f"ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do "
+            f"echo >/dev/tcp/{sftp_host}/{sftp_port} 2>/dev/null && break; "
+            f"sleep 2; done'"
+        )
+        
+        # mount 옵션: --vfs-cache-mode full, --read-only, --dir-cache-time, --log-level
+        mount_options = (
+            "--vfs-cache-mode full \\\n"
+            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
+            "  --read-only \\\n"
+            "  --dir-cache-time 5m \\\n"
+            "  --log-level NOTICE"
+        )
+        
+        return {
+            "sync_interval_sec": str(vault.get("sync_interval_sec", 3600)),
+            "after_target": "network-online.target tailscaled.service",
+            "tcp_check_pre": tcp_check_pre,
+            "mount_options": mount_options,
+            "restart_policy": "on-failure",
+            "template_comments": (
+                "NAS vault mount template\\n"
+                "- After: network-online.target + tailscaled.service\\n"
+                "- ExecStartPre: TCP 체크 (SFTP 포트 도달성)\\n"
+                "- mount_options: vfs-cache-mode full, read-only\\n"
+                "- Restart: on-failure (Tailscale 지연 시 자가 복구)"
+            ),
+        }
+    else:
+        # Drive vault: 기존 동작
+        mount_options = (
+            "--vfs-cache-mode minimal \\\n"
+            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
+            "  --drive-export-formats docx,xlsx,pptx,md \\\n"
+            "  --dir-cache-time 5m \\\n"
+            "  --log-level NOTICE \\\n"
+            "  --rc \\\n"
+            f"  --rc-addr 127.0.0.1:{{rc_port_for_%i}}"
+        )
+        
+        return {
+            "sync_interval_sec": str(vault.get("sync_interval_sec", 3600)),
+            "after_target": "network-online.target",
+            "tcp_check_pre": "",
+            "mount_options": mount_options,
+            "restart_policy": "always",
+            "template_comments": (
+                "Drive vault mount template\\n"
+                "- After: network-online.target\\n"
+                "- mount_options: vfs-cache-mode minimal, rc 활성화\\n"
+                "- Restart: always"
+            ),
+        }
 
 
 # ── safe substitution ──────────────────────────────────────────────────
