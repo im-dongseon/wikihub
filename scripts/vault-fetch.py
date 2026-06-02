@@ -100,7 +100,14 @@ def main(argv: list[str] | None = None) -> int:
             rc_addr = f"127.0.0.1:{rc_port}"
 
         assert_mount_alive(args.vault, mount_path, state_dir=state_dir)
-        if cfg.operations.vfs_refresh_mode == "recursive":
+
+        # NAS vault는 read-only이므로 vfs_refresh 불필요 (Issue #119)
+        # - rc endpoint 미존재 → rclone rc 실패
+        # - SFTP auth 실패 시 OAuth revoke로 오인 가능
+        # assert_mount_alive는 유지 (mount liveness는 NAS도 필요)
+        if vault_cfg.type == "nas":
+            log.info("vault %s: NAS vault — vfs_refresh skip", args.vault)
+        elif cfg.operations.vfs_refresh_mode == "recursive":
             vfs_refresh(args.vault, rc_addr, state_dir=state_dir, recursive=True)
         elif cfg.operations.vfs_refresh_mode == "per-file":
             # K2 (per-file) — v0.2.x deferred. v0.1.0 fallback 으로 recursive.
