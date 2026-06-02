@@ -140,6 +140,9 @@ def _validate_schema(cfg: dict) -> list[str]:
             if vid in seen_ids:
                 errors.append(f"vaults[{i}].id 중복: {vid}")
             seen_ids.add(vid)
+            # NAS vault 는 rclone rc 미사용 — port 검증 skip (Issue #117)
+            if str(v.get("type", "")).strip() == "nas":
+                continue
             opts = v.get("options") or {}
             port = opts.get("rclone_rc_port")
             if port is not None:
