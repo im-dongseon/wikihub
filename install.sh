@@ -676,6 +676,8 @@ _setup_nas_vault_remotes() {
     fi
 
     local nas_vaults
+    # ▶ pipe(|) delimiter: sftp_host/user 등에 pipe 포함 시 파싱 깨짐. 실용적 위험 낮음
+    # (호스트명·사용자명에 pipe 불가). JSON-line 으로 변경 시 파이썬 json.dumps + bash readarray 필요.
     nas_vaults="$("$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
 import sys, yaml
 try:
@@ -694,34 +696,36 @@ for v in cfg.get("vaults", []):
     host = opts.get("sftp_host", "")
     port = opts.get("sftp_port", 22)
     user = opts.get("sftp_user", "")
-    key = opts.get("ssh_key_path", "")
-    rpath = opts.get("remote_path", "")
+    key  = opts.get("ssh_key_path", "")   # 빈 문자열 == password auth fallback
     if not host or not user:
         print(f"NAS vault '{vid}': sftp_host 또는 sftp_user 미설정 — skip", file=sys.stderr)
         continue
-    print(f"{remote}|{host}|{port}|{user}|{key}|{rpath}")
+    print(f"{remote}|{host}|{port}|{user}|{key}")
 PYEOF
-)" 2>/dev/null || true
+)" || true   # exit 2 (yaml 파싱 실패) → set -e 회피용 || true. stderr 는 그대로 통과.
 
     if [[ -z "$nas_vaults" ]]; then
         info "NAS vault 없음 — rclone SFTP remote 생성 skip"
         return 0
     fi
 
-    local remote host port user key rpath
-    while IFS='|' read -r remote host port user key rpath; do
+    local remote host port user key
+    while IFS='|' read -r remote host port user key; do
         [[ -z "$remote" ]] && continue
         if rclone config show "$remote" >/dev/null 2>&1; then
             info "rclone remote '$remote' 이미 존재 — skip"
             continue
         fi
         info "rclone SFTP remote 생성: $remote (host=$host, user=$user)"
+        # key_file 은 ssh_key_path 가 있을 때만 전달 (빈 문자열 → rclone 이 password prompt)
+        local key_args=()
+        [[ -n "$key" ]] && key_args=(key_file "$key")
         rclone config create "$remote" sftp \
             host "$host" \
             port "$port" \
             user "$user" \
-            key_file "$key" \
-            || { err "rclone SFTP remote '$remote' 생성 실패"; return 1; }
+            "${key_args[@]}" \
+            || { err "rclone SFTP remote '$remote' 생성 실패 — 다른 vault 계속 진행"; continue; }
         ok "rclone SFTP remote '$remote' 생성 완료"
     done <<<"$nas_vaults"
 
