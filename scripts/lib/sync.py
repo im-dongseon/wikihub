@@ -468,6 +468,7 @@ def sync(
     diff = compute_diff(
         listing,
         file_map,
+        vault_type=vault_cfg.type,
         exclude_shared_with_me=exclude_swm,
     )
 
