@@ -1,6 +1,6 @@
 [Unit]
 Description=WikiHub rclone mount — %i
-After=network-online.target
+After={after_target}
 Wants=network-online.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
@@ -14,34 +14,16 @@ Environment=RCLONE_CONFIG={rclone_config_path}
 ExecStartPre=-/bin/fusermount3 -uz {wikihub_home}/vault/%i
 ExecStartPre=/bin/mkdir -p {wikihub_home}/vault/%i
 ExecStartPre=-{rclone_bin} mkdir {remote_name_for_%i}:{remote_path_for_%i}
+{tcp_check_pre}
 ExecStart={rclone_bin} mount {remote_name_for_%i}:{remote_path_for_%i} {wikihub_home}/vault/%i \
-  --vfs-cache-mode minimal \
-  --vfs-cache-max-size {vfs_cache_max_size} \
-  --drive-export-formats docx,xlsx,pptx,md \
-  --dir-cache-time 5m \
-  --log-level NOTICE \
-  --rc \
-  --rc-addr 127.0.0.1:{rc_port_for_%i}
+  {mount_options}
 ExecStop=/bin/fusermount3 -u {wikihub_home}/vault/%i
-Restart=always
+Restart={restart_policy}
 RestartSec=10s
 RemainAfterExit=no
 SyslogIdentifier=wikihub-mount-%i
 
-# ExecStartPre= -fusermount3 -uz — kill -9 등 비정상 종료 시 stale FUSE mount entry 가
-#   ExecStartPre 의 mkdir 을 "Transport endpoint is not connected" 로 fail 시키는 restart loop
-#   결함 차단 (V<N> Phase 2 결함 #3, 2026-05-17). `-` prefix 로 exit code 무시 (mount 안 됐을
-#   땐 자연스럽게 no-op). `-z` lazy unmount — busy mount (열린 파일 / cwd 안에 있는 process)
-#   에서도 detach 강제, restart loop 재발 회피 (R16-H5 V<N> R16 SRE 리뷰, 2026-05-17).
-# ExecStartPre= -rclone mkdir — remote_path 부재 시 자동 생성 (멱등). `-` prefix: 이미 존재 시
-#   exit 비0 무시. remote_path 가 빈 문자열이면 `rclone mkdir gdrive:` (no-op).
-#   ADR-0035 §Note 2026-05-19 — mount source path 사전 보장 책임은 systemd unit.
-# Type=simple — daemon 상시 살아있음. process 시작 시점이 active (FUSE 준비 완료 시점 아님 — assert_mount_alive 가 보강).
-# Restart=always + StartLimitBurst=5/300s — 5회 fail/5min 초과 시 permanently failed → OnFailure=ops-alert.service.
-# --rc-addr — vault@.service 가 mount.vfs_refresh 호출. per-vault port (yaml.vaults[*].options.rclone_rc_port).
-# --vfs-cache-mode minimal — ADR-0025 β2. β3(full) 은 Google native (Docs/Sheets/Slides) read=0 silent fail (V15a 진단, 2026-05-17). minimal 은 stream read path 라 backend export 자동 트리거 + 큰 파일 캐시 효과 유지.
-# --drive-export-formats — Google native → markdown/docx/xlsx/pptx 변환 우선순위. RWFileHandle 우회 stream read 시 backend export call 에 적용.
-# --log-level NOTICE — INFO 는 token 노출 위험 (ADR-0025 v9). trouble-shoot 시 RCLONE_LOG_LEVEL=DEBUG override.
+# {template_comments}
 
 [Install]
 WantedBy=default.target
