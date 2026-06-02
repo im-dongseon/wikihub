@@ -717,10 +717,12 @@ PYEOF
             continue
         fi
         info "rclone SFTP remote 생성: $remote (host=$host, user=$user)"
+        local rclone_conf="${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}"
         # key_file 은 ssh_key_path 가 있을 때만 전달 (빈 문자열 → rclone 이 password prompt)
         local key_args=()
         [[ -n "$key" ]] && key_args=(key_file "$key")
         rclone config create "$remote" sftp \
+            --config "$rclone_conf" \
             host "$host" \
             port "$port" \
             user "$user" \
