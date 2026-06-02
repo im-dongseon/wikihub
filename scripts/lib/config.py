@@ -18,7 +18,7 @@ from .exceptions import VaultSyncFatal
 _log = logging.getLogger(__name__)
 
 VAULT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-SUPPORTED_VAULT_TYPES = frozenset({"gdrive_api", "directory"})
+SUPPORTED_VAULT_TYPES = frozenset({"gdrive_api", "directory", "nas"})
 
 
 @dataclass
@@ -120,6 +120,16 @@ def _parse_vault(vid: str, vcfg: dict[str, Any]) -> VaultConfig:
                 "bind-mount/ramdisk/multi-vault layout 의도가 아니면 yaml 정합 확인 권장.",
                 vid, mount_path, local_path,
             )
+
+    # NAS vault 필수 옵션 검증 및 기본값 (features/20260602_nas_vault §2.1)
+    if vtype == "nas":
+        _require(options, "sftp_host", ctx=f"vaults.{vid}.options")
+        _require(options, "sftp_user", ctx=f"vaults.{vid}.options")
+        _require(options, "remote_path", ctx=f"vaults.{vid}.options")
+        options.setdefault("sftp_port", 22)
+        options.setdefault("ssh_key_path", "~/.ssh/id_ed25519")
+        # rclone_remote_name 기본값: nas_{vault_id}
+        options.setdefault("rclone_remote_name", f"nas_{vid}")
 
     return VaultConfig(
         id=vid,
@@ -224,6 +234,9 @@ def load_wikihub_yaml(path: Path | None = None) -> Config:
     seen_ports: dict[str | int, str] = {}
     for vcfg in vaults_raw:
         vid = _require(vcfg, "id", ctx="vaults[*]")
+        # NAS vault 는 rclone rc 미사용 — port 검증 skip (Issue #117)
+        if str(vcfg.get("type", "")).strip() == "nas":
+            continue
         opts = dict(vcfg.get("options", {}))
         port = opts.get("rclone_rc_port")
         if port is not None:
