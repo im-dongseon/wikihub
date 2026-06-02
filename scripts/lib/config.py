@@ -125,7 +125,7 @@ def _parse_vault(vid: str, vcfg: dict[str, Any]) -> VaultConfig:
     if vtype == "nas":
         _require(options, "sftp_host", ctx=f"vaults.{vid}.options")
         _require(options, "sftp_user", ctx=f"vaults.{vid}.options")
-        _require(options, "remote_path", ctx=f"vaults.{vid}.options")
+        _require(options, "rclone_remote_path", ctx=f"vaults.{vid}.options")
         options.setdefault("sftp_port", 22)
         options.setdefault("ssh_key_path", "~/.ssh/id_ed25519")
         # rclone_remote_name 기본값: nas_{vault_id}
