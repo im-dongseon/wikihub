@@ -402,5 +402,5 @@
   - **release 프로세스 hardening** — preflight 체크 (#114) + push refspec 명시적 분리 (#112).
 - **생성 ADR**: ADR-0044 (NAS vault storage layer).
 - **트레이드오프**: NAS vault는 SFTP 기반으로 rclone 의존성 유지. Google Drive vault와 동일한 mount/vfs 계층 사용하나, `vfs/refresh` 및 OAuth 검사는 NAS에서 불필요하여 조건 분기. 향후 NFS/SMB backend는 별도 ADR 필요.
-- **결론**: main merge `<SHA>` + annotated tag `v0.1.11` + `latest` (2026-06-05). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.11 entry.
+- **결론**: main merge `dbf4dda` + annotated tag `v0.1.11` + `latest` (2026-06-05). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.11 entry.
 - **참조**: `docs/changelog.md` [v0.1.11], `docs/adr/0044`, features/archive/*.
