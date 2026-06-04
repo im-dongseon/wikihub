@@ -388,3 +388,19 @@
 - **트레이드오프**: MCP Phase 1 은 stdio+SSH 한정 (SSE/HTTP·write tool 은 Phase 2 deferred). release.sh 는 첫 실사용에서 branch+tag 동일명 push 모호성 발견(#112, v0.1.11 fix).
 - **결론**: main merge `fb50872` + annotated tag `v0.1.10` + `latest` (2026-05-30). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.10 entry.
 - **참조**: `docs/changelog.md` [v0.1.10], `docs/adr/0042`·`0043`, features/archive/20260529_mcp_integration/ 등.
+|
+
+## [2026-06-05] v0.1.11 release (통합 기록)
+
+> NAS vault 첫 지원 release — SFTP 기반 vault type 확장.
+
+- **목적**: v0.1.10 → v0.1.11 누적 release. Google Drive 외 NAS (SFTP) vault type 지원 + release 프로세스 hardening.
+- **로직 (주요 묶음)**:
+  - **NAS vault type** (ADR-0044, #117/#125) — `SUPPORTED_VAULT_TYPES` + type별 필수 옵션 검증 + rclone rc port skip + mount 템플릿 분기 (#130) + path 기반 diff (#129) + SFTP remote 생성 (#126).
+  - **NAS vault 호환성** — vfs_refresh/OAuth 검사 조건 분기 (#119/#127).
+  - **NAS vault 저장 계층** — 저장 위치·권한·백업 구조 ADR-0044 정본화 (#123/#131).
+  - **release 프로세스 hardening** — preflight 체크 (#114) + push refspec 명시적 분리 (#112).
+- **생성 ADR**: ADR-0044 (NAS vault storage layer).
+- **트레이드오프**: NAS vault는 SFTP 기반으로 rclone 의존성 유지. Google Drive vault와 동일한 mount/vfs 계층 사용하나, `vfs/refresh` 및 OAuth 검사는 NAS에서 불필요하여 조건 분기. 향후 NFS/SMB backend는 별도 ADR 필요.
+- **결론**: main merge `<SHA>` + annotated tag `v0.1.11` + `latest` (2026-06-05). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.11 entry.
+- **참조**: `docs/changelog.md` [v0.1.11], `docs/adr/0044`, features/archive/*.

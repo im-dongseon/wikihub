@@ -6,13 +6,22 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.11] — (canary, 진행 중)
-
-### 수정 (Fixed)
-- **release.sh push refspec** — 버전 브랜치(`refs/heads/vX.Y.Z`)와 annotated 태그(`refs/tags/vX.Y.Z`) 동일명으로 인한 `git push origin main vX.Y.Z` 모호성 → 명시적 refspec 분리 (issue #112)
+## [v0.1.11] — 2026-06-05 (released)
 
 ### 추가 (Added)
+- **NAS vault type 지원** (ADR-0044) — `SUPPORTED_VAULT_TYPES` 에 `nas` 추가, vault type별 필수 옵션 검증, rclone rc port skip. Google Drive 외 SFTP 기반 NAS vault 운영 가능 (#117, #125)
+- **install.sh rclone SFTP remote 생성** — `install.sh setup` 시 rclone SFTP remote 자동 생성, NAS vault 사전 조건 충족 (#126)
+- **mount_diff.py path 기반 diff** — NAS vault (path 기반 변경 감지)를 위한 `compute_path_diff` 추가. Drive vault (fileId 기반)와 공존 (#129)
+- **NAS vault mount 템플릿 분기** — systemd `mount@.service` 템플릿이 vault type에 따라 rclone mount 옵션 분기. NAS vault는 `--sftp` + `--vfs-cache-mode full` (#130)
+- **NAS vault 저장 계층 ADR** — NAS vault 데이터 저장 위치·권한·백업 구조를 ADR-0044로 정본화 (#123, #131)
 - **릴리스 문서 preflight** — `release.sh` 가 merge 전 `_system/VERSION`·`docs/changelog.md`·`README.md` 배지를 검증(HARD), roadmap/HISTORY 경고(WARN). 릴리스 문서 체크리스트를 `docs/agent_dev_guide.md §Step 5` 에 정본화 (issue #114)
+
+### 수정 (Fixed)
+- **NAS vault vfs_refresh 및 OAuth 검사 건너뛰기** — NAS vault (SFTP)에서 불필요한 `vfs/refresh` 호출 및 OAuth token 검사 시  `rc` port 미사용으로 인한 오류 방지 (#119, #127)
+- **release.sh push refspec** — 버전 브랜치(`refs/heads/vX.Y.Z`)와 annotated 태그(`refs/tags/vX.Y.Z`) 동일명으로 인한 `git push origin main vX.Y.Z` 모호성 → 명시적 refspec 분리 (issue #112)
+
+### 변경 (Changed)
+- `_system/VERSION` — `0.1.10` → `0.1.11`
 
 ---
 
