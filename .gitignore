@@ -41,4 +41,5 @@ docs/superpowers/
 .agents/
 .claude/
 .hermes/
+.opencode/
 skills-lock.json

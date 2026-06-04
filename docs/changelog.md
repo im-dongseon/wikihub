@@ -6,7 +6,26 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.10] — 2026-05-29 (canary)
+## [v0.1.11] — 2026-06-05 (released)
+
+### 추가 (Added)
+- **NAS vault type 지원** (ADR-0044) — `SUPPORTED_VAULT_TYPES` 에 `nas` 추가, vault type별 필수 옵션 검증, rclone rc port skip. Google Drive 외 SFTP 기반 NAS vault 운영 가능 (#117, #125)
+- **install.sh rclone SFTP remote 생성** — `install.sh setup` 시 rclone SFTP remote 자동 생성, NAS vault 사전 조건 충족 (#126)
+- **mount_diff.py path 기반 diff** — NAS vault (path 기반 변경 감지)를 위한 `compute_path_diff` 추가. Drive vault (fileId 기반)와 공존 (#129)
+- **NAS vault mount 템플릿 분기** — systemd `mount@.service` 템플릿이 vault type에 따라 rclone mount 옵션 분기. NAS vault는 `--sftp` + `--vfs-cache-mode full` (#130)
+- **NAS vault 저장 계층 ADR** — NAS vault 데이터 저장 위치·권한·백업 구조를 ADR-0044로 정본화 (#123, #131)
+- **릴리스 문서 preflight** — `release.sh` 가 merge 전 `_system/VERSION`·`docs/changelog.md`·`README.md` 배지를 검증(HARD), roadmap/HISTORY 경고(WARN). 릴리스 문서 체크리스트를 `docs/agent_dev_guide.md §Step 5` 에 정본화 (issue #114)
+
+### 수정 (Fixed)
+- **NAS vault vfs_refresh 및 OAuth 검사 건너뛰기** — NAS vault (SFTP)에서 불필요한 `vfs/refresh` 호출 및 OAuth token 검사 시  `rc` port 미사용으로 인한 오류 방지 (#119, #127)
+- **release.sh push refspec** — 버전 브랜치(`refs/heads/vX.Y.Z`)와 annotated 태그(`refs/tags/vX.Y.Z`) 동일명으로 인한 `git push origin main vX.Y.Z` 모호성 → 명시적 refspec 분리 (issue #112)
+
+### 변경 (Changed)
+- `_system/VERSION` — `0.1.10` → `0.1.11`
+
+---
+
+## [v0.1.10] — 2026-05-30 (released)
 
 ### 추가 (Added)
 - **MCP server** (ADR-0043) — 외부 MCP-호환 client (Claude Desktop / Cline / IDE plugin) 가 SSH 로 wikihub VM 에 원격 spawn → wiki 데이터 read-only query.
@@ -16,8 +35,11 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 - **alias-aware link resolver** (ADR-0042) — `[[mini-max]]` 가 `aliases: [MiniMax, mini-max, minimax]` 보유한 `entities/MiniMax.md` 로 자동 resolve. lint Step 1.5 alias index build (per-cycle, in-memory).
 - **deployment helpers** — `promote_canary.sh` + `release.sh` (AGENTS.md §3 Step 5 자동화).
 - **acceptance gate 결과 기록** — update_mode V3·V4·V5a/b·V6·V7·V8·V9a·V10·V12 multipass VM 검증 + design.md §9.2.1.
+- **웹 UI 도입 검토 가이드** — `docs/web-ui-setup.md` (hermes-webui + Cloudflare Tunnel, Telegram 대체 — issue #107). 외부 컴포넌트 셋업·보안·걷어내기 절차 + AionUi 비교.
 
 ### 수정 (Fixed)
+- **curl-pipe 업데이트 sidecar fix** — `_write_installed_versions_sidecar` 가 cwd 미고정으로 `python3 -m scripts.lib.sidecar` 호출 → curl-pipe 업데이트(cwd=$HOME)에서 `ModuleNotFoundError` 로 Step 4.5 abort. `(cd "$WIKIHUB_SRC" && …)` 로 해소 (issue #108 — curl-pipe 업데이트 경로 blocking)
+- **sidecar uv 버전 탐지** — `INSTALLED_VERSIONS.json` 의 uv 필드 빈 문자열 → rclone/yq 와 동일하게 `uv --version` 직접 파싱 (issue #109)
 - **install hardening**:
   - `_step2_update` self-restart 후 `current_version` export 보존 (downgrade warn 미발화 silent fail fix, issue #86)
   - ingest Step 0 per-vault flock — Hermes 채팅 직접 호출 race 차단 (issue #61)
@@ -27,6 +49,8 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 - 기타 install.sh / lint / graphify timeout / yaml schema migration 다수 (PR #62~#94, #100/#101)
 
 ### 변경 (Changed)
+- **systemd TimeoutStartSec yaml-driven** — lint/ingest 각각 `lint_timeout_start_sec` / `ingest_timeout_start_sec` override + `agent.timeout_sec` fallback (issue #104)
+- **문서 정리** — `docs/reviews/`·`docs/reports/` 의 v0.1.8/v018-fix 산출물을 `features/archive/` 로 이관 (docs/ 는 영속 문서만 잔존)
 - `_system/VERSION` — `0.1.9` → `0.1.10`
 
 ---

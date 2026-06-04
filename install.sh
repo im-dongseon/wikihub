@@ -663,6 +663,78 @@ _enforce_rclone_conf_perms() {
     fi
 }
 
+# NAS vault용 rclone SFTP remote 자동 생성 (features/20260602_nas_vault · issue #118).
+# wikihub.yaml 의 vaults[*].type=="nas" 항목을 감지해 rclone config create 실행.
+# PyYAML 은 venv (Step 3) 생성 후 가용 — 미가용 시 bash fallback 없이 skip + 수동 안내.
+_setup_nas_vault_remotes() {
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
+    [[ -f "$yaml" ]] || { info "wikihub.yaml 미존재 — NAS vault rclone remote 생성 skip"; return 0; }
+
+    if [[ ! -x "$VENV_PATH/bin/python3" ]]; then
+        warn "Python venv 미가용 — NAS vault rclone remote 생성을 수동 실행: rclone config create nas_<id> sftp host=... user=... key_file=..."
+        return 0
+    fi
+
+    local nas_vaults
+    # ▶ pipe(|) delimiter: sftp_host/user 등에 pipe 포함 시 파싱 깨짐. 실용적 위험 낮음
+    # (호스트명·사용자명에 pipe 불가). JSON-line 으로 변경 시 파이썬 json.dumps + bash readarray 필요.
+    nas_vaults="$("$VENV_PATH/bin/python3" - "$yaml" <<'PYEOF'
+import sys, yaml
+try:
+    cfg = yaml.safe_load(open(sys.argv[1])) or {}
+except Exception as e:
+    print(f"yaml 파싱 실패: {e}", file=sys.stderr)
+    sys.exit(2)
+for v in cfg.get("vaults", []):
+    if v.get("type") != "nas":
+        continue
+    if v.get("enabled") is False:
+        continue
+    opts = v.get("options") or {}
+    vid = v.get("id", "")
+    remote = opts.get("rclone_remote_name", f"nas_{vid}")
+    host = opts.get("sftp_host", "")
+    port = opts.get("sftp_port", 22)
+    user = opts.get("sftp_user", "")
+    key  = opts.get("ssh_key_path", "")   # 빈 문자열 == password auth fallback
+    if not host or not user:
+        print(f"NAS vault '{vid}': sftp_host 또는 sftp_user 미설정 — skip", file=sys.stderr)
+        continue
+    print(f"{remote}|{host}|{port}|{user}|{key}")
+PYEOF
+)" || true   # exit 2 (yaml 파싱 실패) → set -e 회피용 || true. stderr 는 그대로 통과.
+
+    if [[ -z "$nas_vaults" ]]; then
+        info "NAS vault 없음 — rclone SFTP remote 생성 skip"
+        return 0
+    fi
+
+    local remote host port user key
+    while IFS='|' read -r remote host port user key; do
+        [[ -z "$remote" ]] && continue
+        if rclone config show "$remote" >/dev/null 2>&1; then
+            info "rclone remote '$remote' 이미 존재 — skip"
+            continue
+        fi
+        info "rclone SFTP remote 생성: $remote (host=$host, user=$user)"
+        local rclone_conf="${RCLONE_CONFIG:-${HOME}/.config/rclone/rclone.conf}"
+        # key_file 은 ssh_key_path 가 있을 때만 전달 (빈 문자열 → rclone 이 password prompt)
+        local key_args=()
+        [[ -n "$key" ]] && key_args=(key_file "$key")
+        rclone config create "$remote" sftp \
+            --config "$rclone_conf" \
+            host "$host" \
+            port "$port" \
+            user "$user" \
+            "${key_args[@]}" \
+            || { err "rclone SFTP remote '$remote' 생성 실패 — 다른 vault 계속 진행"; continue; }
+        ok "rclone SFTP remote '$remote' 생성 완료"
+    done <<<"$nas_vaults"
+
+    # rclone.conf 재검증 (새 remote 생성 후 권한 보장)
+    _enforce_rclone_conf_perms
+}
+
 # Migrated to Python (issue-19): scripts/lib/sidecar.py.
 # Atomic write invariant (ADR-0031 §Decision A): tmpfile + fsync + os.replace,
 # matching state.py._atomic_write_json pattern.
@@ -679,6 +751,7 @@ _step45_rclone() {
     info "rclone + graphify + yq 설치 (fresh/update 공통)"
     _install_rclone
     _enforce_rclone_conf_perms
+    _setup_nas_vault_remotes
     _install_graphify
     _install_yq    # lint.md/graphify.md 의 runtime yq 호출 의존
     _write_installed_versions_sidecar
