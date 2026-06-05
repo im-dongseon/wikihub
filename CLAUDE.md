@@ -23,4 +23,4 @@
 ## GitHub 이슈 작성
 
 - Agent ID: `CLAUDE-A`
-- 기타 형식은 [AGENTS.md §9](AGENTS.md#9-github-이슈-작성-컨벤션-에이전트-공통) 및 [docs/issue-authoring-guide.md](docs/issue-authoring-guide.md) 참조
+- 기타 형식은 [AGENTS.md §9](AGENTS.md#9-github-이슈-작성) 및 [docs/issue-authoring-guide.md](docs/issue-authoring-guide.md) 참조

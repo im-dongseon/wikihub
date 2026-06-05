@@ -36,7 +36,7 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 ## 5단계 Feature-based Workflow
 
-> **플로우 개요**: [AGENTS.md §3 (기능 기반 개발 플로우)](../AGENTS.md#3-기능-기반-개발-플로우-feature-based-workflow) mermaid 다이어그램 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
+> **플로우 개요**: [AGENTS.md §3 (5-step feature workflow)](../AGENTS.md#3-5-step-feature-workflow) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
 
 > **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/v0.X.Y`, main 직접 분기·commit 금지. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
 
@@ -195,7 +195,7 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 생략 결정은 Step 1 plan.md에 미리 선언한다. 생략 시 HISTORY.md 항목 추가도 함께 생략한다.
 
-> **5 액션 git workflow**: [AGENTS.md §3 Step 5](../AGENTS.md#step-5-deployment-배포--조건부-생략-가능)의 "수행 시 git 액션 — 5 단계" 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 절차 요약만 제공한다.
+> **5 액션 git workflow**: [AGENTS.md §3 Step 5 (Deploy)](../AGENTS.md#3-5-step-feature-workflow) 의 squash → v0.X.Y → canary → release 시 main merge + tag 행 참조. 정본은 AGENTS.md이며, 본 문서는 실무 절차 요약만 제공한다.
 
 > 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치 누적 commit + OCI canary 검증 통과 후.
 
@@ -250,7 +250,7 @@ journalctl --user -u wikihub-lint.service -n 50
 systemctl --user list-timers
 ```
 
-> **Tag 운영 의미**: [AGENTS.md §8 (버전 관리 및 패치 정책 - Tag 운영 의미)](../AGENTS.md#tag-운영-의미) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 운영 시 필요한 canary tag 명령만 기술한다.
+> **Tag 운영 의미**: [AGENTS.md §5 (Tag 운영 의미)](../AGENTS.md#5-tag-운영-의미--main-직접-commit-금지) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 운영 시 필요한 canary tag 명령만 기술한다.
 
 > install.sh `_step2_update` 는 `git fetch origin --tags --force` 로 force-updated lightweight tag 자동 수신 (ADR-0030 의 `_resolve_ref` path 2 + `--branch canary` 호출과 정합).
 

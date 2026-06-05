@@ -1,0 +1,92 @@
+{
+  // ============================================================
+  // wikihub — OpenCode config
+  // Place this file at your PROJECT ROOT as opencode.json
+  // Reviewers live in .opencode/agent/review-correctness.md
+  //                and .opencode/agent/review-quality.md
+  // OpenCode supports JSONC (comments + trailing commas). Restart after edits.
+  // ============================================================
+  "$schema": "https://opencode.ai/config.json",
+
+  // ---- Plugins -------------------------------------------------------------
+  // NOTE: verify exact package names against each plugin's README before relying on them.
+  "plugin": [
+    // DCP — prunes stale / duplicate context (post-hoc token saving).
+    // Verified latest: 3.1.12 (npm). Pin as "@tarquinen/opencode-dcp@3.1.12" for reproducibility.
+    // Depends on @opencode-ai/sdk ^1.4.3 — make sure your opencode is recent enough.
+    "@tarquinen/opencode-dcp",
+
+    // Rehydra — anonymizes .env secrets before they reach the model,
+    // restores the real value locally right before a tool runs.
+    // This is what keeps your ingest/lint keys out of M3 Free's training data.
+    "@rehydra/opencode"
+  ],
+
+  // ---- MCP servers ---------------------------------------------------------
+  "mcp": {
+    // Context7 — fresh, version-correct library docs so the agent stops guessing APIs.
+    // Confirm the exact command/package against Context7's current docs.
+    "context7": {
+      "type": "local",
+      "command": ["npx", "-y", "@upstash/context7-mcp"]
+    }
+  },
+
+  // ---- Agents --------------------------------------------------------------
+  // Model id formats:
+  //   OpenCode Go  -> opencode-go/<model-id>   (e.g. opencode-go/kimi-k2.6)
+  //   OpenCode Zen -> opencode/<model-id>      (e.g. opencode/minimax-m3-free)
+  // Run /models in the TUI to confirm the exact slugs (glm-5.1, qwen3.7-max, etc.).
+  "agent": {
+
+    // PLAN — frontier reasoning + long context. Produces an EXECUTABLE SPEC.
+    "plan": {
+      "model": "opencode-go/glm-5.1",
+      "tools": { "write": false, "edit": false },
+      "prompt": "You are the planning agent. Produce an EXECUTABLE SPEC, never a high-level sketch. The builder must be able to implement with almost no guessing.\n\nEvery plan MUST include:\n1. Files to change — per file: create / modify / delete.\n2. Signatures — names, args, return types of new or changed functions and classes.\n3. Interface contracts — inputs/outputs, data flow, dependencies.\n4. Edge cases & error handling — empty input, failures, boundary values.\n5. Completion criteria — which tests/checks must pass to call it done. Include the test code itself in the implementation scope: state which tests build must write and what they must cover.\n6. Out of scope — what NOT to touch this round (prevents scope creep).\n7. Order & dependencies — what must come first.\n8. Difficulty tag — tag EACH task [easy] or [hard].\n\nMark a task [hard] if ANY of these apply: concurrency/async (race conditions, locks, parallelism); non-trivial algorithms or complexity-sensitive data structures; subtle state management (global state, cache invalidation, transaction boundaries); security-sensitive (auth, permissions, crypto, input validation); cross-file refactors touching shared interfaces; open-ended design trade-offs; wikihub core logic (graph query optimization, ingest pipeline integrity); hard-to-reproduce debugging; changes spanning multiple functions or modules (not a single file); external API or third-party integration; modifying existing behavior (not just adding new code); non-trivial error handling, retry, or rollback logic; data migration or schema change. Otherwise tag it [easy].\n\nWhen in doubt between [easy] and [hard], tag it [hard]. Borderline tasks go to the stronger model.\n\nAt the very end of every spec, output a one-line tally: \"Difficulty tally — easy: N, hard: M\" (counting the tasks above). This is for monitoring the easy/hard ratio over time.\n\nFor exploration / understanding / quick questions (where is X, what does Y do, how does Z work), do NOT plan — those belong to @research. Use this agent only to produce specs.\n\nDo not write or edit files. Output the spec only."
+    },
+
+    // RESEARCH — exploration, understanding, and analysis + markdown note-taking.
+    // Read + create-new-files only (no editing existing source). Keeps cheap, high-volume
+    // traffic off the expensive plan model. Same model as build, so switching does NOT
+    // break prompt cache. Swap to "opencode-go/mimo-v2.5" if preferred.
+    "research": {
+      "model": "opencode-go/deepseek-v4-flash",
+      "mode": "primary",
+      "tools": { "write": true, "edit": false },
+      "prompt": "You handle exploration, understanding, research, and analysis of the codebase: from quick lookups (where is X, what does Y do) through deeper analysis. On request, save your findings as a markdown note. Do NOT modify existing source code (code changes belong to build/plan) — you may only create new .md notes. If a task needs a deep architecture decision or an implementation spec, hand it to @plan. Be concise and direct."
+    },
+
+    // BUILD — implementation. Cheapest Go model = most quota headroom. Default for [easy] work.
+    // (MiniMax M3 Free was discontinued; M3 now lives on Go but burns ~22x more quota.)
+    // Text/code only — NO vision. Enable the observer below if you show images in-session.
+    // Alt swaps: "opencode-go/minimax-m3" (multimodal, pricier) | "opencode/minimax-m2.5-free" (free, trains on data).
+    "build": {
+      "model": "opencode-go/deepseek-v4-flash"
+    },
+
+    // BUILD-HARD — escalation target for chunks the plan tagged [hard].
+    // Invoke with @build-hard, OR switch build's model to this for the hard chunk.
+    "build-hard": {
+      "model": "opencode-go/kimi-k2.6",
+      "tools": { "write": true, "edit": true, "bash": true },
+      "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or refactor unrelated code."
+    }
+
+    // ----------------------------------------------------------------
+    // OBSERVER (read-only vision reader). NOW RELEVANT: build (DeepSeek V4 Flash) is
+    // text-only, so if you show images / screenshots / PDFs in the coding session,
+    // enable this. If wikihub handles images only in its own runtime pipeline
+    // (not in-session), you can leave it off.
+    // To enable, uncomment and set your Ollama vision model:
+    //
+    // ,"observer": {
+    //   "model": "ollama/gemma4:31b",
+    //   "mode": "subagent",
+    //   "temperature": 0.1,
+    //   "tools": { "write": false, "edit": false, "bash": false },
+    //   "prompt": "Read the given image/PDF/diagram and return a structured text description (UI elements, visible text, errors, diagram structure). Never modify files; return observations only."
+    // }
+    // ----------------------------------------------------------------
+  }
+}
