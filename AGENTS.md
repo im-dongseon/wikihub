@@ -40,7 +40,7 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. Claud
 
 ## 3. 5-step feature workflow
 
-**플로우**: Plan → Analysis & Design → Implementation → (Review) → (Deploy) → archive. Step 4·5 는 조건부 생략 가능 (생략 결정은 Step 1 plan.md 에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 자동 cleanup/bootstrap하므로 항상 최신 patch+1 상태를 유지한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-feature-based-workflow) 참조.
+**플로우**: Plan → Analysis & Design → Implementation → (Review) → (Deploy) → archive. Step 4·5 는 조건부 생략 가능 (생략 결정은 Step 1 plan.md 에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 cleanup 하므로, 다음 사이클 시작은 첫 feature PR 시 `github-dev-flow` Step 4 가 `scripts/bootstrap_version.sh` 를 자동 호출한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-feature-based-workflow) 참조.
 
 | Step | 산출물 | 진입 조건 | 종료 |
 |---|---|---|---|
@@ -68,10 +68,14 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. Claud
 | `latest` | lightweight, force-move | 가장 최근 release commit | production default |
 | `canary` | lightweight, force-update | 현재 버전 브랜치 HEAD | pre-production 검증 trace. `install.sh --branch canary`. **fetch 시 `--force` 필요** (git 2.20+) |
 
-Release 직후: `release.sh` 가 아래 작업을 자동 수행.
+Release 직후: `release.sh` 가 cleanup 만 자동 수행.
 - `refs/heads/v0.X.Y` (version branch) + `refs/tags/canary` **삭제**
-- `main HEAD` 에서 최신 tag patch+1 로 **새 버전 브랜치 + canary tag 생성**
 - `main HEAD = vX.Y.Z = latest` 3 ref 동일 commit (immutable record)
+- **새 버전 브랜치/canary 자동 생성 X** — bootstrap 은 on-demand
+
+**다음 사이클 시작** (release 직후 첫 feature 작업 시):
+- `github-dev-flow` Step 4 가 `origin/{base_branch}` 부재를 감지 → `scripts/bootstrap_version.sh` 자동 호출
+- 수동 호출: `bash scripts/bootstrap_version.sh` (release 후 바로 다음 사이클 시작 시)
 
 **hotfix 필요 시**: `refs/tags/vX.Y.Z` (annotated, main HEAD) 에서 임시 hotfix 브랜치 분기. 5-액션 git workflow 전체: [agent_dev_guide §Step 5](docs/agent_dev_guide.md#step-5-deployment-배포--조건부-생략-가능).
 

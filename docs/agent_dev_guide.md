@@ -199,10 +199,37 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 > 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치 누적 commit + OCI canary 검증 통과 후.
 
-**release 후 ref 상태 (release.sh 자동 처리)**:
+**release 후 ref 상태 (release.sh 자동 처리 — cleanup only)**:
 - `main HEAD = refs/tags/vX.Y.Z = refs/tags/latest` (= 동일 merge commit M)
 - `refs/heads/v0.X.Y` + `refs/tags/canary` **삭제**
-- `main HEAD` 에서 최신 tag patch+1 로 **새 버전 브랜치 + canary tag 생성**
+- **새 버전 브랜치/canary 자동 생성 X** — bootstrap 은 on-demand (다음 절 참조)
+
+### 다음 사이클 시작 — `bootstrap_version.sh` (v0.1.13+ 정책)
+
+release 직후 main HEAD = vX.Y.Z = latest 상태. 다음 feature PR 작업이 들어오면 `github-dev-flow` Step 4 가 `origin/{base_branch}` 부재를 감지하고 `scripts/bootstrap_version.sh` 를 자동 호출한다. 수동 호출도 가능 (`bash scripts/bootstrap_version.sh`).
+
+**bootstrap 절차 (수동 호출 시)**:
+```bash
+# main 에서 실행 (스크립트 내부에서 강제 검증)
+git checkout main
+bash scripts/bootstrap_version.sh
+```
+
+**bootstrap 수행 작업**:
+1. main HEAD 의 `_system/VERSION` → patch+1 bump
+2. `docs/changelog.md` 에 `[vX.Y.Z] — YYYY-MM-DD (canary)` entry 추가
+3. `README.md` Status 배지 → `vX.Y.Z canary-orange` 로 갱신
+4. 변경분 commit `chore(bootstrap): vX.Y.Z 시작`
+5. main HEAD 에서 `vX.Y.Z` 브랜치 생성 + push
+6. canary tag → `vX.Y.Z` HEAD (force-push)
+7. `vX.Y.Z` 브랜치로 checkout
+
+**bootstrap 후 ref 상태**:
+- `main HEAD = refs/tags/vX.Y.Z` (방금 released) — 변경 없음
+- `refs/heads/vX.Y.Z` 신규 (main HEAD + 1 commit)
+- `refs/tags/canary` → `vX.Y.Z` HEAD
+
+**Idempotency guard**: bootstrap_version.sh 는 `vX.Y.Z` 브랜치 (local 또는 origin) 가 이미 존재하면 `die` — 중복 실행 방지. 다음 사이클을 위해 추가 작업이 필요한 경우는 manual 개입.
 
 **canary 사고 시 rollback**:
 ```bash
