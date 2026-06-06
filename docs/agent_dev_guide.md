@@ -38,7 +38,7 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 > **플로우 개요**: [AGENTS.md §3 (5-step feature workflow)](../AGENTS.md#3-5-step-feature-workflow) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
 
-> **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/v0.X.Y`, main 직접 분기·commit 금지. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
+> **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/<현재 버전 브랜치>` (예: `origin/v0.1.12`), main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 자동 cleanup(삭제) + bootstrap(새 분기)하므로 항상 최신 patch+1 상태. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
 
 > **Step 4(검토)와 Step 5(배포)는 조건부 생략 가능**합니다. 생략 결정은 Step 1 `plan.md`에 미리 선언하고 사유를 기록합니다 — 사후 누락이 아니라 계획상의 결정으로 추적합니다.
 
@@ -199,10 +199,10 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 
 > 액션 (1)~(3) 은 매 feature 마다 반복. 액션 (4)~(5) 는 **release 시점에만 1 회** — 버전 브랜치 누적 commit + OCI canary 검증 통과 후.
 
-**release 후 ref 상태**:
+**release 후 ref 상태 (release.sh 자동 처리)**:
 - `main HEAD = refs/tags/vX.Y.Z = refs/tags/latest` (= 동일 merge commit M)
-- `refs/heads/v0.X.Y` = M.parents[1] (release 직전 commit, **hotfix base 후보로 보존**)
-- `refs/tags/canary` = release 직전 commit (다음 minor 첫 squash 까지 OCI trace 보존)
+- `refs/heads/v0.X.Y` + `refs/tags/canary` **삭제**
+- `main HEAD` 에서 최신 tag patch+1 로 **새 버전 브랜치 + canary tag 생성**
 
 **canary 사고 시 rollback**:
 ```bash
@@ -211,7 +211,7 @@ git tag -f canary <prev_sha>
 git push origin canary --force
 ```
 
-**hotfix 흐름**: production critical bug 발견 시 → 현 minor 의 버전 브랜치에서 hotfix feature 진행 → 다음 minor 의 첫 feature 로 흡수. patch 자릿수 도입 (v0.X.Y.Z) 은 별도 결정.
+**hotfix 흐름**: production critical bug 발견 시 → `refs/tags/vX.Y.Z` (annotated, main HEAD) 에서 임시 hotfix 브랜치 분기 → hotfix feature 진행 → 다음 minor 의 첫 feature 로 흡수. patch 자릿수 도입 (v0.X.Y.Z) 은 별도 결정.
 
 **수행 시 HISTORY.md 항목 형식**:
 ```markdown
@@ -368,14 +368,14 @@ gh copilot suggest -t shell "review_context.md 기반으로 코드 리뷰해줘"
 > - 서브에이전트 리뷰를 자동화할 때 (Claude Agent tool 활용 시)
 
 ### 기본 개념
-feature 브랜치를 별도 디렉토리로 체크아웃해 브랜치 전환 없이 여러 작업을 동시에 진행한다. **분기 base 는 항상 타겟 버전 브랜치(`origin/v0.X.Y`)** — main 직접 분기 금지.
+feature 브랜치를 별도 디렉토리로 체크아웃해 브랜치 전환 없이 여러 작업을 동시에 진행한다. **분기 base 는 항상 타겟 버전 브랜치(`origin/<현재 버전 브랜치>`)** — main 직접 분기 금지.
 
 ```bash
 # 1. 최신 버전 브랜치 fetch (필수 — stale base 면 다른 feature squash 와 충돌)
 git fetch origin
 
-# 2. feature worktree 생성 — base 는 origin/v0.X.Y
-git worktree add ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] -b feature/[기능개발주제명] origin/v0.X.Y
+# 2. feature worktree 생성 — base 는 origin/<현재 버전 브랜치>
+git worktree add ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] -b feature/[기능개발주제명] origin/<현재 버전 브랜치>
 
 # 3. Step 5 액션 (3) — squash merge 직후 제거
 git -C ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] status --porcelain   # 출력이 비어있어야 정상
@@ -405,7 +405,7 @@ Agent tool의 `isolation: "worktree"` 옵션을 사용하면 서브에이전트�
 → Agent tool이 임시 worktree 생성 → 리뷰 → 메인 컨텍스트로 결과 반환
 ```
 
-> **주의**: 본 §"분기 base 는 origin/v0.X.Y" 규칙은 **영구 feature 브랜치에만** 적용. Agent tool 임시 worktree 는 일회용이라 규칙 외.
+> **주의**: 본 §"분기 base 는 origin/현재버전브랜치" 규칙은 **영구 feature 브랜치에만** 적용. Agent tool 임시 worktree 는 일회용이라 규칙 외.
 
 수동(cmux) 방식과 자동(Agent tool) 방식 모두 worktree와 자연스럽게 연결된다.
 
@@ -414,9 +414,9 @@ Agent tool의 `isolation: "worktree"` 옵션을 사용하면 서브에이전트�
 Worktree 없이 진행할 때는 feature 브랜치에서 Step 1~4를 진행하고 Step 5에서 squash merge → 버전 브랜치로 통합한다.
 
 ```bash
-# 분기 base = origin/v0.X.Y
+# 분기 base = origin/<현재 버전 브랜치>
 git fetch origin
-git checkout -b feature/[기능개발주제명] origin/v0.X.Y
+git checkout -b feature/[기능개발주제명] origin/<현재 버전 브랜치>
 # Step 1~4 진행 + push
 git push origin feature/[기능개발주제명]
 # Step 5 액션 (1)~(3) 으로 squash merge → 버전 브랜치 (위 §"5 액션 git workflow" 참조)

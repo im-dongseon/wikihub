@@ -182,6 +182,53 @@ run_or_dry git push origin "refs/tags/$VERSION_TAG"
 run_or_dry git push origin "refs/tags/latest" --force 2>/dev/null || \
     warn "Latest tag force-push failed. Check GitHub tag protection rules."
 
+# --- Post-release: cleanup version branch + canary, bootstrap new version ---
+info "=== Post-release: Cleanup version branch + canary ==="
+
+# Delete local version branch
+run_or_dry git branch -D "$VERSION_BRANCH" 2>/dev/null || warn "Local branch '$VERSION_BRANCH' not found."
+
+# Delete remote version branch
+run_or_dry git push origin --delete "refs/heads/$VERSION_BRANCH" 2>/dev/null || \
+    warn "Remote version branch 'refs/heads/$VERSION_BRANCH' not found (already deleted)."
+
+# Delete remote canary tag
+run_or_dry git push origin --delete "refs/tags/canary" 2>/dev/null || \
+    warn "Remote canary tag not found (already deleted)."
+
+# Delete local canary tag
+run_or_dry git tag -d canary 2>/dev/null || true
+
+# Ensure local tags are current (fresh clone / stale local guard)
+run_or_dry git fetch --tags origin
+
+# Calculate next version: latest annotated tag patch+1
+LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+if [[ -z "$LATEST_TAG" ]]; then
+    die "No version tag found to determine next version."
+fi
+NEXT_VERSION="$(echo "$LATEST_TAG" | awk -F. '{print $1"."$2"."($3+1)}')"
+
+info "Next version branch: $NEXT_VERSION (from $LATEST_TAG patch+1)"
+
+# Create new version branch from main HEAD + canary tag
+info "=== Post-release: Bootstrap $NEXT_VERSION + canary ==="
+if ! git rev-parse --verify "refs/heads/$NEXT_VERSION" 2>/dev/null; then
+    run_or_dry git branch "$NEXT_VERSION"
+else
+    warn "Branch '$NEXT_VERSION' already exists locally — skipping creation."
+fi
+run_or_dry git tag -f canary "$NEXT_VERSION"
+run_or_dry git push origin "$NEXT_VERSION" 2>/dev/null || \
+    warn "Branch '$NEXT_VERSION' already on remote — skipping push."
+
+# Force-push canary (lightweight, always force-refresh)
+run_or_dry git push origin refs/tags/canary --force 2>/dev/null || \
+    die "Canary tag force-push failed."
+
+# Switch to new version branch for development continuity
+run_or_dry git checkout "$NEXT_VERSION"
+
 # --- Post-release state display ---
 info "=== release.sh complete ==="
 echo ""
@@ -190,8 +237,10 @@ echo "  Merge commit : $MERGE_SHA"
 echo "  Description  : $TAG_MESSAGE"
 echo ""
 echo "Ref state after release:"
-echo "  main HEAD       = refs/tags/$VERSION_TAG = refs/tags/latest = $MERGE_SHA"
-echo "  $VERSION_BRANCH = $(git rev-parse "refs/heads/$VERSION_BRANCH" 2>/dev/null || echo 'N/A') (previous HEAD, preserved)"
-echo "  canary tag      = previous canary target (preserved until next squash)"
+echo "  main HEAD           = refs/tags/$VERSION_TAG = refs/tags/latest = $MERGE_SHA"
+echo "  (deleted)           = refs/heads/$VERSION_BRANCH"
+echo "  (deleted)           = refs/tags/canary (old)"
+echo "  New version branch  = refs/heads/$NEXT_VERSION (from main HEAD)"
+echo "  New canary tag      = refs/tags/canary → $NEXT_VERSION HEAD"
 echo ""
 echo "Next step: Notify operators to run 'install.sh --branch latest'"

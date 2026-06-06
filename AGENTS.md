@@ -40,7 +40,7 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. Claud
 
 ## 3. 5-step feature workflow
 
-**플로우**: Plan → Analysis & Design → Implementation → (Review) → (Deploy) → archive. Step 4·5 는 조건부 생략 가능 (생략 결정은 Step 1 plan.md 에 사전 선언). 분기 base = **`origin/v0.X.Y`** — main 직접 분기·commit 금지. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-feature-based-workflow) 참조.
+**플로우**: Plan → Analysis & Design → Implementation → (Review) → (Deploy) → archive. Step 4·5 는 조건부 생략 가능 (생략 결정은 Step 1 plan.md 에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 자동 cleanup/bootstrap하므로 항상 최신 patch+1 상태를 유지한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-feature-based-workflow) 참조.
 
 | Step | 산출물 | 진입 조건 | 종료 |
 |---|---|---|---|
@@ -66,9 +66,14 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. Claud
 |---|---|---|---|
 | `vX.Y.Z` | annotated, **immutable** | main 의 merge commit (M) | release 영구 record, rollback target. force-push 금지 (GitHub Ruleset) |
 | `latest` | lightweight, force-move | 가장 최근 release commit | production default |
-| `canary` | lightweight, force-update | 버전 브랜치 HEAD | pre-production 검증 trace. `install.sh --branch canary`. **fetch 시 `--force` 필요** (git 2.20+) |
+| `canary` | lightweight, force-update | 현재 버전 브랜치 HEAD | pre-production 검증 trace. `install.sh --branch canary`. **fetch 시 `--force` 필요** (git 2.20+) |
 
-Release 직후: `main HEAD = vX.Y.Z = latest` 3 ref 동일 commit. `refs/heads/v0.X.Y` 와 `refs/tags/canary` 는 release 직전 commit 보존 (hotfix base + 다음 minor 첫 squash 까지 OCI trace). 5-액션 git workflow 전체: [agent_dev_guide §Step 5](docs/agent_dev_guide.md#step-5-deployment-배포--조건부-생략-가능).
+Release 직후: `release.sh` 가 아래 작업을 자동 수행.
+- `refs/heads/v0.X.Y` (version branch) + `refs/tags/canary` **삭제**
+- `main HEAD` 에서 최신 tag patch+1 로 **새 버전 브랜치 + canary tag 생성**
+- `main HEAD = vX.Y.Z = latest` 3 ref 동일 commit (immutable record)
+
+**hotfix 필요 시**: `refs/tags/vX.Y.Z` (annotated, main HEAD) 에서 임시 hotfix 브랜치 분기. 5-액션 git workflow 전체: [agent_dev_guide §Step 5](docs/agent_dev_guide.md#step-5-deployment-배포--조건부-생략-가능).
 
 ## 6. Release 시 동시 갱신 문서 (issue #114, `scripts/release.sh` preflight)
 
@@ -93,7 +98,7 @@ HARD 3종 미충족 시 `release.sh` 가 비가역 merge 전에 `die` (escape ha
 
 ## 8. Git Worktree
 
-병렬 작업(서브에이전트 / cmux 패널) 시 필수. feature 분기 base = `origin/v0.X.Y`. 패턴 + 명령: [agent_dev_guide §Worktree](docs/agent_dev_guide.md#git-worktree-활용).
+병렬 작업(서브에이전트 / cmux 패널) 시 필수. feature 분기 base = `origin/<현재 버전 브랜치>`. 패턴 + 명령: [agent_dev_guide §Worktree](docs/agent_dev_guide.md#git-worktree-활용).
 
 ## 9. GitHub 이슈 작성
 
