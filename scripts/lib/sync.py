@@ -6,10 +6,18 @@
 3. compute_diff(listing, file_map)       → DiffResult (created/modified/renamed/deleted)
 4. false-deleted 가드 — listing 0건 또는 delete_ratio > threshold 면 Retryable
 5. for each entry:
-     - created/modified: mount FS open + extraction → wiki page atomic write
+     - created/modified: mount FS open + extraction → wiki page atomic write + file_map mutation
      - renamed: wiki page mv + file_map source_relpath 갱신
      - deleted: wiki page unlink + file_map entry 제거
-6. file_map 즉시 commit (per-entry) — 사이클 중단 시 N-1 commit 보존
+6. file_map end-of-cycle batch commit (issue #133) — in-memory mutation 후
+   has_changes=True 일 때만 사이클 종료 시점에 단일 fsync. wiki page 는
+   entry 별 atomic write 로 보존되며 file_map 누락 시 다음 cycle 의 diff 가
+   lsjson 비교로 동일 entry 를 created 로 재분류하므로 (mount_diff.py:
+   prev=None 분기, file_map entry 부재 케이스 — modified 는 prev_mtime
+   불일치 케이스만 해당) per-entry 모델의 N-1 commit 보존과 동등한
+   crash safety 보장. 변경 0건 cycle 은 file_map.json fsync 0회.
+   (last_sync.json 은 no-change cycle 에도 매번 fsync 1회 — 사이클 성공
+   신호용, 본 optim 의 범위 밖.)
 7. last_sync.json 저장
 8. stdout JSON emit (F2 ingest.md §Step 2 contract)
 """
@@ -288,7 +296,6 @@ def _handle_create_or_modify(
     vault_local_path: Path,
     instance_root: Path,
     file_map: dict,
-    state_dir: Path,
     started_iso: str,
     max_file_size_mb: int | None,
     changed_out: list[ChangedFile],
@@ -342,7 +349,7 @@ def _handle_create_or_modify(
         source_mtime=entry.mtime,
         bytes_written=bytes_written,
     ))
-    save_file_map(state_dir, file_map)
+    # issue #133: file_map 저장은 end-of-cycle batch 로 이동 (per-entry save 제거).
 
 
 def _handle_rename(
@@ -352,7 +359,6 @@ def _handle_rename(
     vault_local_path: Path,
     instance_root: Path,
     file_map: dict,
-    state_dir: Path,
     started_iso: str,
     max_file_size_mb: int | None,
     changed_out: list[ChangedFile],
@@ -382,7 +388,6 @@ def _handle_rename(
         vault_local_path=vault_local_path,
         instance_root=instance_root,
         file_map=file_map,
-        state_dir=state_dir,
         started_iso=started_iso,
         max_file_size_mb=max_file_size_mb,
         changed_out=changed_out,
@@ -402,7 +407,6 @@ def _handle_delete(
     *,
     file_map: dict,
     instance_root: Path,
-    state_dir: Path,
     deleted_out: list[str],
 ) -> None:
     """deleted — wiki page unlink + file_map entry 제거.
@@ -418,7 +422,7 @@ def _handle_delete(
         (instance_root / wiki_rel).unlink(missing_ok=True)
     deleted_out.append(str(prev.get("source_relpath", entry.source_id)))
     del file_map["files"][entry.source_id]
-    save_file_map(state_dir, file_map)
+    # issue #133: file_map 저장은 end-of-cycle batch 로 이동 (per-entry save 제거).
     log.info("delete: id=%s wiki=%s", entry.source_id, wiki_rel)
 
 
@@ -505,7 +509,6 @@ def sync(
                     entry,
                     file_map=file_map,
                     instance_root=instance_root,
-                    state_dir=state_dir,
                     deleted_out=deleted,
                 )
             elif entry.operation == "renamed":
@@ -515,7 +518,6 @@ def sync(
                     vault_local_path=vault_cfg.local_path,
                     instance_root=instance_root,
                     file_map=file_map,
-                    state_dir=state_dir,
                     started_iso=started_iso,
                     max_file_size_mb=max_file_size_mb,
                     changed_out=changed,
@@ -527,7 +529,6 @@ def sync(
                     vault_local_path=vault_cfg.local_path,
                     instance_root=instance_root,
                     file_map=file_map,
-                    state_dir=state_dir,
                     started_iso=started_iso,
                     max_file_size_mb=max_file_size_mb,
                     changed_out=changed,
@@ -564,6 +565,18 @@ def sync(
             log.exception("per-entry unexpected error: %s", e)
             error_count += 1
             continue
+
+    # issue #133: file_map end-of-cycle batch commit — fsync 1회로 N건 변경 직렬화.
+    # 변경이 없었던 cycle (has_changes=False) 은 file_map 자체가 동일 → save 생략.
+    # (단, vault_id bootstrap / file_map 신규 생성 케이스는 위 line 459-460 에서 in-memory
+    # mutation 만 발생하므로 disk write 가 필요한 변경으로 간주하지 않음.)
+    # 주의: per-entry 루프에서 generic `except Exception` (line ~564) 이 발생해도
+    # batch save 는 그대로 진행 → 이미 성공한 entry 들의 partial state 가 disk 에
+    # persist 됨. next cycle 의 idempotent re-detect (mount_diff 가 untracked entry
+    # 를 created 로 재분류) 로 보완. 이는 per-entry save 모델의 "각 entry 별 즉시
+    # commit" 과 미묘한 차이 — 의도된 동작이며, pre-existing pattern.
+    if changed or deleted:
+        save_file_map(state_dir, file_map)
 
     duration_ms = int((time.monotonic() - started) * 1000)
     finished_iso = utc_now_iso()

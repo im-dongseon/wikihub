@@ -12,7 +12,7 @@ import pytest
 
 from lib import sync
 from lib.config import VaultConfig
-from lib.exceptions import VaultSyncRetryable
+from lib.exceptions import VaultSyncFatal, VaultSyncFileFatal, VaultSyncRetryable
 from lib.sync import (
     SyncResult,
     _compute_wiki_path,
@@ -319,3 +319,337 @@ def test_sync_passes_rclone_remote_path_to_lsjson(
     result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
     assert captured == {"remote": "gdrive", "path": "wikihub"}
     assert result.has_changes is False
+
+
+# ---------------------------------------------------------------------------
+# issue #133 — file_map end-of-cycle batch commit (fsync 1회)
+# ---------------------------------------------------------------------------
+
+
+def test_sync_file_map_save_called_once_per_cycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #133: 사이클 내 N건 변경 → save_file_map 호출은 정확히 1회.
+
+    변경 0건 cycle 의 fsync 0회 동작은 test_sync_no_changes_does_not_save_file_map
+    (line 379) 에서 별도 검증. 본 테스트는 has_changes=True 케이스의 단일 호출만 다룬다.
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    # mount FS 에 3건 배치 (sync 가 read 할 수 있도록)
+    for name in ("a.md", "b.md", "c.md"):
+        (vault_local / name).write_text(f"content {name}")
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": f"id_{x}", "Path": f"{x}.md", "Name": f"{x}.md", "Size": 9,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False}
+        for x in ("a", "b", "c")
+    ])
+
+    # save_file_map 호출 횟수 카운트 — module-level spy
+    call_count = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    assert len(result.changed) == 3
+    # 핵심 assertion: 3건 변경 → fsync 1회
+    assert call_count["n"] == 1, (
+        f"save_file_map should be called exactly once per cycle "
+        f"(end-of-cycle batch), got {call_count['n']}"
+    )
+    # file_map.json 도 1회만 disk write 됨 — 최종 상태는 영속화됨
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert set(fm["files"].keys()) == {"id_a", "id_b", "id_c"}
+
+
+def test_sync_no_changes_does_not_save_file_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #133: 변경 0건 cycle 은 file_map.json disk write 생략 (fsync 0회).
+
+    기존 file_map 이 비어있지 않은 상태에서 listing 이 동일 → diff 0건.
+    has_changes=False 이면 file_map 자체가 동일하므로 save_file_map 호출 불필요.
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "a.md").write_text("hello")
+    # 기존 file_map 과 listing 이 일치 (변경 0건)
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": "2026-05-19T00:00:00+00:00",
+        "files": {"id_a": {"source_relpath": "a.md", "source_mtime": "2026-05-19T00:00:00Z",
+                           "wiki_path": "wiki/sources/gdrive/a.md", "bytes": 5,
+                           "last_synced_at": "2026-05-19T00:00:00Z"}},
+    }))
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_a", "Path": "a.md", "Name": "a.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    call_count = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    assert result.has_changes is False
+    # 변경 0건 → save_file_map 0회 (file_map 불변, fsync 무의미)
+    assert call_count["n"] == 0, (
+        f"save_file_map should NOT be called when has_changes=False, "
+        f"got {call_count['n']}"
+    )
+    # updated_at 도 변경되지 않음
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert fm["updated_at"] == "2026-05-19T00:00:00+00:00"
+
+
+def test_sync_mixed_operations_saves_file_map_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3 (review 2) — created + deleted + renamed 혼합 cycle 에서도 fsync 1회.
+
+    회귀 가드: `if changed or deleted:` condition 이 혼합 ops 에서도 단일 save 만
+    트리거하는지 검증. (3건 create / 0건 change 단일 케이스만 있던 기존 테스트 보강.)
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+
+    # mount FS 에 created+renamed 대상 배치
+    (vault_local / "new.md").write_text("new file")
+    (vault_local / "renamed.md").write_text("renamed target")
+    # noop entry 들도 mount FS 에 배치 (diff 가 noop 으로 분류)
+    for name in ("noop_a.md", "noop_b.md", "noop_c.md"):
+        (vault_local / name).write_text("noop content")
+
+    # 기존 file_map: id_keep, id_rename, id_delete + 3개 noop (총 6개) — delete_ratio = 1/6 ≈ 17%
+    # (기본 false_delete_threshold 0.3 통과)
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": "2026-05-19T00:00:00+00:00",
+        "files": {
+            "id_keep": {"source_relpath": "keep.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": "wiki/sources/gdrive/keep.md", "bytes": 1,
+                        "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_rename": {"source_relpath": "original.md", "source_mtime": "2026-05-19T00:00:00Z",
+                          "wiki_path": "wiki/sources/gdrive/original.md", "bytes": 1,
+                          "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_delete": {"source_relpath": "doomed.md", "source_mtime": "2026-05-19T00:00:00Z",
+                          "wiki_path": "wiki/sources/gdrive/doomed.md", "bytes": 1,
+                          "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_noop_a": {"source_relpath": "noop_a.md", "source_mtime": "2026-05-19T00:00:00Z",
+                          "wiki_path": "wiki/sources/gdrive/noop_a.md", "bytes": 1,
+                          "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_noop_b": {"source_relpath": "noop_b.md", "source_mtime": "2026-05-19T00:00:00Z",
+                          "wiki_path": "wiki/sources/gdrive/noop_b.md", "bytes": 1,
+                          "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_noop_c": {"source_relpath": "noop_c.md", "source_mtime": "2026-05-19T00:00:00Z",
+                          "wiki_path": "wiki/sources/gdrive/noop_c.md", "bytes": 1,
+                          "last_synced_at": "2026-05-19T00:00:00Z"},
+        },
+    }))
+    # delete 대상 wiki page 사전 배치
+    doomed_wiki = tmp_path / "wiki" / "sources" / "gdrive" / "doomed.md"
+    doomed_wiki.parent.mkdir(parents=True)
+    doomed_wiki.write_text("doomed")
+
+    # listing: id_new (created) + id_rename (renamed → renamed.md) + id_keep + 3 noop
+    # — id_delete 는 listing 에 없음 → deleted
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_new", "Path": "new.md", "Name": "new.md", "Size": 7,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_rename", "Path": "renamed.md", "Name": "renamed.md", "Size": 14,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_keep", "Path": "keep.md", "Name": "keep.md", "Size": 0,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_noop_a", "Path": "noop_a.md", "Name": "noop_a.md", "Size": 0,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_noop_b", "Path": "noop_b.md", "Name": "noop_b.md", "Size": 0,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_noop_c", "Path": "noop_c.md", "Name": "noop_c.md", "Size": 0,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    call_count: dict[str, int] = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    # 기본 false_delete_threshold 0.3 사용 — file_map 6개 중 1개 delete → 17% < 30% 가드 통과
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    # changed: created 1 + renamed 1, deleted: 1, noop 3 (분류만, save 영향 없음)
+    assert len(result.changed) == 2
+    assert len(result.deleted) == 1
+    # 핵심: 혼합 ops 에서도 save_file_map 1회
+    assert call_count["n"] == 1, (
+        f"save_file_map should be called once for mixed ops cycle, got {call_count['n']}"
+    )
+    # 최종 file_map: id_delete 제거, id_rename source_relpath 갱신, id_new 추가, 3 noop 유지
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert set(fm["files"].keys()) == {"id_keep", "id_rename", "id_new", "id_noop_a", "id_noop_b", "id_noop_c"}
+    assert fm["files"]["id_rename"]["source_relpath"] == "renamed.md"
+    assert fm["files"]["id_new"]["source_relpath"] == "new.md"
+
+
+def test_sync_all_fails_does_not_save_file_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S2 (review 1) — 모든 entry 가 handler 에서 raise 시 file_map.json save 0회.
+
+    시나리오: N건의 diff.entries 가 모두 VaultSyncFileFatal → error_count == N →
+    changed/deleted 모두 빈 상태 → end-of-cycle save_file_map skipped.
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "a.md").write_text("hello")
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": f"id_{x}", "Path": f"{x}.md", "Name": f"{x}.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False}
+        for x in ("a", "b")
+    ])
+
+    # 모든 handler 가 VaultSyncFileFatal raise — per-entry fatal (sync 가 catch 후 continue)
+    def _always_fail(*a: Any, **kw: Any) -> None:
+        raise VaultSyncFileFatal(vault_id="gdrive", source_id="x", reason="all-fail simulation")
+
+    monkeypatch.setattr(sync, "_handle_create_or_modify", _always_fail)
+
+    call_count: dict[str, int] = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    result = sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    # 모든 entry 가 file-fatal → changed/deleted 모두 비어있음
+    assert len(result.changed) == 0
+    assert len(result.deleted) == 0
+    # → end-of-cycle save_file_map skip (changed or deleted == False)
+    assert call_count["n"] == 0, (
+        f"save_file_map should NOT be called when all entries fail with FileFatal, "
+        f"got {call_count['n']}"
+    )
+
+
+def test_sync_vaultsyncfatal_midcycle_aborts_batch_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S5 (review 2) — VaultSyncFatal mid-cycle 시 batch save 미도달.
+
+    시나리오: 1건 성공 → 2건째 handler 에서 VaultSyncFatal (auth/structural fatal,
+    사람 개입 필요) → sync 함수가 즉시 re-raise (sync.py:565-566) → batch save 라인
+    도달 못함 → file_map.json 미저장. crash safety 주장은 다음 cycle 의 idempotent
+    re-detect 로 보완 (in-memory mutation 만 유실).
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "a.md").write_text("a ok")
+    (vault_local / "b.md").write_text("b ok")
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_a", "Path": "a.md", "Name": "a.md", "Size": 4,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_b", "Path": "b.md", "Name": "b.md", "Size": 4,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    real_handler = sync._handle_create_or_modify
+    call_index: dict[str, int] = {"i": 0}
+
+    def _maybe_fail(*a: Any, **kw: Any) -> None:
+        call_index["i"] += 1
+        if call_index["i"] == 1:
+            # 첫 번째 entry (id_a) — 성공
+            real_handler(*a, **kw)
+        else:
+            # 두 번째 entry (id_b) — vault-level fatal (auth/structural)
+            raise VaultSyncFatal(
+                vault_id="gdrive",
+                reason="midcycle-fatal simulation",
+                remediation="re-authenticate",
+            )
+
+    monkeypatch.setattr(sync, "_handle_create_or_modify", _maybe_fail)
+
+    call_count: dict[str, int] = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    vault_cfg = VaultConfig(
+        id="gdrive", type="gdrive_api", enabled=True, sync_interval_sec=600,
+        local_path=vault_local,
+        options={"rclone_remote_name": "gdrive"},
+    )
+    with pytest.raises(VaultSyncFatal):
+        sync.sync(vault_cfg=vault_cfg, instance_root=tmp_path, state_dir=state_dir)
+
+    # batch save 미도달 — VaultSyncFatal propagate 시 end-of-cycle 라인 도달 못함
+    assert call_count["n"] == 0, (
+        f"save_file_map should NOT be called when VaultSyncFatal mid-cycle, "
+        f"got {call_count['n']}"
+    )
+    # file_map.json 도 미저장 (in-memory mutation 만 있고, batch save skip)
+    # → pre-existing file_map.json 없었으므로 파일 자체가 없어야 함
+    assert not (state_dir / "file_map.json").exists()
