@@ -1,8 +1,8 @@
-# AI 에이전트 개발 방법론
+# AI 에이전트 개발 방법론 (Issue-First)
 
 ## 개요
 
-LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 워크플로우. 퀄리티와 가성비를 동시에 확보하기 위해 단계별로 도구를 분리해 사용한다.
+LLM 기반 AI 에이전트(OpenCode 등)를 활용한 소프트웨어 개발 워크플로우. 퀄리티와 가성비를 동시에 확보하기 위해 단계별로 도구를 분리해 사용한다.
 
 > **이 문서는 가이드다.** 오타 수정·단순 변경처럼 범위가 명확하고 영향이 작은 작업에는 이 방법론을 적용하지 않아도 된다. 설계 판단이 필요하거나 여러 파일에 영향을 미치는 변경부터 적용을 권장한다.
 
@@ -34,11 +34,11 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 ---
 
-## 5단계 Feature-based Workflow
+## 5단계 Issue-First Workflow
 
-> **플로우 개요**: [AGENTS.md §3 (5-step feature workflow)](../AGENTS.md#3-5-step-feature-workflow) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
+> **플로우 개요**: [AGENTS.md §3 (5-step issue-first workflow)](../AGENTS.md#3-5-step-feature-workflow) 표 참조. 정본은 AGENTS.md이며, 본 문서는 실무 how-to만 다룬다.
 
-> **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/<feat_id>`. feature 분기 base 는 항상 `origin/<현재 버전 브랜치>` (예: `origin/v0.1.12`), main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 자동 cleanup(삭제) + bootstrap(새 분기)하므로 항상 최신 patch+1 상태. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
+> **브랜치 토폴로지**: `main → v0.X.Y (버전 브랜치) → feature/issue-<N>`. feature 분기 base 는 항상 `origin/<현재 버전 브랜치>` (예: `origin/v0.1.12`), main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 자동 cleanup(삭제) + bootstrap(새 분기)하므로 항상 최신 patch+1 상태. Step 5 에서 squash → 버전 브랜치, release batch 시 `merge --no-ff` → main.
 
 > **Step 4(검토)와 Step 5(배포)는 조건부 생략 가능**합니다. 생략 결정은 Step 1 `plan.md`에 미리 선언하고 사유를 기록합니다 — 사후 누락이 아니라 계획상의 결정으로 추적합니다.
 
@@ -46,11 +46,11 @@ LLM 기반 AI 에이전트(Claude Code 등)를 활용한 소프트웨어 개발 
 
 **도구**: 사용자와의 대화 (가벼움)
 **목적**: 메타 결정 — 이 작업을 어떻게 접근할지, 어느 단계까지 진행할지 미리 정한다
-**산출물**: `features/[YYYYMMDD]_[기능개발주제명]/plan.md` (한 페이지 미만 권장)
+**산출물**: `features/[YYYYMMDD]_issue<N>_<slug>/plan.md` (한 페이지 미만 권장)
 
 **선행 조건**: Feature 디렉토리 생성
 ```bash
-mkdir -p features/[YYYYMMDD]_[기능개발주제명]
+mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
 ```
 
 **실행 방법**:
@@ -72,8 +72,8 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 **도구**: Claude Code CLI / [Superpowers](https://github.com/obra/superpowers) (선택 — 발산적 탐색 또는 설계 옵션 비교가 필요할 때)
 **목적**: 요구사항 분석과 그에 따른 설계를 통합 작성
 **산출물**:
-- `features/[YYYYMMDD]_[기능개발주제명]/analysis_and_design.md` — 분석 + 설계 통합 결과물
-- `features/[YYYYMMDD]_[기능개발주제명]/design_review_N.md` — 리뷰어/사용자의 설계 검토 피드백 (선택, N = 리뷰어 순번)
+- `features/[YYYYMMDD]_issue<N>_<slug>/analysis_and_design.md` — 분석 + 설계 통합 결과물
+- `features/[YYYYMMDD]_issue<N>_<slug>/design_review_N.md` — 리뷰어/사용자의 설계 검토 피드백 (선택, N = 리뷰어 순번)
 
 > 분석과 설계를 하나의 단계에서 통합한다. 큰 feature에서 분석 결과를 먼저 확정하고 설계 방향을 가이드받고 싶으면, 파일 내 `## 분석`과 `## 설계` 섹션을 분리하고 사용자가 중간 검토를 선언할 수 있다.
 
@@ -145,7 +145,7 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 **도구**: 멀티모델 리뷰
 **검토 대상**: 구현 결과물 (코드 변경사항, 테스트 포함)
 **검토 주체**: 멀티모델 (Claude, Gemini, Codex 등 AI 리뷰어)
-**산출물**: `features/[YYYYMMDD]_[기능개발주제명]/code_review_N.md`
+**산출물**: `features/[YYYYMMDD]_issue<N>_<slug>/code_review_N.md`
 
 **생략 가능 조건** (모두 충족 시):
 
@@ -181,7 +181,7 @@ mkdir -p features/[YYYYMMDD]_[기능개발주제명]
 | `docs/changelog.md` | `## [vX.Y.Z]` `(canary)`→`(released)` + 날짜 | **HARD** (entry 존재 & not canary) |
 | `README.md` 배지 | Status/Version `canary`→`vX.Y.Z` released | **HARD** (Status 배지에 버전 반영 & not canary) |
 | `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" + 다음 버전 현행화 | WARN |
-| `features/HISTORY.md` | 버전 feature 항목 append (아래 형식) | WARN |
+| `features/HISTORY.md` | 버전 issue 항목 append (아래 형식) | WARN |
 
 `release.sh` 는 HARD 3종 미충족 시 비가역 merge 전에 `die` 한다 (escape hatch: `--skip-doc-check`). WARN 2종은 경고만 — 운영자가 체크리스트로 보장. 이 표가 "릴리스 시 무엇을 갱신해야 하는가"의 정본.
 
@@ -287,7 +287,7 @@ feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 
 
 1. **ADR 검증**: 본 feature가 생성하기로 한 ADR이 모두 `docs/adr/`에 존재하고 Status가 `Accepted`인지 확인.
 2. **HISTORY.md 항목 검증** (Step 5 수행한 경우): 항목이 추가됐고 참조 경로가 `features/archive/...`로 갱신됐는지 확인.
-3. **Archive 이동**: `git mv features/[YYYYMMDD]_[기능개발주제명] features/archive/[YYYYMMDD]_[기능개발주제명]`
+3. **Archive 이동**: `git mv features/[YYYYMMDD]_issue<N>_<slug> features/archive/[YYYYMMDD]_issue<N>_<slug>`
    - features/ 루트에는 **진행 중 feature만** 남는다.
    - archive 위치 자체가 "완료" 표시 — 별도 종료 마커는 두지 않는다.
 4. **feature 브랜치/worktree 정리 확인**: Step 5 액션 (3) 에서 이미 정리됐어야 함. `git branch --list 'feature/<id>'` + `git worktree list` 로 잔존 여부 점검. 미정리 시 본 단계에서 강제(`git worktree remove --force` + `git branch -D`).
@@ -402,17 +402,17 @@ feature 브랜치를 별도 디렉토리로 체크아웃해 브랜치 전환 없
 git fetch origin
 
 # 2. feature worktree 생성 — base 는 origin/<현재 버전 브랜치>
-git worktree add ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] -b feature/[기능개발주제명] origin/<현재 버전 브랜치>
+git worktree add ../wikihub-issue<N> -b feature/issue-<N> origin/<현재 버전 브랜치>
 
 # 3. Step 5 액션 (3) — squash merge 직후 제거
-git -C ../[repo]-feat/[YYYYMMDD]_[기능개발주제명] status --porcelain   # 출력이 비어있어야 정상
-git worktree remove ../[repo]-feat/[YYYYMMDD]_[기능개발주제명]         # dirty 시 git 자체가 거부
-git branch -D feature/[기능개발주제명]
+git -C ../wikihub-issue<N> status --porcelain   # 출력이 비어있어야 정상
+git worktree remove ../wikihub-issue<N>         # dirty 시 git 자체가 거부
+git branch -D feature/issue-<N>
 ```
 
 ### cmux 패널 구성
 ```
-패널 1 (개발자): ../[repo]-feat/[YYYYMMDD]_[기능개발주제명]  ← feature worktree
+패널 1 (개발자): ../wikihub-issue<N>  ← feature worktree
 패널 2 (리뷰어): ../[repo]                                    ← main, diff 확인
 ```
 
@@ -443,9 +443,9 @@ Worktree 없이 진행할 때는 feature 브랜치에서 Step 1~4를 진행하�
 ```bash
 # 분기 base = origin/<현재 버전 브랜치>
 git fetch origin
-git checkout -b feature/[기능개발주제명] origin/<현재 버전 브랜치>
+git checkout -b feature/issue-<N> origin/<현재 버전 브랜치>
 # Step 1~4 진행 + push
-git push origin feature/[기능개발주제명]
+git push origin feature/issue-<N>
 # Step 5 액션 (1)~(3) 으로 squash merge → 버전 브랜치 (위 §"5 액션 git workflow" 참조)
 ```
 
@@ -469,7 +469,7 @@ git push origin feature/[기능개발주제명]
 
 ### Features 구조
 
-`features/[YYYYMMDD]_[기능개발주제명]/` 디렉토리를 Step 1 시작 전에 생성하고, Step 1~5 전 과정의 산출물을 여기에 기록한다. 종료 처리 시 `features/archive/`로 이동한다.
+`features/[YYYYMMDD]_issue<N>_<slug>/` 디렉토리를 Step 1 시작 전에 생성하고, Step 1~5 전 과정의 산출물을 여기에 기록한다. 종료 처리 시 `features/archive/`로 이동한다.
 
 ```
 features/
@@ -504,5 +504,5 @@ docs/adr/
 **git 관리**: `features/` 전체를 커밋해 히스토리를 보존한다.
 
 - `[YYYYMMDD]`: 작업 시작일 (KST)
-- `[기능개발주제명]`: 소문자 + 언더스코어, 기능을 간결히 표현 (예: `user_auth_refactor`)
-- git 브랜치명도 동일한 슬러그 사용: `feature/[기능개발주제명]`
+- `[slug]`: 소문자 + 언더스코어, issue 제목을 간결히 표현 (예: `user_auth_refactor`)
+- git 브랜치명: `feature/issue-<N>`

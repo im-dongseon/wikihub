@@ -1,5 +1,7 @@
 # WikiHub Claude Code Guide (에이전트 특화 지침)
 
+> **⚠️ Deprecated**: WikiHub의 정본 code agent는 **OpenCode**입니다. 본 파일은 참조용으로 보존되며, 새 세션에서는 `.opencode/` 설정을 사용하세요. (ADR-0046)
+
 이 파일은 WikiHub 시스템에서 **Claude Code**가 사용하는 에이전트별 지침입니다.
 공통 거버넌스와 워크플로우는 [AGENTS.md](AGENTS.md)를 따릅니다.
 

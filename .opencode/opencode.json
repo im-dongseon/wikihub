@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "list"
+  ],
+  "agent": {
+    "explore": {
+      "model": "ollama-cloud/deepseek-v4-flash"
+    },
+    "plan": {
+      "model": "ollama-cloud/minimax-m3"
+    },
+    "build": {
+      "model": "ollama-cloud/deepseek-v4-flash"
+    },
+    "build-hard": {
+      "model": "ollama-cloud/kimi-k2.6"
+    },
+    "review-correctness": {
+      "model": "ollama-cloud/glm-5.1"
+    },
+    "review-quality": {
+      "model": "ollama-cloud/minimax-m2.7"
+    }
+  }
+}
