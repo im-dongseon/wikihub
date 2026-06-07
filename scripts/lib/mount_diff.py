@@ -190,6 +190,13 @@ def _compute_diff_path_based(
     for source_id, file_data in files.items():
         path = str(file_data.get("source_relpath", ""))
         if path:
+            # ADR-0045: 레거시 source_id="" entry 감지 시 경고
+            if source_id == "":
+                log.warning(
+                    "legacy NAS file_map entry detected: source_id=\"\" path=%s. "
+                    "This entry will be migrated to source_id=path on next write (ADR-0045).",
+                    path,
+                )
             files_by_path[path] = {**file_data, "_source_id": source_id}
 
     file_map_count_before = len(files)
@@ -207,7 +214,7 @@ def _compute_diff_path_based(
         if prev is None:
             result.entries.append(DiffEntry(
                 operation="created",
-                source_id="",  # NAS vault는 ID 부재
+                source_id=path,  # NAS vault는 path를 source_id로 사용 (ADR-0045)
                 source_relpath=path,
                 mime_type=mime,
                 mtime=mtime,

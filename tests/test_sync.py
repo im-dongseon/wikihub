@@ -653,3 +653,122 @@ def test_sync_vaultsyncfatal_midcycle_aborts_batch_save(
     # file_map.json 도 미저장 (in-memory mutation 만 있고, batch save skip)
     # → pre-existing file_map.json 없었으므로 파일 자체가 없어야 함
     assert not (state_dir / "file_map.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# NAS vault 테스트 (ADR-0045)
+# ---------------------------------------------------------------------------
+
+def test_handle_create_or_modify_nas_path_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """NAS vault _handle_create_or_modify: file_map key == path (source_id == path).
+
+    Issue #134 회귀 테스트: source_id="" 하드코딩 시 모든 NAS 파일이 같은 키로 덮어써지는 문제 검증.
+    """
+    from lib.mount_diff import DiffEntry
+
+    # setup
+    instance_root = tmp_path / "instance"
+    instance_root.mkdir()
+    wiki_root = instance_root / "wiki"
+    wiki_root.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "nas1"
+    vault_local.mkdir(parents=True)
+    (vault_local / "a.txt").write_text("hello")
+
+    file_map: dict[str, Any] = {"files": {}}
+    changed_out: list = []
+
+    entry = DiffEntry(
+        operation="created",
+        source_id="a.txt",  # NAS: source_id == path (ADR-0045)
+        source_relpath="a.txt",
+        mime_type="text/plain",
+        mtime="2026-06-07T00:00:00Z",
+        size=5,
+    )
+
+    # execute
+    sync._handle_create_or_modify(
+        entry,
+        vault_id="nas1",
+        vault_local_path=vault_local,
+        instance_root=instance_root,
+        file_map=file_map,
+        started_iso="2026-06-07T00:00:00Z",
+        max_file_size_mb=None,
+        changed_out=changed_out,
+    )
+
+    # verify: file_map key == path
+    assert "a.txt" in file_map["files"], f"Expected 'a.txt' in file_map, got {list(file_map['files'].keys())}"
+    assert file_map["files"]["a.txt"]["source_relpath"] == "a.txt"
+    assert file_map["files"]["a.txt"]["source_mtime"] == "2026-06-07T00:00:00Z"
+
+
+def test_handle_create_or_modify_nas_multi_file_no_overwrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """NAS vault multi-file: 각 파일이 고유한 key로 file_map에 저장 (덮어쓰기 없음).
+
+    Issue #134 회귀 테스트: source_id="" 하드코딩 시 3개 파일 처리 후 file_map에 1개만 남는 문제 검증.
+    """
+    from lib.mount_diff import DiffEntry
+
+    # setup
+    instance_root = tmp_path / "instance"
+    instance_root.mkdir()
+    wiki_root = instance_root / "wiki"
+    wiki_root.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "nas1"
+    vault_local.mkdir(parents=True)
+    (vault_local / "a.txt").write_text("aaa")
+    (vault_local / "b.txt").write_text("bbb")
+    (vault_local / "c.txt").write_text("ccc")
+
+    file_map: dict[str, Any] = {"files": {}}
+    changed_out: list = []
+
+    entries = [
+        DiffEntry(
+            operation="created",
+            source_id="a.txt",  # NAS: source_id == path
+            source_relpath="a.txt",
+            mime_type="text/plain",
+            mtime="2026-06-07T00:00:00Z",
+            size=3,
+        ),
+        DiffEntry(
+            operation="created",
+            source_id="b.txt",
+            source_relpath="b.txt",
+            mime_type="text/plain",
+            mtime="2026-06-07T00:00:00Z",
+            size=3,
+        ),
+        DiffEntry(
+            operation="created",
+            source_id="c.txt",
+            source_relpath="c.txt",
+            mime_type="text/plain",
+            mtime="2026-06-07T00:00:00Z",
+            size=3,
+        ),
+    ]
+
+    # execute: 3개 파일 처리
+    for entry in entries:
+        sync._handle_create_or_modify(
+            entry,
+            vault_id="nas1",
+            vault_local_path=vault_local,
+            instance_root=instance_root,
+            file_map=file_map,
+            started_iso="2026-06-07T00:00:00Z",
+            max_file_size_mb=None,
+            changed_out=changed_out,
+        )
+
+    # verify: file_map에 3개 entry 모두 존재 (덮어쓰기 없음)
+    assert len(file_map["files"]) == 3, f"Expected 3 entries, got {len(file_map['files'])}: {list(file_map['files'].keys())}"
+    assert "a.txt" in file_map["files"]
+    assert "b.txt" in file_map["files"]
+    assert "c.txt" in file_map["files"]
+
