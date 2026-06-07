@@ -2,7 +2,7 @@
 
 WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepachangelog.com) 스타일.
 
-**정본**: 본 문서는 외부 visible 누적 changelog. 결정의 정본은 `docs/adr/NNNN-*.md`, 운영 history 의 정본은 `features/HISTORY.md` (release 시 append, AGENTS.md §3 Step 5). 본 changelog 는 사용자 관점 요약.
+**정본**: 본 문서는 외부 visible 누적 changelog. 결정의 정본은 `docs/adr/NNNN-*.md`, 운영 history 의 정본은 `docs/release-history.md` (release 시 append, AGENTS.md §3 Step 5). 본 changelog 는 사용자 관점 요약.
 
 ---
 
@@ -126,4 +126,4 @@ acceptance gate 결과 (multipass VM Ubuntu 24.04 ARM + Hermes v0.14.0): V1·V2�
 
 - 각 release 의 자세한 결정은 [`docs/adr/`](adr/) 참조 (ADR 번호로 cross-ref)
 - 미래 로드맵: [`docs/roadmap.md`](roadmap.md)
-- 운영 history (배포 시점 기준): [`features/HISTORY.md`](../features/HISTORY.md) (Step 5 actions 4-5 release 시 append, AGENTS.md §3)
+- 운영 history (배포 시점 기준): [`docs/release-history.md`](../docs/release-history.md) (Step 5 actions 4-5 release 시 append, AGENTS.md §3)

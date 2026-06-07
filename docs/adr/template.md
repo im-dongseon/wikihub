@@ -2,7 +2,7 @@
 
 - **Status**: Proposed | Accepted | Deprecated | Superseded
 - **Date**: YYYY-MM-DD
-- **Feature**: features/[YYYYMMDD]_[feat_id] (또는 features/archive/...)
+- **Feature**: issue #N
 - **Supersedes**: 없음 | ADR-NNNN
 - **Superseded by**: 없음 | ADR-NNNN
 
@@ -16,7 +16,7 @@
 - **(β) 옵션 B**: 간단한 설명
 - **(γ) 옵션 C**: 간단한 설명
 
-> 옵션 상세 비교(장단점 표 등)는 [features/.../analysis_and_design.md](...)의 해당 미결 표 참조.
+> 옵션 상세 비교(장단점 표 등)는 [docs/plans/issue-<N>/analysis_and_design.md](...)의 해당 미결 표 참조.
 
 ## Decision
 

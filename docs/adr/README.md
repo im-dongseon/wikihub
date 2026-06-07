@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-WikiHub의 모든 아키텍처/설계 결정을 영구 기록합니다. 결정의 **정본(source of truth)** 은 이 디렉토리의 개별 ADR 파일이며, `features/` 산출물과 `features/HISTORY.md`는 ADR을 참조만 합니다.
+WikiHub의 모든 아키텍처/설계 결정을 영구 기록합니다. 결정의 **정본(source of truth)** 은 이 디렉토리의 개별 ADR 파일이며, workflow artifact(`docs/plans/`, `docs/reviews/`)와 `docs/release-history.md`는 ADR을 참조만 합니다.
 
 ## 작명 규칙
 
@@ -50,7 +50,7 @@ NNNN-{kebab-case-title}.md
 cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 ```
 
-작성 시점은 메소드론 Step 2(분석및설계) 중 미결 사항을 결정하는 시점.
+작성 시점은 Step 2(analysis_and_design.md) 중 미결 사항을 결정하는 시점.
 
 ## 인덱스
 
@@ -102,4 +102,6 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 | [ADR-0046 ](0046-issue-first-workflow.md) | Issue-first workflow transition + OpenCode canonical agent — feature-based → issue-based 브랜치/디렉토리/커밋 명명 전환. `.opencode/` git 추적, `.claude/` deprecated. | Accepted | 2026-06-07 | governance transition (ADR-0046 itself) |
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
+| [0047](0047-retire-feature-directory.md) | Retire feature directory — GitHub issue as workflow single source | Accepted | 2026-06-08 | governance transition (ADR-0046 follow-up) |
+
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

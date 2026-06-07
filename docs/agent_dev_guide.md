@@ -46,12 +46,9 @@ LLM 기반 AI 에이전트(OpenCode 등)를 활용한 소프트웨어 개발 워
 
 **도구**: 사용자와의 대화 (가벼움)
 **목적**: 메타 결정 — 이 작업을 어떻게 접근할지, 어느 단계까지 진행할지 미리 정한다
-**산출물**: `features/[YYYYMMDD]_issue<N>_<slug>/plan.md` (한 페이지 미만 권장)
+**산출물**: GitHub issue body (8-section template, [issue-authoring-guide.md](issue-authoring-guide.md) 참조)
 
-**선행 조건**: Feature 디렉토리 생성
-```bash
-mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
-```
+**선행 조건**: GitHub issue #N 생성 (필수)
 
 **실행 방법**:
 ```
@@ -72,8 +69,8 @@ mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
 **도구**: Claude Code CLI / [Superpowers](https://github.com/obra/superpowers) (선택 — 발산적 탐색 또는 설계 옵션 비교가 필요할 때)
 **목적**: 요구사항 분석과 그에 따른 설계를 통합 작성
 **산출물**:
-- `features/[YYYYMMDD]_issue<N>_<slug>/analysis_and_design.md` — 분석 + 설계 통합 결과물
-- `features/[YYYYMMDD]_issue<N>_<slug>/design_review_N.md` — 리뷰어/사용자의 설계 검토 피드백 (선택, N = 리뷰어 순번)
+- `docs/plans/issue-<N>/analysis_and_design.md` — 분석 + 설계 통합 결과물
+- `docs/plans/issue-<N>/design_review_<reviewer>.md` — 리뷰어/사용자의 설계 검토 피드백 (선택)
 
 > 분석과 설계를 하나의 단계에서 통합한다. 큰 feature에서 분석 결과를 먼저 확정하고 설계 방향을 가이드받고 싶으면, 파일 내 `## 분석`과 `## 설계` 섹션을 분리하고 사용자가 중간 검토를 선언할 수 있다.
 
@@ -145,7 +142,7 @@ mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
 **도구**: 멀티모델 리뷰
 **검토 대상**: 구현 결과물 (코드 변경사항, 테스트 포함)
 **검토 주체**: 멀티모델 (Claude, Gemini, Codex 등 AI 리뷰어)
-**산출물**: `features/[YYYYMMDD]_issue<N>_<slug>/code_review_N.md`
+**산출물**: `docs/reviews/issue-<N>/code_review_<reviewer>-<YYYY-MM-DD>-<HHMMSS>.md`
 
 **생략 가능 조건** (모두 충족 시):
 
@@ -171,7 +168,7 @@ mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
 
 **도구**: git + install.sh (배포는 git workflow 로 수행, deploy 스크립트 없음)
 **진입 조건**: Step 4 DoD 전항목 충족 (Step 4 생략 시 Step 3 자가 검증 + 사용자 승인으로 대체) + 사용자 최종 승인 (`"배포 진행해줘"` 또는 `"Step 5 시작해줘"`)
-**산출물**: `features/HISTORY.md` — release(액션 4~5) 시점에 한 번 append
+**산출물**: `docs/release-history.md` — release(액션 4~5) 시점에 한 번 append
 
 **릴리스 문서 체크리스트 (액션 4~5 전 — 일부는 `release.sh` preflight 가 강제, issue #114)**:
 
@@ -181,7 +178,7 @@ mkdir -p features/[YYYYMMDD]_issue<N>_<slug>
 | `docs/changelog.md` | `## [vX.Y.Z]` `(canary)`→`(released)` + 날짜 | **HARD** (entry 존재 & not canary) |
 | `README.md` 배지 | Status/Version `canary`→`vX.Y.Z` released | **HARD** (Status 배지에 버전 반영 & not canary) |
 | `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" + 다음 버전 현행화 | WARN |
-| `features/HISTORY.md` | 버전 issue 항목 append (아래 형식) | WARN |
+| `docs/release-history.md` | 버전 issue 항목 append (아래 형식) | WARN |
 
 `release.sh` 는 HARD 3종 미충족 시 비가역 merge 전에 `die` 한다 (escape hatch: `--skip-doc-check`). WARN 2종은 경고만 — 운영자가 체크리스트로 보장. 이 표가 "릴리스 시 무엇을 갱신해야 하는가"의 정본.
 
@@ -249,7 +246,7 @@ git push origin canary --force
 - **생성 ADR**: ADR-NNNN, ADR-NNNN (해당 항목이 있을 때)
 - **트레이드오프**: 이 결정으로 포기한 것, 생긴 제약 (없으면 "없음")
 - **결론**: 최종 상태 및 후속 과제
-- **참조**: features/archive/[YYYYMMDD]_[기능개발주제명]/
+- **참조**: docs/plans/issue-<N>/analysis_and_design.md
 ```
 
 > 결정 이유의 상세는 ADR로 옮겨갔으므로 HISTORY 항목은 "생성 ADR" 한 줄로 참조한다. ADR이 없는 단순 운영성 feature는 이 줄을 생략한다.
@@ -286,13 +283,10 @@ systemctl --user list-timers
 feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 후), 다음을 수행한다.
 
 1. **ADR 검증**: 본 feature가 생성하기로 한 ADR이 모두 `docs/adr/`에 존재하고 Status가 `Accepted`인지 확인.
-2. **HISTORY.md 항목 검증** (Step 5 수행한 경우): 항목이 추가됐고 참조 경로가 `features/archive/...`로 갱신됐는지 확인.
-3. **Archive 이동**: `git mv features/[YYYYMMDD]_issue<N>_<slug> features/archive/[YYYYMMDD]_issue<N>_<slug>`
-   - features/ 루트에는 **진행 중 feature만** 남는다.
-   - archive 위치 자체가 "완료" 표시 — 별도 종료 마커는 두지 않는다.
-4. **feature 브랜치/worktree 정리 확인**: Step 5 액션 (3) 에서 이미 정리됐어야 함. `git branch --list 'feature/<id>'` + `git worktree list` 로 잔존 여부 점검. 미정리 시 본 단계에서 강제(`git worktree remove --force` + `git branch -D`).
+2. **HISTORY.md 항목 검증** (Step 5 수행한 경우): 항목이 추가됐는지 확인.
+3. **feature 브랜치/worktree 정리 확인**: Step 5 액션 (3) 에서 이미 정리됐어야 함. `git branch --list 'feature/issue-<N>'` + `git worktree list` 로 잔존 여부 점검. 미정리 시 본 단계에서 강제(`git worktree remove --force` + `git branch -D`).
 
-종료 처리는 사용자 선언 (`"feature 종료해줘"` 또는 `"archive로 이동해줘"`)으로 트리거한다.
+종료 처리는 사용자 선언 (`"feature 종료해줘"`)으로 트리거한다.
 
 ---
 
@@ -328,9 +322,9 @@ Step 2(설계 검토 — 선택)와 Step 4(구현 검토 — 조건부)에 동�
 **컨텍스트 전달 (Code Review 시)**:
 ```bash
 # 변경 내용을 파일로 추출 (base 브랜치명이 다르면 main 부분 수정)
-git diff $(git merge-base HEAD main) > review_context.md
+git diff $(git merge-base HEAD main) > /tmp/review_context.md
 ```
-리뷰어에게: `"review_context.md를 참조해서 code_review_N.md 작성해줘"`
+리뷰어에게: `"review_context.md를 참조해서 docs/reviews/issue-<N>/code_review_<reviewer>-<YYYY-MM-DD>-<HHMMSS>.md 작성해줘"`
 
 **실행 방식** (택일):
 
@@ -350,15 +344,15 @@ gh copilot suggest -t shell "review_context.md 기반으로 코드 리뷰해줘"
 > CLI 플래그(`-p` 등)는 버전마다 다를 수 있으므로 각 CLI 공식 문서 확인 후 사용
 > diff가 너무 크면 잘릴 수 있으므로 변경 범위가 큰 경우 파일 단위로 분할 전달
 
-- **서브에이전트 (Claude Agent tool)**: `"서브에이전트로 리뷰해서 code_review_N.md에 기록해줘"` → Agent tool이 worktree 격리 후 결과 파일 생성
+- **서브에이전트 (Claude Agent tool)**: `"서브에이전트로 리뷰해서 docs/reviews/issue-<N>/code_review_<reviewer>-<YYYY-MM-DD>-<HHMMSS>.md에 기록해줘"` → Agent tool이 worktree 격리 후 결과 파일 생성
 
 **결과 취합**:
 ```
 리뷰 파일이 1개일 때:
-"[prefix]_review_1.md를 참조해서 지적 항목 우선순위 정리해줘"
+"docs/reviews/issue-<N>/ 파일들을 참조해서 지적 항목 우선순위 정리해줘"
 
 리뷰 파일이 2개 이상일 때:
-"[prefix]_review_N.md 파일들을 참조해서
+"docs/reviews/issue-<N>/ 파일들을 참조해서
 2개 이상 공통으로 지적한 항목만 추려서 우선순위 정리해줘"
 ```
 
@@ -467,25 +461,27 @@ git push origin feature/issue-<N>
 
 > **라이프사이클 기준 분리**: `features/`는 active → archive 라이프사이클을 가진 워크스페이스, `docs/adr/`는 supersede로만 변경되는 영속 기록. 같은 "개발 관련"이지만 행동이 다르므로 디렉토리를 분리한다.
 
-### Features 구조
+### Workflow artifacts 구조
 
-`features/[YYYYMMDD]_issue<N>_<slug>/` 디렉토리를 Step 1 시작 전에 생성하고, Step 1~5 전 과정의 산출물을 여기에 기록한다. 종료 처리 시 `features/archive/`로 이동한다.
+`features/` 디렉토리는 더 이상 신규 작업에 사용하지 않는다 (ADR-0047). 모든 신규 작업의 산출물은 GitHub issue + 아래 디렉토리에 분산 저장한다.
 
 ```
-features/
-├── HISTORY.md                                       # 배포 이력 누적 (append-only, Step 5 수행 시에만 추가)
-├── [YYYYMMDD]_[기능개발주제명]/                     # 진행 중 feature (루트에 가시화)
-│   ├── plan.md                                      # Step 1 산출물 (가벼움)
+docs/
+├── plans/issue-<N>/                                 # 분석·설계 산출물 (Step 1~2)
 │   ├── analysis_and_design.md                       # Step 2 산출물 (분석 + 설계 통합)
-│   ├── design_review_N.md                           # Step 2 리뷰 (선택, N=1,2,3...)
-│   └── code_review_N.md                             # Step 4 리뷰 (조건부, N=1,2,3...)
-└── archive/
-    └── [YYYYMMDD]_[기능개발주제명]/                 # 완료 feature
-        └── (위와 동일 구조)
+│   └── design_review_<reviewer>.md                  # Step 2 리뷰 (선택)
+├── reviews/issue-<N>/                               # 코드 리뷰 산출물 (Step 4)
+│   └── code_review_<reviewer>-<YYYY-MM-DD>-<HHMMSS>.md
+└── adr/                                             # 결정 기록 (영속)
+    ├── README.md
+    ├── template.md
+    └── NNNN-{kebab-case}.md
 ```
 
-- **루트 = 진행 중**: features/ 직속의 [기능개발주제명]/ 디렉토리는 모두 작업 중.
-- **archive/ = 완료**: 종료 처리된 feature는 이쪽으로 이동. 위치 자체가 완료 표시.
+- `docs/plans/issue-<N>/`: PR merge 시점까지 유지. merge 후에도 참조용으로 보존 (삭제 금지).
+- `docs/reviews/issue-<N>/`: review agent가 자동 기록. merge 후 참조용 보존.
+- `features/archive/`: ADR-0047 이전의 35개 feature 기록은 read-only 보존.
+- `docs/release-history.md`: release history append-only. 계속 유지.
 
 ### 결정 기록 (ADR)
 
@@ -497,12 +493,12 @@ docs/adr/
 ```
 
 - 결정의 **정본(source of truth)** 은 ADR 파일. 다른 문서(analysis_and_design.md, HISTORY.md)는 `ADR-NNNN` 식별자로 참조만.
-- archive로 이동돼도 ADR은 `docs/adr/` 그대로 유지 (feature와 분리된 영속 기록).
+- ADR은 `docs/adr/`에 영속 보존 (workflow artifact와 분리).
 - 결정 변경 시 기존 ADR Status를 `Superseded`로 바꾸고 신규 ADR에 `Supersedes: ADR-NNNN` 명시. 기존 ADR은 **삭제하지 않는다.**
 
 **Worktree 사용 시**: Step 3~4는 feature 브랜치 worktree에서 진행하고, Step 5 액션 (1)~(3) 에서 버전 브랜치로 squash merge — release batch 시점에만 main 으로 `merge --no-ff` (액션 4~5).
-**git 관리**: `features/` 전체를 커밋해 히스토리를 보존한다.
+**git 관리**: workflow artifact(`docs/plans/`, `docs/reviews/`)는 PR과 함께 커밋해 히스토리를 보존한다.
 
-- `[YYYYMMDD]`: 작업 시작일 (KST)
-- `[slug]`: 소문자 + 언더스코어, issue 제목을 간결히 표현 (예: `user_auth_refactor`)
+- `docs/plans/issue-<N>/`: 분석·설계 artifact 영구 보존
+- `docs/reviews/issue-<N>/`: 코드 리뷰 artifact 영구 보존
 - git 브랜치명: `feature/issue-<N>`

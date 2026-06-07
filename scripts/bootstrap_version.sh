@@ -184,8 +184,8 @@ else
     warn "$ROADMAP_FILE not found at repo root. roadmap 갱신은 수동으로 처리."
 fi
 
-# --- Step 5: features/HISTORY.md — manual update warning ---
-HISTORY_FILE="features/HISTORY.md"
+# --- Step 5: docs/release-history.md — manual update warning ---
+HISTORY_FILE="docs/release-history.md"
 if [[ -f "$HISTORY_FILE" ]]; then
     if ! grep -q "$NEXT_VERSION" "$HISTORY_FILE"; then
         warn "$HISTORY_FILE 에 '$NEXT_VERSION' 항목 없음 — release 시 append 되므로 지금은 무시 가능."

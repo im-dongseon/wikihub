@@ -14,7 +14,7 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. **Ope
 | [docs/issue-authoring-guide.md](docs/issue-authoring-guide.md) | GitHub 이슈 8섹션 템플릿 |
 | [docs/changelog.md](docs/changelog.md) + `_system/VERSION` | 릴리스 누적 변경 |
 | [docs/roadmap.md](docs/roadmap.md) | 향후 계획 (시점 확정 아님) |
-| [features/HISTORY.md](features/HISTORY.md) | 운영 history (release 시 append) |
+| [docs/release-history.md](docs/release-history.md) | 운영 history (release 시 append) |
 | [docs/mcp-setup.md](docs/mcp-setup.md) | 외부 MCP client 셋업 (회사 망 fallback 포함) |
 | [CLAUDE.md](CLAUDE.md) | Claude Code 특화 — **deprecated** (ADR-0046). OpenCode가 정본 code agent. |
 
@@ -22,7 +22,7 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. **Ope
 
 | Zone | 위치 | 역할 | 누가 건드리는가 |
 |---|---|---|---|
-| **Development** | 루트 (`features/`, `docs/`, `install.sh`, `scripts/`, `AGENTS.md`) | 시스템을 만드는 공장 | 메인테이너(agent) |
+| **Development** | 루트 (`docs/`, `install.sh`, `scripts/`, `AGENTS.md`, `.opencode/`) | 시스템을 만드는 공장 | 메인테이너(agent) |
 | **Operations** | `_system/` | 시스템이 돌아가는 엔진 — 정본 룰 + 명령어 playbook | `install.sh` 가 fetch·갱신. **agent는 운영 인스턴스(OCI)일 때만 read** |
 
 - **에이전트가 Development Zone 에서 작업할 때 `_system/` 을 직접 수정하지 말 것.** 변경은 §3 의 Step 1~5 를 거쳐 git workflow + `install.sh` 로만 운영에 주입.
@@ -44,21 +44,19 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. **Ope
 
 | Step | 산출물 | 진입 조건 | 종료 |
 |---|---|---|---|
-| 1 Plan | `features/[YYYYMMDD]_issue<N>_<slug>/plan.md` | GitHub issue #N 생성 (모든 작업 필수) | 사용자 확정 |
+| 1 Plan | GitHub issue body (8-section template) | GitHub issue #N 생성 (모든 작업 필수) | 사용자 확정 |
 | 2 AD | `analysis_and_design.md` (optional `design_review_N.md`) | — | `approved: YYYY-MM-DD` 마커 (사용자 명시 승인 필수) |
 | 3 Impl | `_system/commands/*.md`, `_system/wiki-schema.md`, `scripts/*`, `install.sh` 등 | Step 2 승인 | 설계서 모든 항목 반영 |
 | 4 Review | `code_review_N.md` (생략 가능) | Step 3 완료 | 결함 없음 |
 | 5 Deploy | squash → v0.X.Y, canary force-update, (release 시) main merge + tag | 사용자 `"배포 진행해줘"` | 운영 반영 + archive 이동 |
 
 - **ADR 추출**: Step 2 의 미결 사항이 결정되면 `docs/adr/NNNN-{slug}.md` 1개 (결정 N개 = ADR N개). ADR이 정본 — `analysis_and_design.md` 의 미결 표는 옵션 탐색 과정만 보존. ADR Feature 필드는 `issue #N` 로 기록.
-- **Issue 종료**: 완료 시 `git mv features/[id] features/archive/[id]` (archive 위치 자체가 종료 마커). `feature/issue-<N>` 브랜치·worktree 강제 정리.
+- **Issue 종료**: 완료 시 PR merge + issue close (archive 이동 불필요 — `features/` 디렉토리 미생성). `feature/issue-<N>` 브랜치·worktree 강제 정리.
 
 ## 4. 버전 관리 — Atomic Change
 
 - **버전 명명**: 문서·tag = `v{X.Y.Z}`, 배포 도구 인자 = `{X_Y_Z}`. WikiHub 시작 = v0.1.0.
 - **Atomic Change**: 한 issue = 한 목적. 부수 이슈는 새 issue 생성.
-- **issue 디렉토리**: `features/[YYYYMMDD]_issue<N>_<slug>/` (KST 날짜, 소문자+언더스코어).
-- **features/ 라이프사이클**: 루트 = 진행 중, `features/archive/` = 완료.
 
 ## 5. Tag 운영 의미 — main 직접 commit 금지
 
@@ -87,7 +85,7 @@ Release 직후: `release.sh` 가 cleanup 만 자동 수행.
 | `docs/changelog.md` | `## [vX.Y.Z]` `(canary)`→`(released)` + 날짜 | **HARD** |
 | `README.md` 배지 | Status/Version canary→vX.Y.Z released | **HARD** |
 | `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" | WARN |
-| `features/HISTORY.md` | 항목 append | WARN |
+| `docs/release-history.md` | 항목 append | WARN |
 
 HARD 3종 미충족 시 `release.sh` 가 비가역 merge 전에 `die` (escape hatch: `--skip-doc-check`).
 

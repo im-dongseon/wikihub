@@ -80,8 +80,8 @@ _preflight_release_docs() {
     # WARN — roadmap / HISTORY (prose, 기계 단정 어려움 — 존재 힌트만)
     printf '%s\n' "$(git show "$ref:docs/roadmap.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
         || warn "preflight: docs/roadmap.md 에 $VERSION_TAG 언급 없음 — 누적완료 이동 확인 권장."
-    printf '%s\n' "$(git show "$ref:features/HISTORY.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
-        || warn "preflight: features/HISTORY.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
+    printf '%s\n' "$(git show "$ref:docs/release-history.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
+        || warn "preflight: docs/release-history.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
 
     info "Release-doc preflight 통과 (HARD 3종 OK)."
 }

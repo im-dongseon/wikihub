@@ -93,7 +93,7 @@ WikiHub의 5-step workflow (AGENTS.md §3·§4, agent_dev_guide.md)는 `features
 - AGENTS.md §3·§4·§8 업데이트 필요
 - agent_dev_guide.md Step 1~5 명명 규칙 업데이트 필요
 - `docs/adr/README.md` 인덱스 포맷: Feature 필드 `issue #N` 패턴 표준화
-- `features/HISTORY.md` 포맷: 향후 항목부터 `issue #N` 기반으로 전환
+- `docs/release-history.md` 포맷: 향후 항목부터 `issue #N` 기반으로 전환
 - `agent/*.md`에 `write: true` 설정 추가하여 review 에이전트의 artifact 영속화 지원
 
 ## References

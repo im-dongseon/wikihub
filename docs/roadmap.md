@@ -59,7 +59,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 - 결정의 정본: [`docs/adr/`](adr/) (ADR-NNNN)
 - 진행 중 feature workspace: `features/<feat_id>/` (active → archive 라이프사이클, AGENTS.md §3)
-- 배포 이력: `features/HISTORY.md` (release 시 append)
+- 배포 이력: `docs/release-history.md` (release 시 append)
 - 누적 changelog: [`docs/changelog.md`](changelog.md)
 
 본 roadmap 은 "**아직 결정 안 된 후보**" 수준의 진행 trace. 확정된 결정은 ADR 작성 + feature workspace 진행 시점에 정본 이동.
