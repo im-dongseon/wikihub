@@ -1,0 +1,7 @@
+name: wq
+description: "wh-query alias — 자연어 질의 + 분석 저장. wikihub spec — _system/commands/query.md playbook."
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, query, search, alias]
+  category: knowledge-management
