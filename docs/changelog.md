@@ -2,11 +2,32 @@
 
 WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepachangelog.com) 스타일.
 
-**정본**: 본 문서는 외부 visible 누적 changelog. 결정의 정본은 `docs/adr/NNNN-*.md`, 운영 history 의 정본은 `features/HISTORY.md` (release 시 append, AGENTS.md §3 Step 5). 본 changelog 는 사용자 관점 요약.
+**정본**: 본 문서는 외부 visible 누적 changelog. 결정의 정본은 `docs/adr/NNNN-*.md`, 운영 history 의 정본은 `docs/release-history.md` (release 시 append, AGENTS.md §3 Step 5). 본 changelog 는 사용자 관점 요약.
 
 ---
 
-## [v0.1.11] — 2026-06-05 (released)
+## [v0.1.12] — 2026-06-08 (released)
+
+### 추가 (Added)
+- **wq alias 등록** — `wh-query`와 동일 playbook(`_system/commands/query.md`)을 공유하는 `wq` skill 신규 등록. `/wq <질문>` 으로 `/wh-query`와 동일 동작 (#138, PR #139)
+- **브랜치 전략 단순화 (release.sh cleanup)** — `release.sh`가 post-release bootstrap 대신 cleanup만 담당. 새 사이클 시작은 `scripts/bootstrap_version.sh` 또는 dev-flow Step 4 lazy trigger (`v0.1.13+` 정책, PR #136)
+- **file_map end-of-cycle batch commit** — vault sync 시 file_map을 매 entry마다 직렬화 대신 cycle 종료 시 batch write로 전환 (#133, PR #135)
+- **OpenCode agent 정규화** — `.opencode/opencode.json` 정본화 + agent prompt를 `.opencode/agent/*.md`로 분리 (ADR-0046)
+- **feature directory retire** — `features/` → `features/archive/` 라이프사이클 종료, GitHub Issue 기반 workflow로 전환 (ADR-0047)
+
+### 수정 (Fixed)
+- **NAS vault file_map source_id 충돌** — NAS vault vfs refresh 없이 cycle 중복 재처리. source_id를 path 기반으로 설정 (#134, PR #137)
+- **mount_diff.py path 기반 diff** — NAS vault(path 기반)와 Drive vault(fileId 기반) 병행 (#120, #129)
+
+### 변경 (Changed)
+- `scripts/release.sh` — post-release 6,7 단계(bootstrap) 제거, cleanup 전용
+- `scripts/bootstrap_version.sh` — 신규 (on-demand bootstrap)
+- `_system/skills/wq.frontmatter.yaml` — 신규
+- `_system/VERSION` — `0.1.11` → `0.1.12`
+
+---
+
+[v0.1.11] — 2026-06-05 (released)
 
 ### 추가 (Added)
 - **NAS vault type 지원** (ADR-0044) — `SUPPORTED_VAULT_TYPES` 에 `nas` 추가, vault type별 필수 옵션 검증, rclone rc port skip. Google Drive 외 SFTP 기반 NAS vault 운영 가능 (#117, #125)
@@ -126,4 +147,4 @@ acceptance gate 결과 (multipass VM Ubuntu 24.04 ARM + Hermes v0.14.0): V1·V2�
 
 - 각 release 의 자세한 결정은 [`docs/adr/`](adr/) 참조 (ADR 번호로 cross-ref)
 - 미래 로드맵: [`docs/roadmap.md`](roadmap.md)
-- 운영 history (배포 시점 기준): [`features/HISTORY.md`](../features/HISTORY.md) (Step 5 actions 4-5 release 시 append, AGENTS.md §3)
+- 운영 history (배포 시점 기준): [`docs/release-history.md`](../docs/release-history.md) (Step 5 actions 4-5 release 시 append, AGENTS.md §3)

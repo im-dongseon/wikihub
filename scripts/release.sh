@@ -80,8 +80,8 @@ _preflight_release_docs() {
     # WARN — roadmap / HISTORY (prose, 기계 단정 어려움 — 존재 힌트만)
     printf '%s\n' "$(git show "$ref:docs/roadmap.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
         || warn "preflight: docs/roadmap.md 에 $VERSION_TAG 언급 없음 — 누적완료 이동 확인 권장."
-    printf '%s\n' "$(git show "$ref:features/HISTORY.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
-        || warn "preflight: features/HISTORY.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
+    printf '%s\n' "$(git show "$ref:docs/release-history.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
+        || warn "preflight: docs/release-history.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
 
     info "Release-doc preflight 통과 (HARD 3종 OK)."
 }
@@ -182,8 +182,11 @@ run_or_dry git push origin "refs/tags/$VERSION_TAG"
 run_or_dry git push origin "refs/tags/latest" --force 2>/dev/null || \
     warn "Latest tag force-push failed. Check GitHub tag protection rules."
 
-# --- Post-release: cleanup version branch + canary, bootstrap new version ---
-info "=== Post-release: Cleanup version branch + canary ==="
+# --- Post-release: cleanup version branch + canary (cleanup only) ---
+# v0.1.13+ 정책 (AGENTS.md §3 Step 5): release.sh 는 cleanup 만 담당.
+# 새 버전 브랜치 + canary tag 의 bootstrap 은 `scripts/bootstrap_version.sh` 가
+# 별도로 처리 (수동 호출 또는 github-dev-flow Step 4 자동 호출).
+info "=== Post-release: Cleanup version branch + canary (cleanup only) ==="
 
 # Delete local version branch
 run_or_dry git branch -D "$VERSION_BRANCH" 2>/dev/null || warn "Local branch '$VERSION_BRANCH' not found."
@@ -199,36 +202,6 @@ run_or_dry git push origin --delete "refs/tags/canary" 2>/dev/null || \
 # Delete local canary tag
 run_or_dry git tag -d canary 2>/dev/null || true
 
-# Ensure local tags are current (fresh clone / stale local guard)
-run_or_dry git fetch --tags origin
-
-# Calculate next version: latest annotated tag patch+1
-LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
-if [[ -z "$LATEST_TAG" ]]; then
-    die "No version tag found to determine next version."
-fi
-NEXT_VERSION="$(echo "$LATEST_TAG" | awk -F. '{print $1"."$2"."($3+1)}')"
-
-info "Next version branch: $NEXT_VERSION (from $LATEST_TAG patch+1)"
-
-# Create new version branch from main HEAD + canary tag
-info "=== Post-release: Bootstrap $NEXT_VERSION + canary ==="
-if ! git rev-parse --verify "refs/heads/$NEXT_VERSION" 2>/dev/null; then
-    run_or_dry git branch "$NEXT_VERSION"
-else
-    warn "Branch '$NEXT_VERSION' already exists locally — skipping creation."
-fi
-run_or_dry git tag -f canary "$NEXT_VERSION"
-run_or_dry git push origin "$NEXT_VERSION" 2>/dev/null || \
-    warn "Branch '$NEXT_VERSION' already on remote — skipping push."
-
-# Force-push canary (lightweight, always force-refresh)
-run_or_dry git push origin refs/tags/canary --force 2>/dev/null || \
-    die "Canary tag force-push failed."
-
-# Switch to new version branch for development continuity
-run_or_dry git checkout "$NEXT_VERSION"
-
 # --- Post-release state display ---
 info "=== release.sh complete ==="
 echo ""
@@ -239,8 +212,8 @@ echo ""
 echo "Ref state after release:"
 echo "  main HEAD           = refs/tags/$VERSION_TAG = refs/tags/latest = $MERGE_SHA"
 echo "  (deleted)           = refs/heads/$VERSION_BRANCH"
-echo "  (deleted)           = refs/tags/canary (old)"
-echo "  New version branch  = refs/heads/$NEXT_VERSION (from main HEAD)"
-echo "  New canary tag      = refs/tags/canary → $NEXT_VERSION HEAD"
+echo "  (deleted)           = refs/tags/canary"
+echo ""
+echo "다음 사이클 시작: scripts/bootstrap_version.sh 호출 (또는 github-dev-flow Step 4에서 자동 호출)"
 echo ""
 echo "Next step: Notify operators to run 'install.sh --branch latest'"

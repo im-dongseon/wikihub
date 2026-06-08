@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "@tarquinen/opencode-dcp",
+    "@rehydra/opencode"
+  ],
+  "mcp": {
+    "context7": {
+      "type": "local",
+      "command": ["npx", "-y", "@upstash/context7-mcp"]
+    }
+  },
+  "agent": {
+    "plan": {
+      "model": "ollama-cloud/minimax-m3",
+      "tools": { "write": false, "edit": false }
+    },
+    "research": {
+      "model": "ollama-cloud/deepseek-v4-flash",
+      "mode": "primary",
+      "tools": { "write": true, "edit": false },
+      "prompt": "You handle exploration, understanding, research, and analysis of the codebase: from quick lookups (where is X, what does Y do) through deeper analysis. On request, save your findings as a markdown note. Do NOT modify existing source code (code changes belong to build/plan) — you may only create new .md notes. If a task needs a deep architecture decision or an implementation spec, hand it to @plan. Be concise and direct."
+    },
+    "explore": {
+      "model": "ollama-cloud/deepseek-v4-flash"
+    },
+    "build": {
+      "model": "ollama-cloud/deepseek-v4-flash"
+    },
+    "build-hard": {
+      "model": "ollama-cloud/kimi-k2.6",
+      "tools": { "write": true, "edit": true, "bash": true },
+      "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or touch unrelated code."
+    },
+    "review-correctness": {
+      "model": "ollama-cloud/glm-5.1"
+    },
+    "review-quality": {
+      "model": "ollama-cloud/minimax-m2.7"
+    }
+  }
+}

@@ -37,9 +37,8 @@ venv/
 # Superpowers intermediate artifacts (optional)
 docs/superpowers/
 
-# Agent skills (project-local installs via `npx skills add`)
+# Agent skills — deprecated / external (ADR-0046: OpenCode is canonical; Hermes is external)
 .agents/
 .claude/
 .hermes/
-.opencode/
 skills-lock.json

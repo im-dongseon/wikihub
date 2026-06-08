@@ -4,13 +4,12 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 ---
 
-## 현재 진행 (v0.1.11, 진행 중)
+## 현재 진행
 
 | 항목 | 상태 |
 |---|---|
-| release.sh push refspec fix — branch+tag 동일명(`vX.Y.Z`) 모호성 (#112) | 🔧 PR #113 |
 
-**v0.1.10 은 2026-05-30 정식 release** — `main` merge (`--no-ff`) + `v0.1.10` annotated tag + `latest` promote (AGENTS.md §3 Step 5). 운영자: `install.sh --branch latest`. 자세한 내용은 [`docs/changelog.md`](changelog.md) v0.1.10 entry.
+**v0.1.12 은 2026-06-08 정식 release** — `main` merge + `v0.1.12` annotated tag + `latest` promote. 자세한 내용은 [`docs/changelog.md`](changelog.md) v0.1.12 entry.
 
 ---
 
@@ -41,6 +40,8 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 그룹 | feature_id | 결과 |
 |---|---|---|
+| v0.1.12 | `branch_policy_cleanup`(PR #136) · `file_map_batch_commit`(PR #135) · `nas_file_map_key`(PR #137) · `wq_alias`(PR #139) · OpenCode agent 정규화(ADR-0046) · feature directory retire(ADR-0047) | ✅ release (2026-06-08) |
+| v0.1.11 | NAS vault type (ADR-0044) · install.sh SFTP remote · systemd mount 분기 · release document preflight (#114) · sync file_map batch (#133) · refspec push fix (#112) | ✅ release (2026-06-05) |
 | v0.1.10 | MCP Phase 1(ADR-0043) · alias resolver(ADR-0042) · install/update hardening · deployment helpers · sidecar fixes(#108/#109) | ✅ release (2026-05-30) |
 | v0.1.9 | `sync_passthrough_fix` | ✅ release |
 | v0.1.8 | `entity_concept_alias_frontmatter`, `monitor_services_remove`, `systemd_prefix_realign`, `branch_strategy_formalize`, `lint_operations_improvements`, `update_path_fixes`, `install_update_hardening`, `legacy_migration_cleanup`, `graphify_path_absolute` | ✅ release |
@@ -59,7 +60,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 - 결정의 정본: [`docs/adr/`](adr/) (ADR-NNNN)
 - 진행 중 feature workspace: `features/<feat_id>/` (active → archive 라이프사이클, AGENTS.md §3)
-- 배포 이력: `features/HISTORY.md` (release 시 append)
+- 배포 이력: `docs/release-history.md` (release 시 append)
 - 누적 changelog: [`docs/changelog.md`](changelog.md)
 
 본 roadmap 은 "**아직 결정 안 된 후보**" 수준의 진행 trace. 확정된 결정은 ADR 작성 + feature workspace 진행 시점에 정본 이동.
