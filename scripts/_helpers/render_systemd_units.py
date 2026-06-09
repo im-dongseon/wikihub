@@ -324,12 +324,12 @@ def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
             f"sleep 2; done'"
         )
         
-        # mount 옵션: --vfs-cache-mode full, --read-only, --dir-cache-time, --log-level
+        # mount 옵션: --vfs-cache-mode full, --dir-cache-time, --log-level
         # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
+        # --read-only 제거 — NAS vault 는 ingest/sync 과정에서 write 필요 (issue #142)
         mount_options = (
             "--vfs-cache-mode full \\\n"
             f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
-            "  --read-only \\\n"
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE"
         )
@@ -344,7 +344,7 @@ def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
                 "NAS vault mount template\\n"
                 "- After: network-online.target + tailscaled.service\\n"
                 "- ExecStartPre: TCP 체크 (SFTP 포트 도달성)\\n"
-                "- mount_options: vfs-cache-mode full, read-only\\n"
+                "- mount_options: vfs-cache-mode full\\n"
                 "- Restart: on-failure (Tailscale 지연 시 자가 복구)"
             ),
         }
