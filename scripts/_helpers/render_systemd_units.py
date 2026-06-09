@@ -351,6 +351,8 @@ def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
     else:
         # Drive vault: 기존 동작
         # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
+        # rc_port 도 opts 에서 직접 읽어 mount_options 에 치환 (issue #144)
+        rc_port = str(opts.get("rclone_rc_port", 5572))
         mount_options = (
             "--vfs-cache-mode minimal \\\n"
             f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
@@ -358,7 +360,7 @@ def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE \\\n"
             "  --rc \\\n"
-            "  --rc-addr 127.0.0.1:{rc_port_for_%i}"
+            f"  --rc-addr 127.0.0.1:{rc_port}"
         )
         
         return {
