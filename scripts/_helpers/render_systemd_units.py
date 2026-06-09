@@ -299,11 +299,15 @@ def _cross_vault_subs(vault: dict) -> dict[str, str]:
         }
 
 
-def _current_vault_subs(vault: dict) -> dict[str, str]:
+def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
     """Current-vault scalar keys (suffix 없음) — 본 vault 의 render 결과에만 적용.
 
     ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
     vault_type에 따라 mount 옵션 분기.
+
+    vfs_cache_max_size: instance-wide 설정값. mount_options 내에 미리 치환하여
+    반환 (format_map 1-pass에서 `{mount_options}` 내부 placeholder가
+    미치환되는 문제 해결 — issue #141).
     """
     vault_type = str(vault.get("type", "gdrive_api")).strip()
     opts = vault.get("options") or {}
@@ -321,9 +325,10 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
         )
         
         # mount 옵션: --vfs-cache-mode full, --read-only, --dir-cache-time, --log-level
+        # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
         mount_options = (
             "--vfs-cache-mode full \\\n"
-            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
+            f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
             "  --read-only \\\n"
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE"
@@ -345,14 +350,15 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
         }
     else:
         # Drive vault: 기존 동작
+        # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
         mount_options = (
             "--vfs-cache-mode minimal \\\n"
-            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
+            f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
             "  --drive-export-formats docx,xlsx,pptx,md \\\n"
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE \\\n"
             "  --rc \\\n"
-            f"  --rc-addr 127.0.0.1:{{rc_port_for_%i}}"
+            "  --rc-addr 127.0.0.1:{rc_port_for_%i}"
         )
         
         return {
@@ -500,7 +506,7 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
         if per_vault:
             for v in enabled:
                 # per-vault render: base + current vault scalar keys (sync_interval_sec 등)
-                current_subs = _current_vault_subs(v)
+                current_subs = _current_vault_subs(v, base_subs.get("vfs_cache_max_size", "10G"))
                 # current_subs 의 key 가 base_subs 와 충돌하면 안 됨
                 conflict = set(current_subs) & set(base_subs)
                 if conflict:
