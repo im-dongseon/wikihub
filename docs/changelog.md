@@ -6,6 +6,14 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
+## [v0.1.13] — 2026-06-09 (canary)
+
+### 추가 (Added)
+
+- (bootstrap — first feature commit 부터 entry 누적)
+
+---
+
 ## [v0.1.12] — 2026-06-08 (released)
 
 ### 추가 (Added)
