@@ -87,7 +87,7 @@ updated: 2026-05-13
 sources:
   - sources/gdrive/meetings/2026-Q1.pptx
   - sources/gdrive/meetings/2026-Q2.pptx
-referenced_by: []   # /wh-lint Step 4 가 갱신 (v0.1.8 update_path_fixes — wikihub-graphify.service 는 graph.json 빌드 책임만, referenced_by 미관여)
+referenced_by: []   # /wl Step 4 가 갱신 (v0.1.8 update_path_fixes — wikihub-graphify.service 는 graph.json 빌드 책임만, referenced_by 미관여)
 tags: []
 ---
 
@@ -103,7 +103,7 @@ tags: []
 
 slug 규칙: `<YYYY-MM-DD>-<영문 kebab summary>.md` (예: `2026-05-13-q1-vs-q2-decisions.md`). 충돌 시 `-2`, `-3` suffix.
 
-- 동일 질의가 다시 들어와도 기존 페이지 갱신이 아니라 **새 페이지 추가** (시계열 보존). 중복 제거는 `/wh-lint`가 미래 ADR로 결정 가능
+- 동일 질의가 다시 들어와도 기존 페이지 갱신이 아니라 **새 페이지 추가** (시계열 보존). 중복 제거는 `/wl`가 미래 ADR로 결정 가능
 - analyses 페이지 자체가 "query 기록" 역할 → **별도 query log 안 만듦**
 
 ### Step 6. (저장 안 한 경우) log
@@ -119,7 +119,7 @@ slug 규칙: `<YYYY-MM-DD>-<영문 kebab summary>.md` (예: `2026-05-13-q1-vs-q2
 | 사용자 응답 (Telegram / stdout) | 매 호출 |
 | `wiki/analyses/<slug>.md` | Step 5 heuristic 통과 시만 |
 | systemd journal | 항상 (agent runtime) |
-| wiki의 다른 카테고리 | 본 명령은 만지지 않음 (entities·concepts는 `/wh-ingest`·`/wh-lint`만, index는 `/wh-lint`만) |
+| wiki의 다른 카테고리 | 본 명령은 만지지 않음 (entities·concepts는 `/wi`·`/wl`만, index는 `/wl`만) |
 
 ## 실패 처리
 
@@ -147,4 +147,4 @@ slug 규칙: `<YYYY-MM-DD>-<영문 kebab summary>.md` (예: `2026-05-13-q1-vs-q2
 - ADR-0001 vault-prefix link 규약 (인용 형식)
 - ADR-0005 wiki/index.md 폴백 (graphify 부재 시)
 - ADR-0006 unified orchestration (본 명령은 sync subprocess 호출 없음 — read-only + analyses write 한정)
-- ADR-0008 `/wh-lint` 권한 — 본 명령은 lint가 아니므로 wiki 자체 수정 안 함
+- ADR-0008 `/wl` 권한 — 본 명령은 lint가 아니므로 wiki 자체 수정 안 함

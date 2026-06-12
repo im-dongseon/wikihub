@@ -15,7 +15,7 @@ Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
 #   파일 부재 또는 빈 값이어도 unit start 자체는 성공 — graphify subprocess 만 fail (lenient `-` prefix).
 #   default WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_* 3 키 install.sh prefill. ollama_gemma 외 profile cookbook → docs/graphify-backend-test-reference.md §6.
 EnvironmentFile=-%h/.config/wikihub/env
-ExecStart={agent_invocation_for_wh_lint} "/wh-lint"
+ExecStart={agent_invocation_for_wl} "/wl"
 SuccessExitStatus=0 75
 TimeoutStartSec={lint_timeout_start_sec}sec
 SyslogIdentifier=wikihub-lint

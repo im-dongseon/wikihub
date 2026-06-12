@@ -174,7 +174,7 @@ def _instance_root(cfg: dict) -> Path:
 
 
 # ── F5 (ADR-0032·0033): wikihub skill 5건 — per-skill substitution ────
-_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-setup", "wq")
+_WIKIHUB_SKILLS = ("wi", "wl", "wh-query", "wh-setup", "wq")
 # v0.1.8 update_path_fixes (B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
 # graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
@@ -203,8 +203,15 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
     # ADR-0032 §Note (v0.1.5, 2026-05-20) — per-skill model override.
     # yaml.agent.models[<skill>] 명시 시 oneshot_args 에 `--model <id>` inject (--query 앞에).
     # 빈 dict / 미명시 skill → hermes config.yaml.model.default 사용 (backward-compat).
+    # v0.1.14 (issue #150): rename backward compat — 구 wh-ingest/wh-lint 키가 있으면 alias lookup
     models = agent.get("models") or {}
     skill_model = models.get(skill_name)
+    if not skill_model:
+        # backward compat: 구 wh-ingest → wi, wh-lint → wl alias lookup
+        _OLD_ALIAS = {"wi": "wh-ingest", "wl": "wh-lint"}
+        old_key = _OLD_ALIAS.get(skill_name)
+        if old_key:
+            skill_model = models.get(old_key)
     if skill_model:
         new_args: list = []
         inserted = False

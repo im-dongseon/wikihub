@@ -1,11 +1,11 @@
-# /wh-ingest
+# /wi
 
 특정 vault의 변경 사항을 wiki에 통합한다. 본 playbook은 agent-agnostic(Hermes·codex-cli·gemini-cli·copilot 등 어떤 CLI agent로도 실행 가능).
 
 ## 호출
 
 ```
-<agent_invocation> "/wh-ingest --vault <vault_id>"
+<agent_invocation> "/wi --vault <vault_id>"
 ```
 
 - **트리거**: systemd timer (정상 주기) 또는 사용자 수동 호출
@@ -27,16 +27,16 @@
 - **한자 (漢字) 감지 시 한글로 변환** — deepseek-v4-pro / minimax 등 일부 모델이 동음이의 한국어를 한자 표기로 출력하는 결함 (Hermes OCI 실증, 2026-05-20, lint.md 와 동일). 예: "기획(企劃)" → "기획"; "권한(權限)" → "권한". 고유명사 (인명·지명·조직명 중 한국 외 출처) 는 예외 허용.
 - **영어 약어** (OKR, PM, CRM, API 등) 는 그대로 유지.
 
-본 정책은 lint.md 의 "출력 언어 정책" 와 동일 — 운영 model (yaml `agent.models.wh-ingest`) 의 한자 출력 결함 대비.
+본 정책은 lint.md 의 "출력 언어 정책" 와 동일 — 운영 model (yaml `agent.models.wi`) 의 한자 출력 결함 대비.
 
 ## 절차
 
 ### Step 0. per-vault flock 가드 (race 가드)
 
-`wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wh-ingest --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단. 진행 중 ingest 가 있으면 즉시 exit 0 (no-op).
+`wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wi --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단. 진행 중 ingest 가 있으면 즉시 exit 0 (no-op).
 
 ```bash
-exec 200>"$WIKIHUB_HOME/.wh-ingest-<vault_id>.lock"
+exec 200>"$WIKIHUB_HOME/.wi-<vault_id>.lock"
 flock -n 200 || { echo "ingest (vault=<vault_id>) 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
 # lock 은 process 종료 시 자동 해제 (kernel-managed)
 ```
@@ -165,13 +165,13 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
    - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 (위 alias 인식 포함) → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
    - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + `aliases: [<본문 form>]` + 본문은 1줄 요약, `referenced_by: [<source>]`)
 4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
-5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wh-lint`가 책임 (--apply 시 archive)
+5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wl`가 책임 (--apply 시 archive)
 
 각 `deleted[*]`에 대해:
 
 1. 해당 wiki 경로 = `wiki/sources/<vault_id>/<path>.md`
 2. **이미 script가 삭제 처리** (script는 file_map 기준 wiki source 파일도 같이 삭제)
-3. agent는 entities/concepts의 `referenced_by`에서 해당 source 경로 제거 (남는 reference 0건이면 entity·concept 페이지 자체는 보존 — `/wh-lint`가 고아 페이지 판단)
+3. agent는 entities/concepts의 `referenced_by`에서 해당 source 경로 제거 (남는 reference 0건이면 entity·concept 페이지 자체는 보존 — `/wl`가 고아 페이지 판단)
 
 **Source 페이지 본문·frontmatter는 절대 수정 안 함** (책임 경계: source = script, entities/concepts = agent)
 
@@ -215,9 +215,9 @@ Step 5까지 무에러 완료 시:
 | `_state/<vault_id>/pending_ingest.json` | agent | 작성 (Step 3) → 삭제 (Step 6) |
 | `wiki/entities/<name>.md`, `wiki/concepts/<name>.md` | agent | 생성·갱신 |
 | `wiki/sources/<vault_id>/log.md` | agent | append |
-| `wiki/index.md` | **본 명령은 수정 안 함** (ADR-0005 — `/wh-lint` 책임) | — |
+| `wiki/index.md` | **본 명령은 수정 안 함** (ADR-0005 — `/wl` 책임) | — |
 | `wiki/analyses/` | **본 명령은 수정 안 함** (`/wh-query` 책임) | — |
-| `graphify-out/` | **본 명령은 수정 안 함** (graphify rebuild = `/wh-lint` Step 9 chain, ADR-0036 §D6) | — |
+| `graphify-out/` | **본 명령은 수정 안 함** (graphify rebuild = `/wl` Step 9 chain, ADR-0036 §D6) | — |
 
 ## 실패 처리
 
@@ -237,7 +237,7 @@ Step 5까지 무에러 완료 시:
 
 ## 동시성
 
-- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wh-ingest-<vault_id>.lock`) — systemd timer · 메인테이너 수동 `systemctl start` · Hermes 채팅의 `/wh-ingest` 직접 호출 사이의 동일 vault 중복 실행을 일괄 차단. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover.
+- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wi-<vault_id>.lock`) — systemd timer · 메인테이너 수동 `systemctl start` · Hermes 채팅의 `/wi` 직접 호출 사이의 동일 vault 중복 실행을 일괄 차단. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover.
 - vault별 systemd unit 이 `Type=oneshot` → 동일 vault timer 중복 발화는 systemd 자체에서도 드롭 (Step 0 lock 의 보강 layer, F1 §4.6.5).
 - 다중 vault 간 직렬화는 `wikihub.yaml.operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede). Step 0 lock 은 per-vault 이므로 본 정책에 직교.
 
@@ -245,6 +245,6 @@ Step 5까지 무에러 완료 시:
 
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지
 - ADR-0002 agent CLI subprocess (`hermes -z`)
-- ADR-0005 wiki/index.md 갱신은 `/wh-lint`가, log는 vault별
+- ADR-0005 wiki/index.md 갱신은 `/wl`가, log는 vault별
 - ADR-0006 unified orchestration (본 playbook이 mechanical + semantic 둘 다)
 - ADR-0007 state는 all JSON (`pending_ingest.json` 형식)
