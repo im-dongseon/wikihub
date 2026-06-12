@@ -1,0 +1,7 @@
+name: wl
+description: "wiki 의 정합성·일관성 검증. graphify 자동 호출 가능. wikihub spec — _system/commands/lint.md playbook. (alias: wikihub lint)"
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, lint, validation]
+  category: knowledge-management

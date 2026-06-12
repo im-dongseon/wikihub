@@ -16,7 +16,7 @@
 ## 호출 흐름
 
 ```
-wikihub-lint.timer (3h 주기) → wh-lint hermes skill (deepseek-v4-flash)
+wikihub-lint.timer (3h 주기) → wl hermes skill (deepseek-v4-flash)
    ├─ Step 1~8: lint cycle 본체 (LLM 작업)
    └─ Step 9: 변경 감지 분기 (cost gate)
        ├─ 변경 없음 → skip + report.md "graph rebuild skipped (no changes)"

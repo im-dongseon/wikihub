@@ -93,7 +93,7 @@ HARD 3종 미충족 시 `release.sh` 가 비가역 merge 전에 `die` (escape ha
 
 | Entry | 책임 | mutation 권한 |
 |---|---|---|
-| **Hermes CLI skill** (`/wh-ingest`, `/wh-lint`, `/wh-query`, `/wh-setup`) | LLM-mediated playbook — 의미 검색 + cross-ref 추론 + `analyses` 자동 저장 | `wiki/`, `_state/`, OAuth credential 모두 mutation 가능 |
+| **Hermes CLI skill** (`/wi`, `/wl`, `/wh-query`, `/wh-setup`) | LLM-mediated playbook — 의미 검색 + cross-ref 추론 + `analyses` 자동 저장 | `wiki/`, `_state/`, OAuth credential 모두 mutation 가능 |
 | **MCP server** (`scripts/wikihub_mcp.py`) | deterministic primitive (LLM 호출 0) — 외부 client (Claude Desktop / Cline) 가 SSH 로 spawn | **`wiki/` read 전용**. mutation은 Hermes skill 전유 |
 
 **레이어 분리 invariant**: `wikihub_mcp.py` 안에서 LLM 호출 0 (recursive LLM 회피). semantic synthesis 는 MCP client 측 LLM 책임.
