@@ -1329,8 +1329,8 @@ ${C_WARN}  /wh:setup 호출 전에 systemd timer enable 또는 reboot 금지 —
 
 [Hermes config.yaml 권장 (wikihub 정본 영역 외 — 운영자 책임)]
   ~/.hermes/config.yaml 의 다음 필드 권장 설정:
-    delegation.model: minimax-m2.5         # wh-lint Step 6 등 subagent — non-reasoning 안정성 + 한자→한글 정합
-  wh-ingest·wh-lint 메인 모델은 wikihub agent.models 가 systemd \`--model\` 으로 lock — hermes
+    delegation.model: minimax-m2.5         # wl Step 6 등 subagent — non-reasoning 안정성 + 한자→한글 정합
+  wi·wl 메인 모델은 wikihub agent.models 가 systemd \`--model\` 으로 lock — hermes
   model.default 와 무관. Telegram 대화·미명시 skill (wh-query·wh-setup) 의
   model.default 는 운영자 일반 선호로 결정.
 

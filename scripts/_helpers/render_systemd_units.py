@@ -174,7 +174,7 @@ def _instance_root(cfg: dict) -> Path:
 
 
 # ── F5 (ADR-0032·0033): wikihub skill 5건 — per-skill substitution ────
-_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-setup", "wq")
+_WIKIHUB_SKILLS = ("wi", "wl", "wh-query", "wh-setup", "wq")
 # v0.1.8 update_path_fixes (B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
 # graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
