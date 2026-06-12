@@ -203,8 +203,15 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
     # ADR-0032 §Note (v0.1.5, 2026-05-20) — per-skill model override.
     # yaml.agent.models[<skill>] 명시 시 oneshot_args 에 `--model <id>` inject (--query 앞에).
     # 빈 dict / 미명시 skill → hermes config.yaml.model.default 사용 (backward-compat).
+    # v0.1.14 (issue #150): rename backward compat — 구 wh-ingest/wh-lint 키가 있으면 alias lookup
     models = agent.get("models") or {}
     skill_model = models.get(skill_name)
+    if not skill_model:
+        # backward compat: 구 wh-ingest → wi, wh-lint → wl alias lookup
+        _OLD_ALIAS = {"wi": "wh-ingest", "wl": "wh-lint"}
+        old_key = _OLD_ALIAS.get(skill_name)
+        if old_key:
+            skill_model = models.get(old_key)
     if skill_model:
         new_args: list = []
         inserted = False

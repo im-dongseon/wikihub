@@ -10,7 +10,8 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ### 추가 (Added)
 
-- (bootstrap — first feature commit 부터 entry 누적)
+- **wi/wl 단축명 등록** — `wh-ingest` → `wi`, `wh-lint` → `wl` 로 Hermes skill 이름 단축. `wq` alias 패턴(ADR-0039)과 동일한 frontmatter + thin command wrapper 방식. frontmatter tags/description에 `wikihub ingest`, `wikihub lint` 유지하여 자연어 명령 매칭 보존 (#150, PR #151)
+- **backward compat** — `render_systemd_units.py`가 `agent.models`에서 구 `wh-ingest`/`wh-lint` 키를 `wi`/`wl`의 fallback으로 lookup (기존 운영자 yaml 무변경 호환)
 
 ---
 
