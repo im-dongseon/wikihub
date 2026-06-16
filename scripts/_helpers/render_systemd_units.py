@@ -174,7 +174,7 @@ def _instance_root(cfg: dict) -> Path:
 
 
 # ── F5 (ADR-0032·0033): wikihub skill 5건 — per-skill substitution ────
-_WIKIHUB_SKILLS = ("wh-ingest", "wh-lint", "wh-query", "wh-setup", "wq")
+_WIKIHUB_SKILLS = ("wi", "wl", "wh-query", "wh-setup", "wq")
 # v0.1.8 update_path_fixes (B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
 # graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
@@ -203,8 +203,15 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
     # ADR-0032 §Note (v0.1.5, 2026-05-20) — per-skill model override.
     # yaml.agent.models[<skill>] 명시 시 oneshot_args 에 `--model <id>` inject (--query 앞에).
     # 빈 dict / 미명시 skill → hermes config.yaml.model.default 사용 (backward-compat).
+    # v0.1.14 (issue #150): rename backward compat — 구 wh-ingest/wh-lint 키가 있으면 alias lookup
     models = agent.get("models") or {}
     skill_model = models.get(skill_name)
+    if not skill_model:
+        # backward compat: 구 wh-ingest → wi, wh-lint → wl alias lookup
+        _OLD_ALIAS = {"wi": "wh-ingest", "wl": "wh-lint"}
+        old_key = _OLD_ALIAS.get(skill_name)
+        if old_key:
+            skill_model = models.get(old_key)
     if skill_model:
         new_args: list = []
         inserted = False
@@ -215,6 +222,20 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
             new_args.append(arg)
         if not inserted:
             new_args.extend(["--model", str(skill_model)])
+        oneshot_args = new_args
+
+    # issue #153 — optional Hermes profile inject (--query 앞에, --model 뒤에)
+    profile = agent.get("profile")
+    if profile:
+        new_args: list = []
+        inserted = False
+        for arg in oneshot_args:
+            if str(arg) == "--query" and not inserted:
+                new_args.extend(["--profile", str(profile)])
+                inserted = True
+            new_args.append(arg)
+        if not inserted:
+            new_args.extend(["--profile", str(profile)])
         oneshot_args = new_args
 
     resolved = [str(a).format(skill=skill_name) for a in oneshot_args]
@@ -299,11 +320,15 @@ def _cross_vault_subs(vault: dict) -> dict[str, str]:
         }
 
 
-def _current_vault_subs(vault: dict) -> dict[str, str]:
+def _current_vault_subs(vault: dict, vfs_cache_max_size: str) -> dict[str, str]:
     """Current-vault scalar keys (suffix 없음) — 본 vault 의 render 결과에만 적용.
 
     ADR-0035: `credentials_path` 폐기 (rclone.conf 단일 인증). `sync_interval_sec` 만 유지.
     vault_type에 따라 mount 옵션 분기.
+
+    vfs_cache_max_size: instance-wide 설정값. mount_options 내에 미리 치환하여
+    반환 (format_map 1-pass에서 `{mount_options}` 내부 placeholder가
+    미치환되는 문제 해결 — issue #141).
     """
     vault_type = str(vault.get("type", "gdrive_api")).strip()
     opts = vault.get("options") or {}
@@ -320,11 +345,12 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
             f"sleep 2; done'"
         )
         
-        # mount 옵션: --vfs-cache-mode full, --read-only, --dir-cache-time, --log-level
+        # mount 옵션: --vfs-cache-mode full, --dir-cache-time, --log-level
+        # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
+        # --read-only 제거 — NAS vault 는 ingest/sync 과정에서 write 필요 (issue #142)
         mount_options = (
             "--vfs-cache-mode full \\\n"
-            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
-            "  --read-only \\\n"
+            f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE"
         )
@@ -339,20 +365,23 @@ def _current_vault_subs(vault: dict) -> dict[str, str]:
                 "NAS vault mount template\\n"
                 "- After: network-online.target + tailscaled.service\\n"
                 "- ExecStartPre: TCP 체크 (SFTP 포트 도달성)\\n"
-                "- mount_options: vfs-cache-mode full, read-only\\n"
+                "- mount_options: vfs-cache-mode full\\n"
                 "- Restart: on-failure (Tailscale 지연 시 자가 복구)"
             ),
         }
     else:
         # Drive vault: 기존 동작
+        # vfs_cache_max_size 는 호출부에서 전달받아 직접 치환 (issue #141)
+        # rc_port 도 opts 에서 직접 읽어 mount_options 에 치환 (issue #144)
+        rc_port = str(opts.get("rclone_rc_port", 5572))
         mount_options = (
             "--vfs-cache-mode minimal \\\n"
-            f"  --vfs-cache-max-size {{vfs_cache_max_size}} \\\n"
+            f"  --vfs-cache-max-size {vfs_cache_max_size} \\\n"
             "  --drive-export-formats docx,xlsx,pptx,md \\\n"
             "  --dir-cache-time 5m \\\n"
             "  --log-level NOTICE \\\n"
             "  --rc \\\n"
-            f"  --rc-addr 127.0.0.1:{{rc_port_for_%i}}"
+            f"  --rc-addr 127.0.0.1:{rc_port}"
         )
         
         return {
@@ -500,7 +529,7 @@ def _do_render(cfg: dict, out_dir: Path) -> int:
         if per_vault:
             for v in enabled:
                 # per-vault render: base + current vault scalar keys (sync_interval_sec 등)
-                current_subs = _current_vault_subs(v)
+                current_subs = _current_vault_subs(v, base_subs.get("vfs_cache_max_size", "10G"))
                 # current_subs 의 key 가 base_subs 와 충돌하면 안 됨
                 conflict = set(current_subs) & set(base_subs)
                 if conflict:

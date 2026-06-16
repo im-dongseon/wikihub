@@ -8,8 +8,8 @@
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.13%20canary-orange)](docs/changelog.md)
-[![Version](https://img.shields.io/badge/Version-0.1.12-blue)](_system/VERSION)
+[![Status](https://img.shields.io/badge/Status-v0.1.13%20released-green)](docs/changelog.md)
+[![Version](https://img.shields.io/badge/Version-0.1.13-blue)](_system/VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -54,7 +54,7 @@
 - 주기 lint 가 dangling link 정리 · index 재구성 · graph 그래프 갱신.
 
 ### 💬 자연어 질의 (Hermes via Telegram)
-- Hermes daemon 이 Telegram polling → `/wh-ingest`, `/wh-lint`, `/wh-query` 같은 slash command 호출.
+- Hermes daemon 이 Telegram polling → `/wi`, `/wl`, `/wh-query` 같은 slash command 호출.
 - 예: *"`[[gdrive/meetings/2026-Q1.pptx]]` 의 핵심 결정 사항만 표로 정리해줘"*.
 - LLM 이 wiki 본문 + cross-ref 추론 → `wiki/analyses/<slug>.md` 에 분석 결과 자동 저장.
 
@@ -67,7 +67,7 @@
 
 ### 🕸️ 지식 그래프 (graphify, 외부 CLI 통합)
 - `wiki/` 의 페이지 간 link 를 graph 로 시각화 (graphify PyPI 패키지 + ollama / OpenAI 등 backend 선택 가능).
-- wh-lint 가 변경 시에만 graphify 재호출 (cost gate).
+- wl 이 변경 시에만 graphify 재호출 (cost gate).
 
 ---
 
@@ -133,8 +133,8 @@ chmod 0600 ~/.config/rclone/rclone.conf
 systemd timer (default 10분 주기) 가 알아서 ingest. 수동 호출도 가능:
 
 ```
-/wh-ingest --vault gdrive    # vault 변경 사항 → wiki/sources/gdrive/*.md
-/wh-lint                     # entities/concepts 정리 + dangling link 보고 + index 재구성
+/wi --vault gdrive    # vault 변경 사항 → wiki/sources/gdrive/*.md
+/wl                     # entities/concepts 정리 + dangling link 보고 + index 재구성
 /wh-query "Q1 OKR 회의 결정 사항 정리해줘"   # → wiki/analyses/<slug>.md 자동 저장
 ```
 
@@ -187,7 +187,7 @@ flowchart LR
 - **Hermes** = LLM-mediated playbook entry (`/wh-query` 같은 의미 검색 + analyses 저장 mutation).
 - **MCP server** = deterministic primitive entry (외부 client 의 LLM 이 추론 — 서버측 LLM 호출 0, ADR-0043).
 
-두 entry (Hermes / MCP) 는 같은 `wiki/` 를 read 하되 **layer 분리** — mutation 책임은 Hermes 의 `/wh-lint` · `/wh-ingest` 만.
+두 entry (Hermes / MCP) 는 같은 `wiki/` 를 read 하되 **layer 분리** — mutation 책임은 Hermes 의 `/wl` · `/wi` 만.
 
 상세 아키텍처: [`features/archive/20260513_v030_initial_architecture/analysis_and_design.md`](features/archive/20260513_v030_initial_architecture/analysis_and_design.md) + [`docs/adr/`](docs/adr/).
 

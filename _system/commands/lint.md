@@ -1,11 +1,11 @@
-# /wh-lint
+# /wl
 
-wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 명령은 self-maintaining wiki의 핵심 — 사용자 개입 없이 위키 위생을 유지한다.
+wiki 의 정합성·일관성 검증. graphify 자동 호출 가능. wikihub spec — _system/commands/lint.md playbook.
 
 ## 호출
 
 ```
-<agent_invocation> "/wh-lint"            # 진단 + 적용 (timer 자동 호출 + 메인테이너 수동 호출 동일 동작)
+<agent_invocation> "/wl"            # 진단 + 적용 (timer 자동 호출 + 메인테이너 수동 호출 동일 동작)
 ```
 
 - **트리거 (자동)**: systemd timer (3시간 1회, v0.1.5 default `wikihub.yaml.operations.lint_interval_hours: 3`. 24h 이전 default 에서 변경 — graphify chain 의 cost 8배 증가하나 wiki 위생 사이클 빠른 surface 가치 우선)
@@ -17,7 +17,7 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 - `wikihub.yaml` 존재
 - wiki/ 디렉토리 + 4 카테고리(`sources/`, `entities/`, `concepts/`, `analyses/`) + `_lint/` 존재 (없으면 생성 — 본 명령이 자동)
-- (선택) `$WIKIHUB_HOME/graphify-out/graph.json` — 있으면 그래프 기반 점검, 없으면 wiki 순회. **절대 경로 사용 필수** — wh-lint skill (LLM) 의 CWD context 가 wiki/ 로 implicit drift 가능 → 상대 경로 시 stale `wiki/graphify-out/` 읽기 회귀 위험. 자세한 분석 + 진단 가이드: [docs/references/graph-path-resolution.md](../../docs/references/graph-path-resolution.md).
+- (선택) `$WIKIHUB_HOME/graphify-out/graph.json` — 있으면 그래프 기반 점검, 없으면 wiki 순회. **절대 경로 사용 필수** — wl skill (LLM) 의 CWD context 가 wiki/ 로 implicit drift 가능 → 상대 경로 시 stale `wiki/graphify-out/` 읽기 회귀 위험. 자세한 분석 + 진단 가이드: [docs/references/graph-path-resolution.md](../../docs/references/graph-path-resolution.md).
 - **stale 감지**: `$WIKIHUB_HOME/wiki/graphify-out/` 존재 시 (legacy v0.1.7 이전 또는 잘못된 `graphify --out` 호출 잔존) → Step 7 가 cleanup, Step 8 가 보고. 본 디렉토리는 Step 3 graph source 로 절대 read 안 함.
 
 ## 출력 언어 정책 (LLM 호출 step 들 공통)
@@ -34,10 +34,10 @@ wiki 일관성·구조 점검과 비파괴 자동 정비를 수행한다. 본 �
 
 ### Step 0. wiki-wide flock 가드 (v0.1.8 — race 가드)
 
-wikihub-lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wh-lint` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
+wikihub-lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wl` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
 
 ```bash
-exec 200>"$WIKIHUB_HOME/.wh-lint.lock"
+exec 200>"$WIKIHUB_HOME/.wl.lock"
 flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
 # lock 은 process 종료 시 자동 해제 (kernel-managed)
 ```
@@ -168,7 +168,7 @@ python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
 
 ### Step 5. wiki/index.md 재구성 (자동)
 
-ADR-0005에 따라 `/wh-lint`가 index 재구성 책임 보유:
+ADR-0005에 따라 `/wl`가 index 재구성 책임 보유:
 
 ```markdown
 # WikiHub
@@ -249,7 +249,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - 본 디렉토리는 pre-v0.1.8 era graphify 호출 또는 잘못된 `graphify --out` 인자 잔존물. 정상 graphify (`scripts/wikihub_graphify.sh` 가 `--out "$WIKIHUB_HOME"` 명시) 는 `wiki/graphify-out/` 미생성.
   - archive 후 lint 가 다시 stale 을 graph source 로 읽지 않음 + Step 3 의 절대 경로 정합으로 회귀 차단.
 
-**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wh-lint`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` read.
+**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wl`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` read.
 
 ### Step 8. log 작성
 
@@ -358,5 +358,5 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 
 - ADR-0001 vault namespace + `[[link]]` 단축형 금지 (Step 2 검증)
 - ADR-0005 wiki/index.md 갱신 책임 (Step 5)
-- ADR-0008 `/wh-lint` 권한 분류 (v0.1.0 era — 자동/`--apply` 구분, v0.1.8 ADR-0039 에서 폐기)
+- ADR-0008 `/wl` 권한 분류 (v0.1.0 era — 자동/`--apply` 구분, v0.1.8 ADR-0039 에서 폐기)
 - ADR-0009 `/wh-setup`이 wikihub-lint.timer 주기를 wikihub.yaml에서 동기화

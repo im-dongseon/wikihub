@@ -28,7 +28,7 @@
       "model": "ollama-cloud/deepseek-v4-flash"
     },
     "build-hard": {
-      "model": "ollama-cloud/kimi-k2.6",
+      "model": "ollama-cloud/kimi-k2.7-code",
       "tools": { "write": true, "edit": true, "bash": true },
       "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or touch unrelated code."
     },
