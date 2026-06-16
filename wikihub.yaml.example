@@ -70,6 +70,7 @@ operations:
 agent:
   type: hermes                                                            # ADR-0012 — 다른 값: codex, gemini
   binary: /usr/local/bin/hermes                                           # R10 MED-8: 미설치 시 운영자가 별도 설치 책임
+  # profile: wikihub                                                      # optional Hermes profile name (issue #153). 미지정 시 default profile 사용.
   oneshot_args: ["chat", "--skills", "{skill}", "--quiet", "--yolo", "--query"]     # ADR-0032 + 2026-05-19 §Note — `{skill}` per-unit placeholder, `--quiet` transcript 차단, `--yolo` tirith auto-approve (noninteractive 환경 필수)
   skill_prefix: "wh-"                                                     # ADR-0033 (ADR-0011 supersedes — colon `wh:` → hyphen `wh-`)
   timeout_sec: 1200                                                       # bash timeout + systemd TimeoutStartSec sync source (ADR-0032 §sub-4). v0.1.5 default 600 → 1200 — DeepSeek 등 느린 LLM backend 대비 (Hermes 실증, 2026-05-20).

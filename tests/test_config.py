@@ -129,7 +129,7 @@ def test_mount_path_no_warn_on_equal(tmp_path: Path, caplog: pytest.LogCaptureFi
 
 
 def test_duplicate_vault_id_fatal(tmp_path: Path) -> None:
-    text = """
+    text = """\
 version: 1
 instance:
   root: /opt/wikihub
@@ -152,3 +152,21 @@ agent:
     with pytest.raises(VaultSyncFatal) as e:
         load_wikihub_yaml(yp)
     assert "중복" in e.value.reason
+
+
+def test_agent_profile_default_none(tmp_path: Path) -> None:
+    """profile 미지정 시 None (backward-compat)."""
+    yp = _write(tmp_path / "wikihub.yaml", _minimum_yaml())
+    cfg = load_wikihub_yaml(yp)
+    assert cfg.agent.profile is None
+
+
+def test_agent_profile_set(tmp_path: Path) -> None:
+    """profile 지정 시 값 반영."""
+    text = _minimum_yaml().replace(
+        "  oneshot_args: [\"-z\"]",
+        "  profile: wikihub\n  oneshot_args: [\"-z\"]",
+    )
+    yp = _write(tmp_path / "wikihub.yaml", text)
+    cfg = load_wikihub_yaml(yp)
+    assert cfg.agent.profile == "wikihub"
