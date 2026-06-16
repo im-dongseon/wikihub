@@ -224,6 +224,20 @@ def _per_skill_invocation(cfg: dict, skill_name: str) -> str:
             new_args.extend(["--model", str(skill_model)])
         oneshot_args = new_args
 
+    # issue #153 — optional Hermes profile inject (--query 앞에, --model 뒤에)
+    profile = agent.get("profile")
+    if profile:
+        new_args: list = []
+        inserted = False
+        for arg in oneshot_args:
+            if str(arg) == "--query" and not inserted:
+                new_args.extend(["--profile", str(profile)])
+                inserted = True
+            new_args.append(arg)
+        if not inserted:
+            new_args.extend(["--profile", str(profile)])
+        oneshot_args = new_args
+
     resolved = [str(a).format(skill=skill_name) for a in oneshot_args]
     return " ".join([binary] + resolved).strip()
 

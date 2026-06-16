@@ -39,6 +39,7 @@ class AgentConfig:
     skill_prefix: str
     timeout_sec: int
     notify_on_fatal: bool
+    profile: str | None = None  # optional Hermes profile name (issue #153)
 
 
 @dataclass
@@ -149,6 +150,7 @@ def _parse_agent(acfg: dict[str, Any]) -> AgentConfig:
         skill_prefix=str(acfg.get("skill_prefix", "wh:")),
         timeout_sec=int(acfg.get("timeout_sec", 600)),
         notify_on_fatal=bool(acfg.get("notify_on_fatal", True)),
+        profile=acfg.get("profile"),  # optional, None if unset (issue #153)
     )
 
 
