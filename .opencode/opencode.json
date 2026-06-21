@@ -33,7 +33,7 @@
       "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or touch unrelated code."
     },
     "review-correctness": {
-      "model": "ollama-cloud/glm-5.1"
+      "model": "ollama-cloud/glm-5.2"
     },
     "review-quality": {
       "model": "ollama-cloud/minimax-m2.7"
