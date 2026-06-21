@@ -404,3 +404,17 @@
 - **트레이드오프**: NAS vault는 SFTP 기반으로 rclone 의존성 유지. Google Drive vault와 동일한 mount/vfs 계층 사용하나, `vfs/refresh` 및 OAuth 검사는 NAS에서 불필요하여 조건 분기. 향후 NFS/SMB backend는 별도 ADR 필요.
 - **결론**: main merge `dbf4dda` + annotated tag `v0.1.11` + `latest` (2026-06-05). 운영자 `install.sh --branch latest`. 자세한 사용자 관점 요약은 `docs/changelog.md` v0.1.11 entry.
 - **참조**: `docs/changelog.md` [v0.1.11], `docs/adr/0044`, features/archive/*.
+
+---
+
+## [2026-06-21] v0.1.14 release
+
+- **목적**: v0.1.12 → v0.1.14 누적 release. index.md 경량화 + lint 파일 권한 명시화 + OpenCode review 모델 변경.
+- **로직 (주요 묶음)**:
+  - **index.md 경량화** (#156) — lint Step 5 출력 포맷에서 설명·참조 수 제거, wikilink만 유지. 208KB → ~30~40KB (80%+ 감소).
+  - **lint 파일 권한 644 설정** (#157) — `wiki/index.md`와 `wiki/_lint/report.md` write 직후 `chmod 644`, `_lint/` 디렉토리 `chmod 755`. systemd timer umask 의존성 제거.
+  - **OpenCode review 모델 변경** — review-correctness subagent 모델 변경.
+- **생성 ADR**: 없음.
+- **트레이드오프**: index.md 경량화로 graphify 폴백 시 read 비용 감소. lint 파일 권한 명시화로 umask drift 방어.
+- **결론**: main merge `2a9fc09` + annotated tag `v0.1.14` + `latest` (2026-06-21). 운영자 `install.sh --branch latest`.
+- **참조**: `docs/changelog.md` [v0.1.14].
