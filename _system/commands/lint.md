@@ -197,6 +197,7 @@ ADR-0005에 따라 `/wl`가 index 재구성 책임 보유:
 - 카테고리별 섹션. sources는 vault별 sub-section
 - 각 항목: `[[link]]` (wikilink만 — 설명·참조 수 제거, index는 카탈로그 역할에 집중)
 - 통째 덮어쓰기 (이전 index는 backup 없이 대체 — 결정론적 재계산이므로 손실 무의미)
+- **권한 설정**: index.md write 직후 `chmod 644 "<path>"` 실행.
 
 ### Step 6. 모순·정보 갱신 점검 (보고만)
 
@@ -296,6 +297,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 ```
 
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
+- **권한 설정**: report.md write 직후 `chmod 644 "<path>"`. `_lint/` 디렉토리 write 전 `mkdir -p` 후 `chmod 755`.
 
 ### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
@@ -346,6 +348,7 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 | LLM 응답 실패 (entity 추출 등) | 해당 source skip + report에 노트. exit 0 (다음 사이클 재시도) |
 | index.md write 실패 (disk full 등) | exit 1 + ops-alert |
 | 카테고리 디렉토리 생성 실패 | exit 2 (Fatal, 권한 문제 의심) + notify |
+| chmod 실패 (소유권·읽기전용 FS·NFS ACL) | warn-only + report에 노트. exit 0 (권한 실패가 wiki 내용 손실로 이어지지 않음) |
 
 ## 멱등성 보장
 
