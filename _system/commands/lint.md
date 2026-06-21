@@ -348,7 +348,7 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 | LLM 응답 실패 (entity 추출 등) | 해당 source skip + report에 노트. exit 0 (다음 사이클 재시도) |
 | index.md write 실패 (disk full 등) | exit 1 + ops-alert |
 | 카테고리 디렉토리 생성 실패 | exit 2 (Fatal, 권한 문제 의심) + notify |
-| chmod 실패 (소유권·읽기전용 FS·NFS ACL) | warn-only + report에 노트. exit 0 (권한 실패가 wiki 내용 손실로 이어지지 않음)
+| chmod 실패 (소유권·읽기전용 FS·NFS ACL) | warn-only + report에 노트. exit 0 (권한 실패가 wiki 내용 손실로 이어지지 않음) |
 
 ## 멱등성 보장
 
