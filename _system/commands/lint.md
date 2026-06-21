@@ -175,27 +175,27 @@ ADR-0005에 따라 `/wl`가 index 재구성 책임 보유:
 
 ## Sources
 ### gdrive
-- [[gdrive/meetings/2026-Q1.pptx]] — 2026 Q1 회의자료 (sources/gdrive/meetings/)
-- [[gdrive/notes/idea]] — 아이디어 메모
+- [[gdrive/meetings/2026-Q1.pptx]]
+- [[gdrive/notes/idea]]
 ### nas (있을 시)
 ...
 
 ## Entities
-- [[홍길동]] — 전략기획팀 PM (5 sources 참조)
+- [[홍길동]]
 - ...
 
 ## Concepts
-- [[OKR]] — Objectives and Key Results (3 sources 참조)
+- [[OKR]]
 - ...
 
 ## Analyses
-- [[2026-H1-회의-결정-비교]] — 2026-05-13 작성
+- [[2026-H1-회의-결정-비교]]
 - ...
 ```
 
 - frontmatter 미포함 (사람 가시 진입점)
 - 카테고리별 섹션. sources는 vault별 sub-section
-- 각 항목: `[[link]] — 1줄 요약 (참조 수 또는 위치)`
+- 각 항목: `[[link]]` (wikilink만 — 설명·참조 수 제거, index는 카탈로그 역할에 집중)
 - 통째 덮어쓰기 (이전 index는 backup 없이 대체 — 결정론적 재계산이므로 손실 무의미)
 
 ### Step 6. 모순·정보 갱신 점검 (보고만)
