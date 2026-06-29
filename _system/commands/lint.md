@@ -108,6 +108,7 @@ def resolve_link(name, category):
 - **dangling 엣지** (존재하지 않는 노드 가리킴): Step 2와 중복 가능. 통합 보고
 - **언급된 개념의 페이지 부재**: source 본문에서 LLM이 식별한 entity·concept 중 `wiki/entities/`·`wiki/concepts/`에 페이지 없음 → **자동 stub 생성** (frontmatter + 1줄 LLM 요약 + `referenced_by`)
   - **alias 인식 (v0.1.8 — ADR-0039)**: stub 생성 전 wiki/entities/ + wiki/concepts/ 의 기존 page frontmatter `aliases` 셋을 lowercase 로 normalize 한 후, 본문 form 의 lowercase 가 그 셋에 포함되면 stub 생성 **skip** (LLM 재생성 무한 loop 차단). 기존 page 의 referenced_by 만 갱신.
+  - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행 (Step 5·8과 동일 패턴). 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
 
 ### Step 4. 자동 cross-ref 추가 (자동)
 

@@ -164,6 +164,7 @@ python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
    - **alias 인식 (ADR-0039)**: 본문 form 의 lowercase 가 기존 page 의 frontmatter `aliases` 셋 (lowercase normalize) 1+ 공통 → 기존 page 로 간주. `referenced_by` 만 추가 (alias 셋 미변경, stub 생성 skip — LLM 재생성 무한 loop 차단)
    - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 (위 alias 인식 포함) → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
    - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + `aliases: [<본문 form>]` + 본문은 1줄 요약, `referenced_by: [<source>]`)
+     - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행. 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
 4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
 5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wl`가 책임 (--apply 시 archive)
 
