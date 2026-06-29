@@ -857,7 +857,7 @@ EOF
 
 # ─── F5 ADR-0032·0033 — Hermes skill registration ────────────────────
 # WIKIHUB_SKILLS 정본 list. ADR-0032 §sub-2 (install-time materialized)
-WIKIHUB_SKILLS=(wi wl wh-query wh-setup wq)
+WIKIHUB_SKILLS=(wi wl wh-query wh-setup wq wh-update)
 # v0.1.8 update_path_fixes (D3=B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
 # graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
