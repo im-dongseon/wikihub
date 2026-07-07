@@ -38,7 +38,8 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 그룹 | feature_id | 결과 |
 |---|---|---|
-| v0.1.14 | `index_md_lightweight`(#156) · `lint_file_permission_644`(#157) · opencode review model 변경 | ✅ release (2026-06-21) |
+|| v0.1.15 | `lint_ingest_chmod_644`(#160) · `fix_issue_162` | ✅ release (2026-07-07) |
+|| v0.1.14 | `index_md_lightweight`(#156) · `lint_file_permission_644`(#157) · opencode review model 변경 | ✅ release (2026-06-21) |
 | v0.1.12 | `branch_policy_cleanup`(PR #136) · `file_map_batch_commit`(PR #135) · `nas_file_map_key`(PR #137) · `wq_alias`(PR #139) · OpenCode agent 정규화(ADR-0046) · feature directory retire(ADR-0047) | ✅ release (2026-06-08) |
 | v0.1.11 | NAS vault type (ADR-0044) · install.sh SFTP remote · systemd mount 분기 · release document preflight (#114) · sync file_map batch (#133) · refspec push fix (#112) | ✅ release (2026-06-05) |
 | v0.1.10 | MCP Phase 1(ADR-0043) · alias resolver(ADR-0042) · install/update hardening · deployment helpers · sidecar fixes(#108/#109) | ✅ release (2026-05-30) |
