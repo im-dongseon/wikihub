@@ -417,4 +417,16 @@
 - **생성 ADR**: 없음.
 - **트레이드오프**: index.md 경량화로 graphify 폴백 시 read 비용 감소. lint 파일 권한 명시화로 umask drift 방어.
 - **결론**: main merge `2a9fc09` + annotated tag `v0.1.14` + `latest` (2026-06-21). 운영자 `install.sh --branch latest`.
-- **참조**: `docs/changelog.md` [v0.1.14].
+|- **참조**: `docs/changelog.md` [v0.1.14].
+
+---
+
+## [2026-07-07] v0.1.15 release
+
+- **목적**: v0.1.14 → v0.1.15 누적 release. lint/ingest Step 3/4 stub 생성 시 chmod 644 명시.
+- **로직**:
+  - **lint/ingest 파일 권한 644 명시** (#160) — lint Step 3, ingest Step 4 stub 생성 직후 `chmod 644` 명시. systemd timer umask 의존성 제거.
+- **생성 ADR**: 없음.
+- **트레이드오프**: lint/ingest stub 파일 권한 명시화로 umask drift 방어.
+- **결론**: main merge + annotated tag `v0.1.15` + `latest` (2026-07-07). 운영자 `install.sh --branch latest`.
+- **참조**: `docs/changelog.md` [v0.1.15].

@@ -1,0 +1,7 @@
+name: wh-update
+description: "wikihub 운영 환경을 latest (또는 명시 ref) 로 동기화. install.sh update mode 의 thin wrapper — config drift 사전 점검 + systemd unit 변경 보고. (alias: wikihub update)"
+version: 0.1.0
+platforms: [linux]
+metadata:
+  tags: [wikihub, update, maintenance, ops]
+  category: operations
