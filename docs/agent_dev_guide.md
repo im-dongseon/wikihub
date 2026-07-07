@@ -176,11 +176,11 @@ LLM 기반 AI 에이전트(OpenCode 등)를 활용한 소프트웨어 개발 워
 |---|---|---|
 | `_system/VERSION` | `= X.Y.Z` | **HARD** (== release tag) |
 | `docs/changelog.md` | `## [vX.Y.Z]` `(canary)`→`(released)` + 날짜 | **HARD** (entry 존재 & not canary) |
-| `README.md` 배지 | Status/Version `canary`→`vX.Y.Z` released | **HARD** (Status 배지에 버전 반영 & not canary) |
+| `README.md` 배지 | Status/Version `canary`→`vX.Y.Z` released | **HARD** (Status 배지에 버전 반영 & not canary; Version 배지에 버전 반영 & not canary) |
 | `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" + 다음 버전 현행화 | WARN |
 | `docs/release-history.md` | 버전 issue 항목 append (아래 형식) | WARN |
 
-`release.sh` 는 HARD 3종 미충족 시 비가역 merge 전에 `die` 한다 (escape hatch: `--skip-doc-check`). WARN 2종은 경고만 — 운영자가 체크리스트로 보장. 이 표가 "릴리스 시 무엇을 갱신해야 하는가"의 정본.
+`release.sh` 는 HARD 4종 미충족 시 비가역 merge 전에 `die` 한다 (escape hatch: `--skip-doc-check`). WARN 2종은 경고만 — 운영자가 체크리스트로 보장. 이 표가 "릴리스 시 무엇을 갱신해야 하는가"의 정본.
 
 **생략 가능 조건** (어느 하나라도 해당):
 

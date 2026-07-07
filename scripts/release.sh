@@ -48,7 +48,7 @@ run_or_dry() {
 
 # Release-doc preflight (issue #114) — verify the release-doc set is updated on the
 # version branch BEFORE the irreversible merge/tag. Reads the branch tree via `git show`
-# (no checkout). HARD-fails on deterministic signals (VERSION / changelog / README badge),
+# (no checkout). HARD-fails on deterministic signals (VERSION / changelog / README badges),
 # WARNs on prose docs (roadmap / HISTORY). `--skip-doc-check` is the escape hatch.
 # Checklist 정본: docs/agent_dev_guide.md §Step 5.
 _preflight_release_docs() {
@@ -77,13 +77,18 @@ _preflight_release_docs() {
     printf '%s' "$badge" | grep -q "$VERSION_TAG" || die "preflight: README.md Status 배지가 $VERSION_TAG 미반영 ('${badge:-<none>}') — 배지 갱신 후 재시도."
     printf '%s' "$badge" | grep -qi "canary" && die "preflight: README.md Status 배지가 아직 canary — released 로 갱신 후 재시도."
 
+    # HARD 4 — README Version 배지가 이 버전을 반영
+    vbadge="$(printf '%s\n' "$readme" | grep -i 'img.shields.io/badge/Version' | head -1 || true)"
+    printf '%s' "$vbadge" | grep -q "$ver" || die "preflight: README.md Version 배지가 $ver 미반영 ('${vbadge:-<none>}') — 배지 갱신 후 재시도."
+    printf '%s' "$vbadge" | grep -qi "canary" && die "preflight: README.md Version 배지가 아직 canary — released 로 갱신 후 재시도."
+
     # WARN — roadmap / HISTORY (prose, 기계 단정 어려움 — 존재 힌트만)
     printf '%s\n' "$(git show "$ref:docs/roadmap.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
         || warn "preflight: docs/roadmap.md 에 $VERSION_TAG 언급 없음 — 누적완료 이동 확인 권장."
     printf '%s\n' "$(git show "$ref:docs/release-history.md" 2>/dev/null || true)" | grep -q "$VERSION_TAG" \
         || warn "preflight: docs/release-history.md 에 $VERSION_TAG 항목 없음 — release 항목 append 확인 (AGENTS §3.5)."
 
-    info "Release-doc preflight 통과 (HARD 3종 OK)."
+    info "Release-doc preflight 통과 (HARD 4종 OK)."
 }
 
 # --- Argument parsing ---

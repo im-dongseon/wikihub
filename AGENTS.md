@@ -87,7 +87,7 @@ Release 직후: `release.sh` 가 cleanup 만 자동 수행.
 | `docs/roadmap.md` | "현재 진행"→"누적 완료(release)" | WARN |
 | `docs/release-history.md` | 항목 append | WARN |
 
-HARD 3종 미충족 시 `release.sh` 가 비가역 merge 전에 `die` (escape hatch: `--skip-doc-check`).
+HARD 4종 미충족 시 `release.sh` 가 비가역 merge 전에 `die` (escape hatch: `--skip-doc-check`).
 
 ## 7. 외부 client entry points (v0.1.10+, ADR-0043)
 
