@@ -136,6 +136,7 @@ case "$backend" in
         ;;
     openai)
         timeout "$timeout_sec" env OPENAI_API_KEY="$api_key" \
+            OPENAI_BASE_URL="$endpoint" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend openai --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
