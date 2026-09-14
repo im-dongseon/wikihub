@@ -120,6 +120,11 @@ def _detect_duplicates(alias_map: dict[str, list[dict]]) -> dict:
         if len(pages) < 2:
             continue
 
+        # Filter: only count entries with 2+ DISTINCT pages (not alias variants within one page)
+        distinct_paths: set[str] = {p["path"] for p in pages}
+        if len(distinct_paths) < 2:
+            continue
+
         # Count distinct categories
         cats: set[str] = {p["category"] for p in pages}
         if len(cats) == 1:
