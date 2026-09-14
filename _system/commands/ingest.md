@@ -35,13 +35,23 @@
 
 `wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wi --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단. 진행 중 ingest 가 있으면 즉시 exit 0 (no-op).
 
+**1차 가드 = systemd `Type=oneshot`.** vault별 유닛이 실행 중이면 중복 발화가 systemd 자체에서 드롭됩니다 (`## 동시성` 참조).
+
+**2차 가드 = per-vault flock 파일.** **단일 bash 프로세스가 세션 전체를 소유할 때만** 유효합니다.
+
 ```bash
+# 세션 전체를 소유하는 단일 bash 프로세스 내부에서만
 exec 200>"$WIKIHUB_HOME/.wi-<vault_id>.lock"
 flock -n 200 || { echo "ingest (vault=<vault_id>) 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
-# lock 은 process 종료 시 자동 해제 (kernel-managed)
+# lock 은 이 bash 프로세스가 종료할 때까지 유지 (kernel-managed)
 ```
 
-`flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 timer fire 자연 재시도). race window 0% 회피 (lint.md Step 0 와 동일 패턴).
+> **⚠️ 이 패턴은 Hermes 경유 호출에서 무력하다 (2026-09-14 실증)**
+>
+> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라집니다. Hermes agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과합니다. 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
+> **fd 상속 방식은 이 실행 모델에서 race 를 보장 차단하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다. lint.md Step 0 참조.
+>
+> `flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 timer fire 자연 재시도).
 
 **scope = per-vault** (lock 파일명에 `<vault_id>` 접미). multi-vault 병렬 ingest 허용 — `wikihub.yaml.operations.max_concurrent_vaults` 정책 정합. 본 lock 은 Step 1~6 전체를 cover하므로, Step 2 의 `vault-fetch.py` 가 보유한 기존 `_state/<vault>/.lock` 이 보호하지 못하던 Step 1 (`pending_ingest.json` attempts 증가) · Step 4 (LLM entity·concept 추출) · Step 5 (`log.md` append) · Step 6 (`pending_ingest.json` 삭제) 의 race window 가 본 lock 으로 닫힌다.
 
@@ -238,8 +248,8 @@ Step 5까지 무에러 완료 시:
 
 ## 동시성
 
-- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wi-<vault_id>.lock`) — systemd timer · 메인테이너 수동 `systemctl start` · Hermes 채팅의 `/wi` 직접 호출 사이의 동일 vault 중복 실행을 일괄 차단. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover.
-- vault별 systemd unit 이 `Type=oneshot` → 동일 vault timer 중복 발화는 systemd 자체에서도 드롭 (Step 0 lock 의 보강 layer, F1 §4.6.5).
+- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wi-<vault_id>.lock`) — systemd 유닛 경유 경로(timer·수동 `systemctl`)는 1차 가드가 커버하므로, 본 2차 가드는 **Hermes 채팅의 `/wi` 직접 호출 경로** 대상이다. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover한다. **단 세션 전체를 소유하는 단일 bash 프로세스 내부에서만 유효** — Step 0 경고 참조.
+- vault별 systemd unit 이 `Type=oneshot` → 동일 vault timer 중복 발화는 systemd 자체에서도 드롭 (**1차 가드**. Step 0 lock 은 2차 보조 layer, F1 §4.6.5).
 - 다중 vault 간 직렬화는 `wikihub.yaml.operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede). Step 0 lock 은 per-vault 이므로 본 정책에 직교.
 
 ## 관련 ADR
