@@ -135,8 +135,14 @@ case "$backend" in
                 --max-concurrency "$concurrency" --out "$WIKIHUB_HOME"
         ;;
     openai)
-        timeout "$timeout_sec" env OPENAI_API_KEY="$api_key" \
-            OPENAI_BASE_URL="$endpoint" \
+        # OPENAI_BASE_URL 은 graphify 의 os.environ.get() fallback 을 덮어쓴다 —
+        # 빈 값도 "설정됨" 으로 취급되어 default(api.openai.com)가 사라진다.
+        # endpoint 미설정 profile(예: openai_gpt4)에서는 변수 자체를 넘기지 않는다.
+        openai_env=(OPENAI_API_KEY="$api_key")
+        if [[ -n "$endpoint" ]]; then
+            openai_env+=(OPENAI_BASE_URL="$endpoint")
+        fi
+        timeout "$timeout_sec" env "${openai_env[@]}" \
             graphify extract "$WIKIHUB_HOME/wiki" \
                 --backend openai --model "$model" \
                 --max-concurrency 4 --out "$WIKIHUB_HOME"
