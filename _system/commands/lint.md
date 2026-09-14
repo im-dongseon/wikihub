@@ -5,11 +5,15 @@ wiki 의 정합성·일관성 검증. graphify 자동 호출 가능. wikihub spe
 ## 호출
 
 ```
-<agent_invocation> "/wl"            # 진단 + 적용 (timer 자동 호출 + 메인테이너 수동 호출 동일 동작)
+# 권장 (1차 race 가드 적용 — systemd 경유)
+systemctl --user start wikihub-lint.service
+
+# Hermes 채팅 직접 호출 (systemd 우회 — 동시 실행 가드 미적용, Step 0.5 참조)
+<agent_invocation> "/wl"
 ```
 
 - **트리거 (자동)**: systemd timer (3시간 1회, v0.1.5 default `wikihub.yaml.operations.lint_interval_hours: 3`. 24h 이전 default 에서 변경 — graphify chain 의 cost 8배 증가하나 wiki 위생 사이클 빠른 surface 가치 우선)
-- **트리거 (수동)**: 메인테이너가 `wiki/_lint/report.md` 즉시 확인 + 변경 적용 의도 시
+- **트리거 (수동)**: 메인테이너가 `wiki/_lint/report.md` 즉시 확인 + 변경 적용 의도 시. **`systemctl --user start wikihub-lint.service` 를 사용** — timer 발화와 겹쳐도 systemd 가 동일 유닛 중복을 드롭 (Step 0)
 - **vault 무관 (wiki-wide)**: 단일 명령으로 전체 wiki 점검
 - **v0.1.8 ADR-0039 정합**: `--apply` flag 폐기 — wikihub `wiki/` 는 sources (vault, immutable) 의 LLM derivative 라 원본 변경 0. 매 cycle 진단 + 적용 default. 별도 dry-run 모드 필요 시 v0.2.x 검토.
 
@@ -32,17 +36,47 @@ wiki 의 정합성·일관성 검증. graphify 자동 호출 가능. wikihub spe
 
 ## 절차
 
-### Step 0. wiki-wide flock 가드 (v0.1.8 — race 가드)
+### Step 0. 동시 실행 가드 (race 가드)
 
-wikihub-lint.service (3h 주기 timer) + 메인테이너 수동 호출 `/wl` 의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
+wikihub-lint.service (3h 주기 timer) + 메인테이너 수동 호출의 동시 실행 race 차단. 진행 중 lint 가 있으면 즉시 exit 0 (no-op).
 
-```bash
-exec 200>"$WIKIHUB_HOME/.wl.lock"
-flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
-# lock 은 process 종료 시 자동 해제 (kernel-managed)
+**1차 가드 = systemd** (`Type=oneshot`). 동일 유닛이 실행 중이면 중복 발화가 systemd 자체에서 드롭됩니다 (ingest.md 도 동일한 systemd 유닛 가드를 씁니다).
+
+```
+systemctl --user start wikihub-lint.service
 ```
 
-`flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 fire 자연 재시도). race window 0% 회피.
+systemd 가 이미 실행 중인 유닛에 start 를 반복 요청해도 실제 실행 인스턴스는 1개입니다 (2026-09-14 실측: 실행 중 유닛에 start 3회 → 실행 1회). timer 와 수동 호출이 겹쳐도 동일 유닛이므로 중복이 생기지 않습니다.
+
+**2차 가드 = flock 파일** (보조 layer). **단일 bash 프로세스가 세션 전체를 소유할 때만** 유효합니다.
+
+```bash
+# 세션 전체를 소유하는 단일 bash 프로세스 (예: 실행 스크립트) 내부에서만
+exec 200>"$WIKIHUB_HOME/.wl.lock"
+flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
+# lock 은 이 bash 프로세스가 종료할 때까지 유지 (kernel-managed)
+```
+
+> **⚠️ 이 패턴은 Hermes 경유 호출에서 무력하다 (2026-09-14 실증)**
+>
+> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라집니다. Hermes agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과합니다. 실측:
+>
+> ```
+> 명령 1: exec 200>lock; flock -n 200  → 획득 후 프로세스 종료
+> 명령 2: exec 200>lock; flock -n 200  → 획득됨 (가드 무력)
+> flock -n 200 단독 실행 (해당 shell 에 fd 200 미할당) → "Bad file descriptor"
+> ```
+>
+> 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
+> **fd 상속 방식은 이 실행 모델에서 `race window 0%` 를 보장하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다.
+
+### Step 0.5. Hermes 채팅 `/wl` 직접 호출 경로 (미해결 — 후속 결정)
+
+Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 유닛을 경유하지 않으므로 **1차 가드가 적용되지 않습니다.** 이 경로에서는 위 flock 2차 가드도 무력합니다 (fd 상속 불가).
+
+- 현재 상태: 메인테이너가 timer 발화와 겹쳐 `/wl` 을 직접 호출하면 lint cycle 이 중복 실행될 수 있음
+- **권장 경로**: 수동 실행도 `systemctl --user start wikihub-lint.service` 를 사용 (1차 가드 적용)
+- 처리 방향(경로 폐기 / 프로세스-무관 가드 도입)은 후속 결정 사항 — 이슈 #180 참조
 
 ### Step 1. 디렉토리 구조 검증 (자동)
 
@@ -251,7 +285,7 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - 본 디렉토리는 pre-v0.1.8 era graphify 호출 또는 잘못된 `graphify --out` 인자 잔존물. 정상 graphify (`scripts/wikihub_graphify.sh` 가 `--out "$WIKIHUB_HOME"` 명시) 는 `wiki/graphify-out/` 미생성.
   - archive 후 lint 가 다시 stale 을 graph source 로 읽지 않음 + Step 3 의 절대 경로 정합으로 회귀 차단.
 
-**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출 (`/wl`) 도 즉시 적용. 진단만 받고 싶으면 `wiki/_lint/report.md` read.
+**v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출도 즉시 적용 (호출 경로는 `## 호출` 참조 — systemd 경유 권장). 진단만 받고 싶으면 `wiki/_lint/report.md` read.
 
 ### Step 8. log 작성
 
@@ -340,6 +374,13 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 | `wiki/_lint/report.md` | 자동 | overwrite |
 | 카테고리 디렉토리 (없으면) | 자동 | mkdir |
 | dangling link 제거·entity archive·본문 갱신 | 매 cycle 자동 (v0.1.8 ADR-0039) | wiki/ = LLM derivative, 원본 변경 0 |
+
+## 동시성
+
+- **1차 가드 = systemd `Type=oneshot`** — `wikihub-lint.service` 는 단일 유닛이므로 timer 발화와 `systemctl --user start` 수동 호출이 겹쳐도 중복 실행이 드롭된다. 실행 중 유닛에 start 를 반복 요청해도 실제 인스턴스는 1개 (2026-09-14 실측).
+- **2차 가드 = 파일 flock (`.wl.lock`)** — **세션 전체를 소유하는 단일 bash 프로세스가 있을 때만** 유효하다. Hermes agent 의 terminal tool 처럼 명령마다 별도 subprocess 를 만드는 실행 모델에서는 fd 상속이 불가해 무력하다 (Step 0 경고 참조).
+- **미해결 경로**: Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 를 경유하지 않아 1차 가드가 적용되지 않는다. 이 경로의 처리(폐기 또는 프로세스-무관 가드 도입)는 후속 결정 사항 — Step 0.5.
+- ingest 는 vault별 unit + per-vault lock 으로 직렬화한다 (ingest.md `## 동시성` 참조). lint 는 wiki-wide 단일 unit 이며 vault 무관.
 
 ## 실패 처리
 
