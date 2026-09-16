@@ -278,6 +278,16 @@ systemctl --user list-timers
 
 > install.sh `_step2_update` 는 `git fetch origin --tags --force` 로 force-updated lightweight tag 자동 수신 (ADR-0030 의 `_resolve_ref` path 2 + `--branch canary` 호출과 정합).
 
+
+### Profile-aware Hermes skill 등록 (install.sh Step 6)
+
+install.sh `_step6_agent_skill` 가 wikihub skill entry 를 Hermes config 의 `skills.external_dirs` 에 추가하는데, 이 config 파일의 경로는 Hermes 가 profile mode 일 때 profile home 이 아닌 **profile dir** 에 anchor 된다 (Hermes `get_config_path()` = `get_hermes_home() / "config.yaml"`, profile mode = `<hermes_root>/profiles/<name>/config.yaml`).
+
+- `wikihub.yaml` 의 `agent.profile` 값이 install.sh 의 경로 해석을 구동한다. 비어있으면 default (`$HOME/.hermes/config.yaml`) — backward-compat.
+- install.sh 자체가 `HOME=<profile_home>` (예: `.../profiles/<name>/home`) 환경에서 실행 중이면 canonical 경로 = `$(dirname "$HOME")/config.yaml` (= `.../profiles/<name>/config.yaml`). install.sh 가 `_hermes_config_path()` 안에서 `$HOME == */profiles/<profile>/home` 패턴 매칭으로 판별.
+- `HERMES_CONFIG_HOME` env var 가 비어있지 않으면 위 순서를 override 한다 (테스트 용도).
+- 과거 install.sh 이 profile mode 에서 stray `$HOME/.hermes/config.yaml` 에 wikihub entry 를 잘못 기록한 잔재는 `_migrate_hermes_stray_config()` 가 canonical path 와 다를 때만 정리 (marker comment `managed by wikihub install.sh — remove to disable auto-discovery` 로 wikihub entry 식별, 비-wikihub entry 보존, 빈 문서면 파일 삭제).
+
 ### Feature 종료 처리 (필수)
 
 feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 후), 다음을 수행한다.
