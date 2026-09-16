@@ -11,6 +11,9 @@ WorkingDirectory={wikihub_home}
 ExecStartPre=/bin/mkdir -p {wikihub_home}
 Environment=PATH={venv_path}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
+# lint playbook Step 4.5 가 $WIKIHUB_SRC/scripts/_helpers/*.py 를 직접 호출 (lint.md ~161).
+# 미설정 시 확장 결과는 빈 값 → /scripts/... 경로가 되어 실행 불가 (systemd 는 env 미확장 허용).
+Environment=WIKIHUB_SRC={wikihub_src}
 # ADR-0036 + ADR-0038 (v0.1.7 follow-up) — graphify subprocess env namespace 격리.
 #   파일 부재 또는 빈 값이어도 unit start 자체는 성공 — graphify subprocess 만 fail (lenient `-` prefix).
 #   default WIKIHUB_GRAPHIFY_OLLAMA_GEMMA_* 3 키 install.sh prefill. ollama_gemma 외 profile cookbook → docs/graphify-backend-test-reference.md §6.
