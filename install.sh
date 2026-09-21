@@ -861,9 +861,38 @@ WIKIHUB_SKILLS=(wi wl wh-query wh-setup wq wh-update)
 # v0.1.8 update_path_fixes (D3=B): wh-graphify hermes skill 폐기 — wikihub-graphify.service systemd 격상.
 # graphify 호출 정본 = scripts/wikihub_graphify.sh (ADR-0036 §D6 single-source).
 
-# Hermes config path. operator override: $HERMES_CONFIG_HOME (테스트 용도)
+# wikihub.yaml 의 agent.profile 값 읽기 (issue #182). 부재·실패 시 빈 문자열 (install 중단 금지).
+# HERMES_PROFILE env var 가 비어있지 않으면 operator override 로 우선 (HERMES_CONFIG_HOME 관례와 대칭).
+_hermes_agent_profile() {
+    if [[ -n "${HERMES_PROFILE:-}" ]]; then
+        echo "$HERMES_PROFILE"
+        return 0
+    fi
+    local yaml="$WIKIHUB_HOME/wikihub.yaml"
+    [[ -f "$yaml" ]] || return 0
+    "$VENV_PATH/bin/python3" -c \
+        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('profile','') or '')" \
+        "$yaml" 2>/dev/null || true
+}
+
+# Hermes config path. resolution order (issue #182 — Hermes 가 profile config 를 profile dir 에 anchor):
+#   1. $HERMES_CONFIG_HOME set -> ${HERMES_CONFIG_HOME}/config.yaml   (operator override, 테스트 용도)
+#   2. agent.profile 세팅 + $HOME == */profiles/<profile>/home -> $(dirname "$HOME")/config.yaml
+#      (Hermes profile mode 의 canonical — profile home 이 아닌 profile dir 에 config.yaml anchor)
+#   3. fallback -> $HOME/.hermes/config.yaml                          (backward-compat)
 _hermes_config_path() {
-    echo "${HERMES_CONFIG_HOME:-$HOME/.hermes}/config.yaml"
+    if [[ -n "${HERMES_CONFIG_HOME:-}" ]]; then
+        echo "${HERMES_CONFIG_HOME}/config.yaml"
+        return 0
+    fi
+    local _profile; _profile="$(_hermes_agent_profile)"
+    # trailing slash 정규화 — ${HOME%/} 로 glob 매칭 견고화 (reviewer mid 반영)
+    local _home_norm="${HOME%/}"
+    if [[ -n "$_profile" && "$_home_norm" == */profiles/"$_profile"/home ]]; then
+        echo "$(dirname "$_home_norm")/config.yaml"
+        return 0
+    fi
+    echo "$HOME/.hermes/config.yaml"
 }
 
 # operational yaml 의 schema 보강 — v0.1.5+ 신설 field 자동 추가 (부재 시만).
@@ -1156,12 +1185,162 @@ PYEOF
     find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
 }
 
+# Stray Hermes config 정리 (issue #182). 과거 install.sh 이 profile mode 에서
+# $HOME/.hermes/config.yaml (stray) 에 wikihub skill entry 를 잘못 기록한 잔재 제거.
+# canonical path (= _hermes_config_path) 와 stray path 가 다를 때만 작동.
+# wikihub entry 판별: EOL marker comment 또는 realpath 가 /.local/share/wikihub/.../_system/skills/_generated.
+# install 중단 금지 — 모든 error 는 warn + return 0.
+_migrate_hermes_stray_config() {
+    local canonical; canonical="$(_hermes_config_path)"
+    local stray="$HOME/.hermes/config.yaml"
+
+    # canonical == stray 면 정리 대상 아님 (non-profile mode)
+    [[ "$stray" == "$canonical" ]] && return 0
+    # stray 부재 시 조용히 종료
+    [[ -f "$stray" ]] || return 0
+
+    local backup="$stray.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$stray" "$backup"
+
+    local result
+    result="$("$VENV_PATH/bin/python3" - "$stray" "$backup" <<'PYEOF'
+import os, sys
+import ruamel.yaml
+from ruamel.yaml.comments import CommentedSeq
+
+path = sys.argv[1]
+backup_path = sys.argv[2]
+MARKER = "managed by wikihub install.sh — remove to disable auto-discovery"
+WIKIHUB_REALPATH_MARK = "/.local/share/wikihub/"
+WIKIHUB_REALPATH_SUFFIX = "/_system/skills/_generated"
+
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+
+try:
+    with open(path, encoding="utf-8") as f:
+        data = yaml.load(f) or {}
+except Exception as e:
+    # 읽기/파싱 실패는 조용히 넘기지 않는다 — 운영자 인지 필요 (reviewer mid 반영)
+    print("read_error: %s" % e, end="")
+    sys.exit(0)
+
+skills = data.get("skills") if isinstance(data, dict) else None
+if not skills:
+    print("noop", end="")
+    sys.exit(0)
+
+ext = skills.get("external_dirs")
+if ext is None:
+    print("noop", end="")
+    sys.exit(0)
+
+# idx 번째 entry 의 EOL comment 에 marker 가 있는지 검사 (ruamel CommentedSeq.ca.items)
+def entry_has_marker(idx):
+    try:
+        cdata = ext.ca.items.get(idx)
+        if cdata is None:
+            return False
+        try:
+            s = str(cdata[0])
+        except Exception:
+            s = str(cdata)
+        return MARKER in s
+    except Exception:
+        return False
+
+new_ext = CommentedSeq()
+removed = 0
+for idx in range(len(ext)):
+    raw = str(ext[idx])
+    is_wiki = entry_has_marker(idx)
+    if not is_wiki:
+        try:
+            rp = os.path.realpath(os.path.expanduser(raw))
+            if WIKIHUB_REALPATH_MARK in rp and rp.endswith(WIKIHUB_REALPATH_SUFFIX):
+                is_wiki = True
+        except Exception:
+            pass
+    if is_wiki:
+        removed += 1
+        continue
+    new_ext.append(ext[idx])
+
+if removed == 0:
+    print("noop", end="")
+    sys.exit(0)
+
+if len(new_ext) == 0:
+    del skills["external_dirs"]
+else:
+    skills["external_dirs"] = new_ext
+
+if isinstance(skills, dict) and len(skills) == 0:
+    del data["skills"]
+
+if not data:
+    try:
+        os.remove(path)
+        print("removed", end="")
+    except Exception:
+        print("noop", end="")
+    sys.exit(0)
+
+tmp = path + ".tmp"
+try:
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    print("cleaned", end="")
+except Exception:
+    # orphan tmp 회수 (ADR-0031 §Decision A atomic write invariant 정합)
+    try:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    print("noop", end="")
+PYEOF
+)" || result="noop"
+
+    case "$result" in
+        cleaned)
+            info "stray Hermes config 정리 — $stray (backup: $backup)"
+            ;;
+        removed)
+            info "stray Hermes config 제거 — $stray (backup: $backup) — wikihub entry 외 잔존 없어 파일 삭제"
+            ;;
+        noop)
+            # backup 불필요 — cleanup
+            [[ -f "$backup" ]] && rm -f "$backup"
+            ;;
+        read_error*)
+            [[ -f "$backup" ]] && rm -f "$backup"
+            warn "stray Hermes config 읽기/파싱 실패 — ${result#read_error: } (건너뜀)"
+            ;;
+        *)
+            warn "stray Hermes config 정리 결과 비예상: $result — install 계속 진행"
+            ;;
+    esac
+
+    # 7일 초과 stray backup cleanup — _patch_hermes_external_dirs 와 동일 정책 (reviewer minor 반영)
+    find "$HOME/.hermes" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+    return 0
+}
+
 # 등록 후 검증 (ADR-0032 §sub-3 검증 단계)
 _verify_hermes_skill_registration() {
     local agent_binary="$1"
-    info "Hermes skill 인식 검증 — $agent_binary skills list"
+    local _profile; _profile="$(_hermes_agent_profile)"
+    local profile_args=()
+    if [[ -n "$_profile" ]]; then
+        profile_args=(--profile "$_profile")
+    fi
+    info "Hermes skill 인식 검증 — $agent_binary skills list ${profile_args[*]:-}"
     local list_output
-    if ! list_output="$("$agent_binary" skills list 2>&1)"; then
+    if ! list_output="$("$agent_binary" skills list "${profile_args[@]}" 2>&1)"; then
         warn "hermes skills list 실패 — 검증 skip"
         return 0
     fi
@@ -1175,8 +1354,8 @@ _verify_hermes_skill_registration() {
         return 0
     fi
     info "미인식 skill: ${missing[*]} — \`hermes skills audit\` 1회 호출 후 재검증"
-    if "$agent_binary" skills audit >/dev/null 2>&1; then
-        list_output="$("$agent_binary" skills list 2>&1 || true)"
+    if "$agent_binary" skills audit "${profile_args[@]}" >/dev/null 2>&1; then
+        list_output="$("$agent_binary" skills list "${profile_args[@]}" 2>&1 || true)"
         local still_missing=()
         for skill in "${missing[@]}"; do
             echo "$list_output" | grep -qE "(^|[[:space:]])$skill([[:space:]]|$)" \
@@ -1222,6 +1401,9 @@ _step6_agent_skill() {
 
     # 4. ~/.hermes/config.yaml 의 external_dirs 패치 (ADR-0032 §sub-3·sub-4)
     _patch_hermes_external_dirs || return 2
+
+    # 4.5. stray Hermes config 정리 (issue #182 — profile mode 전환 시 과거 잔재 제거)
+    _migrate_hermes_stray_config
 
     # 5. 등록 후 검증
     _verify_hermes_skill_registration "$agent_binary"

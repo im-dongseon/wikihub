@@ -6,11 +6,20 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.16] — 2026-09-14 (canary)
+## [v0.1.16] — 2026-09-21 (released)
 
-### 추가 (Added)
+### 수정 (Fixed)
+- **lint Step 0 race 가드 재설계** — `flock(2)` 은 열린 fd 에 lock 을 걸고 fd 는 프로세스 수명과 함께 사라지므로, Hermes agent 가 terminal tool 로 명령을 매번 별도 subprocess 로 실행하는 환경에서는 2차 flock 가드가 무력했다. systemd 1차 가드로 전환하고 playbook 경고를 실측 근거와 함께 명시 (#180, PR #181)
+- **lint Step 4.5 alias 중복 탐지 오탐** — 같은 페이지의 alias 변형을 자기 자신과 중복으로 판정하던 문제. `distinct_paths` 필터로 2개 이상 서로 다른 페이지가 있을 때만 중복으로 집계 (#176, PR #178)
+- **graphify openai backend endpoint 미전달** — `OPENAI_BASE_URL` 을 전달하지 않아 endpoint 지정 profile 이 default(api.openai.com)로 향하던 문제. endpoint 가 빈 값이면 변수 자체를 넘기지 않아 default 소실도 방지 (#177, PR #179)
+- **install.sh skill 등록이 프로필 config 에 닿지 않음** — `skills.external_dirs` 패치 대상이 `${HERMES_CONFIG_HOME:-$HOME/.hermes}/config.yaml` 로 고정돼, 프로필 운용 시 Hermes 가 읽지 않는 위치에 기록되던 결함. `agent.profile` 을 인지해 프로필 정본 config(`<hermes_root>/profiles/<name>/config.yaml`)를 대상으로 삼고, 과거 stray 파일의 wikihub 항목을 정리한다 (#182, PR #189)
+- **lint/ingest unit template `WIKIHUB_SRC` 부재** — lint Step 4.5 helper 가 `$WIKIHUB_SRC/scripts/_helpers/*.py` 를 참조하는데 unit env 에 없어 빈 값으로 확장 → `/scripts/...` 경로가 되어 helper 가 조용히 미실행되던 결함. 두 template 에 `WIKIHUB_SRC` 를 주입해 graphify template 과 정합 회복 (#183, PR #188)
 
-- (bootstrap — first feature commit 부터 entry 누적)
+### 변경 (Changed)
+- `_system/commands/ingest.md` — entity/concept stub 생성 시 `referenced_by` 블록 들여쓰기 2칸 규칙 명문화 (#183, PR #188)
+- `_system/commands/lint.md` · `ingest.md` — flock 가드 경고를 실측 근거 기반으로 보강 (#180, PR #181)
+- `wikihub.yaml.example` · `docs/agent_dev_guide.md` — `agent.profile` 이 skill 등록 경로를 좌우함을 문서화 (#182, PR #189)
+- `_system/VERSION` — `0.1.15` → `0.1.16`
 
 ---
 

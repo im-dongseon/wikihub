@@ -120,25 +120,40 @@ def _detect_duplicates(alias_map: dict[str, list[dict]]) -> dict:
         if len(pages) < 2:
             continue
 
+        # Filter: only count entries with 2+ distinct pages. A single page whose
+        # aliases normalize to the same form (e.g. "Effort" + "effort") puts the
+        # same path in ``pages`` twice — that is an alias variant, not a duplicate.
+        distinct_paths: set[str] = {p["path"] for p in pages}
+        if len(distinct_paths) < 2:
+            continue
+
+        # Dedupe by path before emitting — one page may contribute several
+        # original forms to the same normalized alias, and the report should
+        # list each conflicting page once.
+        by_path: dict[str, dict] = {}
+        for p in pages:
+            by_path.setdefault(p["path"], p)
+        unique_pages: list[dict] = [by_path[path] for path in sorted(by_path)]
+
         # Count distinct categories
-        cats: set[str] = {p["category"] for p in pages}
+        cats: set[str] = {p["category"] for p in unique_pages}
         if len(cats) == 1:
             # Same category (entity/entity or concept/concept) → case-variant
             cat = next(iter(cats))
             case_variant.append({
                 "alias": norm,
                 "category": cat,
-                "category_dir": pages[0]["category_dir"],
+                "category_dir": unique_pages[0]["category_dir"],
                 "pages": [
                     {"path": p["path"], "original": p["original"]}
-                    for p in sorted(pages, key=lambda x: x["path"])
+                    for p in unique_pages
                 ],
             })
         else:
             # Cross-category (entity + concept)
             entry: dict = {"alias": norm, "pages": []}
             for cat_type in ("entity", "concept"):
-                for p in pages:
+                for p in unique_pages:
                     if p["category"] == cat_type:
                         entry["pages"].append({
                             "path": p["path"],

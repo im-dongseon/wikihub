@@ -430,3 +430,21 @@
 - **트레이드오프**: lint/ingest stub 파일 권한 명시화로 umask drift 방어.
 - **결론**: main merge + annotated tag `v0.1.15` + `latest` (2026-07-07). 운영자 `install.sh --branch latest`.
 - **참조**: `docs/changelog.md` [v0.1.15].
+---
+
+## [2026-09-21] v0.1.16 release
+
+- **목적**: v0.1.15 → v0.1.16 누적 release. 운영 점검(지사서)에서 surface 한 프로필 환경 결함 2건 + lint/graphify 결함 3건 closed.
+- **로직**:
+  - **lint Step 0 race 가드 재설계** (#180) — `flock(2)` 이 열린 fd 기반이라 Hermes agent terminal tool 의 per-command subprocess 모델에서 2차 가드가 무력. systemd 1차 가드로 전환, 실측 근거를 playbook 에 명시.
+  - **alias 중복 탐지 오탐** (#176) — 동일 페이지 alias 변형을 자기 중복으로 판정. `distinct_paths` 필터로 서로 다른 2+ 페이지일 때만 집계.
+  - **graphify openai endpoint** (#177) — `OPENAI_BASE_URL` 미전달로 endpoint 지정 profile 이 default 로 향함. 빈 값 시 변수 미전달로 default 소실도 방지.
+  - **install.sh 프로필 config 정합** (#182) — 패치 대상이 `$HOME/.hermes/config.yaml` 고정이라 프로필 운용 시 Hermes 가 읽지 않는 위치에 기록. `agent.profile` 인지 + 정본 경로 도출 + stray 항목 정리.
+  - **unit template `WIKIHUB_SRC`** (#183) — lint Step 4.5 helper 가 빈 값 확장으로 `/scripts/...` 를 참조해 조용히 미실행. template 2건에 주입해 graphify 와 정합.
+- **생성 ADR**: 없음.
+- **트레이드오프**:
+  - #182 는 install.sh Step 6 에 stray 정리 단계(4.5)를 추가한다 — 프로필 모드에서 `$HOME/.hermes/config.yaml` 의 wikihub 항목이 백업 후 제거된다 (비-wikihub 항목·타 섹션은 보존).
+  - #182 의 `_generated/` 는 gitignore 대상이라 운영자 직접 편집분은 install.sh 재실행 시 덮인다 — 정본 소스에 넣어야 생존한다 (#184 미해결).
+  - #183 은 운영 트리에 손으로 적용돼 있던 동일 패치를 upstream 정본으로 대체한다 — 반영 후 로컬 패치 제거 필요 (#184).
+- **결론**: main merge + annotated tag `v0.1.16` + `latest` (2026-09-21). 운영자 `install.sh --branch latest`.
+- **참조**: `docs/changelog.md` [v0.1.16]. 관련 open issue — #184(update 경로 로컬 패치 보존), #185(`/opt/wikihub` 하드코딩), #186(bare python3), #187(프로필별 환경 독립성 정리).

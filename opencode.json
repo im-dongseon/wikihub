@@ -60,6 +60,11 @@
       "prompt": "You handle exploration, understanding, research, and analysis of the codebase: from quick lookups (where is X, what does Y do) through deeper analysis. On request, save your findings as a markdown note. Do NOT modify existing source code (code changes belong to build/plan) — you may only create new .md notes. If a task needs a deep architecture decision or an implementation spec, hand it to @plan. Be concise and direct."
     },
 
+    // EXPLORE — general exploration tasks.
+    "explore": {
+      "model": "ollama-cloud/deepseek-v4-flash"
+    },
+
     // BUILD — implementation. Default for [easy] work.
     "build": {
       "model": "ollama-cloud/deepseek-v4-flash"
@@ -67,9 +72,19 @@
 
     // BUILD-HARD — escalation target for chunks the plan tagged [hard].
     "build-hard": {
-      "model": "ollama-cloud/kimi-k2.6",
+      "model": "ollama-cloud/glm-5.2",
       "tools": { "write": true, "edit": true, "bash": true },
       "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or touch unrelated code."
+    },
+
+    // REVIEW-CORRECTNESS — correctness review subagent.
+    "review-correctness": {
+      "model": "ollama-cloud/kimi-k2.7-code"
+    },
+
+    // REVIEW-QUALITY — quality review subagent.
+    "review-quality": {
+      "model": "ollama-cloud/qwen3.5:397b"
     },
 
     // ----------------------------------------------------------------
