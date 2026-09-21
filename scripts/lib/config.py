@@ -177,12 +177,19 @@ def _parse_operations(ocfg: dict[str, Any]) -> OperationsConfig:
 def load_wikihub_yaml(path: Path | None = None) -> Config:
     """wikihub.yaml 로드 + 스키마 검증.
 
-    default path: /opt/wikihub/wikihub.yaml.
-    환경변수 ``WIKIHUB_YAML`` 로 override 가능 (dev box 용).
+    ``path`` 미지정 시 resolution 순서 (issue #185 — `/opt/wikihub` 하드코딩 제거):
+      1. ``WIKIHUB_YAML`` env (명시 override, dev box 용 — 최우선)
+      2. ``$WIKIHUB_HOME/wikihub.yaml``
+      3. ``~/wikihub/wikihub.yaml`` (ADR-0034 data-first layout 기본값)
     """
     if path is None:
         env_path = os.environ.get("WIKIHUB_YAML")
-        path = Path(env_path) if env_path else Path("/opt/wikihub/wikihub.yaml")
+        if env_path:
+            path = Path(env_path).expanduser()
+        else:
+            wikihub_home = os.environ.get("WIKIHUB_HOME")
+            base = Path(wikihub_home).expanduser() if wikihub_home else Path("~/wikihub").expanduser()
+            path = base / "wikihub.yaml"
     if not path.exists():
         raise VaultSyncFatal(
             vault_id="__config__",

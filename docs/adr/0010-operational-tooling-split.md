@@ -6,6 +6,8 @@
 - **Supersedes**: 없음 (F1 §4.8.6 deploy.sh 설계를 retract하지만 F1은 ADR가 아닌 archive 문서)
 - **Superseded by**: 없음 (부분 supplement: ADR-0031 — yaml writer 책임만 reassign, 도구 split 결정은 유지)
 
+> **Note (issue #185, `/opt/wikihub` hardcoding 제거)**: 본 ADR 의 `/opt/wikihub` 경로 (install.sh 의 yaml-copy 단계 포함) 는 ADR-0031 (yaml writer 단독 책임) 과 ADR-0034 (data-first layout, `WIKIHUB_HOME` 기본 `~/wikihub`) 로 supersede 됨. 본문은 history 로 보존. issue #185 가 `_system/commands/ingest.md`·`scripts/lib/config.py` 의 잔여 `/opt/wikihub` 하드코딩을 제거.
+
 > **Note (2026-05-18, feature `install_scope_reduction`)**: 본 ADR §"도구별 책임 매트릭스" line 38 (install.sh 가 `wikihub.yaml.example` 복사) + §"wikihub.yaml lifecycle" 단계 2 (line 49) + §"install.sh의 동작" step 7 (line 80) 의 **yaml.example 복사 책임은 ADR-0031 에 의해 `/wh:setup` Step 0 단독으로 이전됨**.
 >
 > 본 ADR 의 큰 결정 (`install.sh + /wh:setup` 2-도구 split, deploy.sh 폐기, git 의존 없음) 은 **유지**. yaml writer 책임만 reassign — install.sh 는 yaml 한 글자도 안 만짐. `/wh:setup` 의 Step 0 가 `wikihub.yaml.example` 을 template 으로 read → derived 5필드 patching → atomic write `$WIKIHUB_INSTANCE_ROOT/wikihub.yaml`.

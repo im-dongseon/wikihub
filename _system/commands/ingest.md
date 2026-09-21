@@ -14,7 +14,7 @@
 
 ## 사전 조건
 
-- `wikihub.yaml`이 `instance.root`(기본 `/opt/wikihub`)에 존재
+- `wikihub.yaml`이 `$WIKIHUB_HOME`(기본 `~/wikihub`)에 존재
 - `vaults[<vault_id>]`가 `enabled: true`
 - 해당 vault의 OAuth credentials(ADR-0003) 유효
 - `wiki/sources/<vault_id>/`, `wiki/entities/`, `wiki/concepts/`, `wiki/analyses/` 디렉토리 존재 (없으면 생성)
@@ -74,7 +74,7 @@ flock -n 200 || { echo "ingest (vault=<vault_id>) 이미 진행 중 — exit 0 (
 ### Step 2. Mechanical phase — script subprocess
 
 ```bash
-python /opt/wikihub/scripts/vault-fetch.py --vault <vault_id>
+python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
 ```
 
 **script의 책임** (ADR-0035 정본):
