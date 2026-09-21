@@ -875,24 +875,92 @@ _hermes_agent_profile() {
         "$yaml" 2>/dev/null || true
 }
 
-# Hermes config path. resolution order (issue #182 — Hermes 가 profile config 를 profile dir 에 anchor):
-#   1. $HERMES_CONFIG_HOME set -> ${HERMES_CONFIG_HOME}/config.yaml   (operator override, 테스트 용도)
-#   2. agent.profile 세팅 + $HOME == */profiles/<profile>/home -> $(dirname "$HOME")/config.yaml
-#      (Hermes profile mode 의 canonical — profile home 이 아닌 profile dir 에 config.yaml anchor)
-#   3. fallback -> $HOME/.hermes/config.yaml                          (backward-compat)
+# Hermes root directory (profiles/ 의 부모). Hermes 자체의 get_default_hermes_root() 를 mirror.
+# install 중단 금지 — 모호 시 빈 출력 보다 $HOME/.hermes fallback 선호.
+#   - HERMES_HOME 이 */profiles/* 형태면 root = $(dirname "$(dirname "$HERMES_HOME")")
+#     (예: /home/ubuntu/.hermes/profiles/jisaseo -> /home/ubuntu/.hermes)
+#   - HERMES_HOME 이 설정됐으나 */profiles/* 가 아니면 Docker/custom root -> 그대로 사용
+#   - HERMES_HOME 미설정 시 $HOME 가 */profiles/<name>/home 형태면 trailing 3-segment 를
+#     잘라내 $HOME/.hermes 유추 (아래 pure-bash 3-step strip), 아니면 $HOME/.hermes
+_hermes_root() {
+    if [[ -n "${HERMES_HOME:-}" ]]; then
+        local _env="${HERMES_HOME%/}"
+        if [[ "$_env" == */profiles/* ]]; then
+            echo "$(dirname "$(dirname "$_env")")"
+        else
+            echo "$_env"
+        fi
+        return 0
+    fi
+    local _h="${HOME%/}"
+    local _r
+    if [[ "$_h" == */profiles/*/home ]]; then
+        # three-segment suffix "/profiles/<name>/home" 제거 — 순수 bash parameter expansion.
+        # /home/ubuntu/.hermes/profiles/jisaseo/home -> /home/ubuntu/.hermes
+        _r="${_h%/home}"; _r="${_r%/*}"; _r="${_r%/profiles*}"
+        echo "$_r"
+        return 0
+    fi
+    echo "$_h/.hermes"
+}
+
+# Hermes config path. resolution order (issue #190 — Hermes 가 profile config 를 profile dir /
+# HERMES_HOME 에 anchor, profile-home-derived path 가 아님):
+#   1. $HERMES_CONFIG_HOME set  -> ${HERMES_CONFIG_HOME}/config.yaml   (operator override, 테스트 용도)
+#   2. $HERMES_HOME set         -> ${HERMES_HOME}/config.yaml          (Hermes canonical — get_config_path)
+#   3. agent.profile set + <hermes_root>/profiles/<profile> 가 dir -> <hermes_root>/profiles/<profile>/config.yaml
+#   4. $HOME == */profiles/<profile>/home -> $(dirname "${HOME%/}")/config.yaml (legacy profile-home 감지)
+#   5. fallback                  -> $HOME/.hermes/config.yaml           (backward-compat)
+# 정상 운용 시 HERMES_HOME 이 profile 식별, HOME 은 OS user home (=/home/ubuntu). Hermes 는 profile
+# config 를 profile dir / HERMES_HOME 에 anchor 하므로 step 2·3 가 canonical, step 4 는 legacy fallback.
 _hermes_config_path() {
     if [[ -n "${HERMES_CONFIG_HOME:-}" ]]; then
-        echo "${HERMES_CONFIG_HOME}/config.yaml"
+        echo "${HERMES_CONFIG_HOME%/}/config.yaml"
+        return 0
+    fi
+    if [[ -n "${HERMES_HOME:-}" ]]; then
+        echo "${HERMES_HOME%/}/config.yaml"
         return 0
     fi
     local _profile; _profile="$(_hermes_agent_profile)"
     # trailing slash 정규화 — ${HOME%/} 로 glob 매칭 견고화 (reviewer mid 반영)
     local _home_norm="${HOME%/}"
+    local _root
+    if [[ -n "$_profile" ]]; then
+        _root="$(_hermes_root)"
+        if [[ -d "${_root}/profiles/${_profile}" ]]; then
+            echo "${_root}/profiles/${_profile}/config.yaml"
+            return 0
+        fi
+    fi
     if [[ -n "$_profile" && "$_home_norm" == */profiles/"$_profile"/home ]]; then
         echo "$(dirname "$_home_norm")/config.yaml"
         return 0
     fi
-    echo "$HOME/.hermes/config.yaml"
+    echo "$_home_norm/.hermes/config.yaml"
+}
+
+# Stray Hermes config 후보 경로 (issue #190). 과거 buggy install.sh 이 wikihub entry 를
+# 잘못 기록했을 수 있는 위치를 한 줄씩 출력. canonical path (= _hermes_config_path) 및
+# default profile canonical (<hermes_root>/config.yaml) 과 문자열이 같으면 제외 —
+# 어느 profile 의 canonical config 도 stray 로 분류하지 않는다. 파일 존재 여부는 caller 가 판별.
+#   (a) <hermes_root>/profiles/<profile>/home/.hermes/config.yaml — agent.profile set 시만
+#   (b) $HOME/.hermes/config.yaml
+_hermes_stray_candidates() {
+    local canonical; canonical="$(_hermes_config_path)"
+    local _root; _root="$(_hermes_root)"
+    local default_canonical="${_root}/config.yaml"
+    local _profile; _profile="$(_hermes_agent_profile)"
+    local _a=""
+    if [[ -n "$_profile" ]]; then
+        _a="${_root}/profiles/${_profile}/home/.hermes/config.yaml"
+        [[ "$_a" != "$canonical" && "$_a" != "$default_canonical" ]] && echo "$_a" || _a=""
+    fi
+    # dedup — 구 실행 방식(HOME=<profile_home>)에서는 후보 a 와 b 가 동일 경로가 된다.
+    # HOME trailing slash 정규화 — 비교·경로 일관성 (reviewer mid 반영).
+    local _b="${HOME%/}/.hermes/config.yaml"
+    [[ -n "$_a" && "$_b" == "$_a" ]] && return 0
+    [[ "$_b" != "$canonical" && "$_b" != "$default_canonical" ]] && echo "$_b"
 }
 
 # operational yaml 의 schema 보강 — v0.1.5+ 신설 field 자동 추가 (부재 시만).
@@ -1185,20 +1253,12 @@ PYEOF
     find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
 }
 
-# Stray Hermes config 정리 (issue #182). 과거 install.sh 이 profile mode 에서
-# $HOME/.hermes/config.yaml (stray) 에 wikihub skill entry 를 잘못 기록한 잔재 제거.
-# canonical path (= _hermes_config_path) 와 stray path 가 다를 때만 작동.
+# Stray Hermes config 단일 파일 정리 (issue #190). _migrate_hermes_stray_config 가
+# 각 candidate 마다 호출. python heredoc 안의 logic 은 issue #182 구현을 그대로 보존.
 # wikihub entry 판별: EOL marker comment 또는 realpath 가 /.local/share/wikihub/.../_system/skills/_generated.
-# install 중단 금지 — 모든 error 는 warn + return 0.
-_migrate_hermes_stray_config() {
-    local canonical; canonical="$(_hermes_config_path)"
-    local stray="$HOME/.hermes/config.yaml"
-
-    # canonical == stray 면 정리 대상 아님 (non-profile mode)
-    [[ "$stray" == "$canonical" ]] && return 0
-    # stray 부재 시 조용히 종료
-    [[ -f "$stray" ]] || return 0
-
+# 결과 token: cleaned | removed | noop | read_error:<msg>. 항상 return 0 (install 중단 금지).
+_clean_hermes_stray_file() {
+    local stray="$1"
     local backup="$stray.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -p "$stray" "$backup"
 
@@ -1324,9 +1384,54 @@ PYEOF
             warn "stray Hermes config 정리 결과 비예상: $result — install 계속 진행"
             ;;
     esac
+    return 0
+}
 
-    # 7일 초과 stray backup cleanup — _patch_hermes_external_dirs 와 동일 정책 (reviewer minor 반영)
-    find "$HOME/.hermes" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+# Stray Hermes config 정리 (issue #182/#190). 과거 buggy install.sh 이 profile mode 에서
+# wikihub skill entry 를 잘못 기록한 잔재 파일들을 순회하며 정리.
+# 후보는 _hermes_stray_candidates 가 한 줄씩 출력. FAIL-CLOSED GUARD — 어떤 profile 의
+# canonical config 도 건드리지 않는다 (canonical 및 default profile canonical 을 skip).
+# install 중단 금지 — 모든 error 는 warn + return 0.
+_migrate_hermes_stray_config() {
+    local canonical; canonical="$(_hermes_config_path)"
+    local _root; _root="$(_hermes_root)"
+    local default_canonical="${_root}/config.yaml"
+
+    # 후보를 1회만 계산해 재사용 — 중복 재계산 및 TOCTOU 회피 (reviewer mid 반영).
+    # _hermes_stray_candidates 는 내부에서 config_path/root 를 다시 계산하므로
+    # 반복 호출 시 _hermes_agent_profile subprocess 가 매번 재실행된다.
+    local -a _cands=()
+    local _p
+    while IFS= read -r _p; do
+        [[ -n "$_p" ]] && _cands+=("$_p")
+    done < <(_hermes_stray_candidates)
+
+    local stray
+    for stray in "${_cands[@]}"; do
+        # FAIL-CLOSED GUARD — 어떤 profile 의 canonical config 도 건드리지 않는다
+        [[ "$stray" == "$canonical" ]] && continue
+        [[ "$stray" == "$default_canonical" ]] && continue
+        [[ -f "$stray" ]] || continue
+        _clean_hermes_stray_file "$stray" || true
+    done
+
+    # 7일 초과 stray backup cleanup — _patch_hermes_external_dirs 와 동일 정책 (reviewer minor 반영).
+    # candidate 의 부모 dir 과 hermes_root dir 양쪽에 모두 적용 (서로 다를 때).
+    local _dirs=("$_root")
+    local _d
+    for _p in "${_cands[@]}"; do
+        _d="$(dirname "$_p")"
+        local _seen=0
+        local _x
+        for _x in "${_dirs[@]}"; do
+            [[ "$_d" == "$_x" ]] && { _seen=1; break; }
+        done
+        (( _seen == 0 )) && _dirs+=("$_d")
+    done
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        find "$_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+    done
     return 0
 }
 
