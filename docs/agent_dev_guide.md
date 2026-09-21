@@ -290,7 +290,7 @@ install.sh `_step6_agent_skill` 가 wikihub skill entry 를 Hermes config 의 `s
   4. `HOME == */profiles/<profile>/home` → `$(dirname "${HOME%/}")/config.yaml` (legacy profile-home 감지)
   5. fallback → `$HOME/.hermes/config.yaml` (backward-compat)
 - `wikihub.yaml` 의 `agent.profile` 값이 step 3·4 의 경로 해석을 구동한다. 비어있으면 default (step 5) — backward-compat.
-- 과거 buggy install.sh 이 profile mode 에서 stray 파일(`<hermes_root>/profiles/<profile>/home/.hermes/config.yaml` 및 `$HOME/.hermes/config.yaml`)에 wikihub entry 를 잘못 기록한 잔재는 `_migrate_hermes_stray_config()` 가 `_hermes_stray_candidates()` 후보를 순회하며 정리. 단 FAIL-CLOSED GUARD 로 canonical path 와 default profile canonical(`<hermes_root>/config.yaml`)은 건드리지 않는다 (marker comment `managed by wikihub install.sh — remove to disable auto-discovery` 로 wikihub entry 식별, 비-wikihub entry 보존, 빈 문서면 파일 삭제).
+- 과거 buggy install.sh 이 profile mode 에서 stray 파일(`<hermes_root>/profiles/<profile>/home/.hermes/config.yaml` 및 `$HOME/.hermes/config.yaml`)에 wikihub entry 를 잘못 기록한 잔재는 `_migrate_hermes_stray_config()` 가 `_hermes_stray_candidates()` 후보를 순회하며 정리. 단 FAIL-CLOSED GUARD 로 canonical path 와 default profile canonical(`<hermes_root>/config.yaml`)은 건드리지 않는다 (marker comment `managed by wikihub install.sh — remove to disable auto-discovery` 로 wikihub entry 식별, 비-wikihub entry 보존, 정리 후 남은 매핑이 비면 — 주석만 남은 경우 포함 — 파일 삭제. 삭제 전 백업 유지).
 
 ### Feature 종료 처리 (필수)
 

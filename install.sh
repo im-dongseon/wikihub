@@ -884,10 +884,11 @@ _hermes_agent_profile() {
 #     잘라내 $HOME/.hermes 유추 (아래 pure-bash 3-step strip), 아니면 $HOME/.hermes
 _hermes_root() {
     if [[ -n "${HERMES_HOME:-}" ]]; then
-        if [[ "$HERMES_HOME" == */profiles/* ]]; then
-            echo "$(dirname "$(dirname "$HERMES_HOME")")"
+        local _env="${HERMES_HOME%/}"
+        if [[ "$_env" == */profiles/* ]]; then
+            echo "$(dirname "$(dirname "$_env")")"
         else
-            echo "$HERMES_HOME"
+            echo "$_env"
         fi
         return 0
     fi
@@ -914,11 +915,11 @@ _hermes_root() {
 # config 를 profile dir / HERMES_HOME 에 anchor 하므로 step 2·3 가 canonical, step 4 는 legacy fallback.
 _hermes_config_path() {
     if [[ -n "${HERMES_CONFIG_HOME:-}" ]]; then
-        echo "${HERMES_CONFIG_HOME}/config.yaml"
+        echo "${HERMES_CONFIG_HOME%/}/config.yaml"
         return 0
     fi
     if [[ -n "${HERMES_HOME:-}" ]]; then
-        echo "${HERMES_HOME}/config.yaml"
+        echo "${HERMES_HOME%/}/config.yaml"
         return 0
     fi
     local _profile; _profile="$(_hermes_agent_profile)"
