@@ -190,6 +190,26 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 
 → `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 결과를 변환해 기록. Step 7 에서 자동 처리.
 
+### Step 4.6. frontmatter 무결성 검사 (자동, 보고만)
+
+매 cycle 아래 4종을 검사해 `_lint/report.md` 에 기록한다. **4종 모두 `yaml.safe_load` 를
+통과**하므로 파서 검증만으로는 검출되지 않는다 — 별도 검사가 필요하다.
+
+| 검출 항목 | 판정 | 함정 |
+|---|---|---|
+| **키 중복** | frontmatter top-level 키가 2회 이상 (특히 `referenced_by`·`aliases`) | YAML 은 마지막 키만 채택 → 첫 블록에 쓴 갱신이 실효값에 반영되지 않음 |
+| **여는 `---` 뒤 개행 소실** | `startswith('---\n')` 가 거짓 | `---aliases:` 로 붙어 frontmatter 파손 + alias index 탈락 |
+| **`aliases` 안의 경로 문자열** | `aliases` 항목에 `sources/` 포함 | run 경계 없이 스캔해 뒤따르는 키의 리스트를 흡수 (alias 오염) |
+| **항목 병합** | `referenced_by` **항목 값 안에** `.md-` 가 포함 | 삽입 오프셋이 직전 항목 "줄 끝" 이라 개행 없이 붙음 (`sources/a/x.md- sources/a/y.md`) |
+
+**삽입 규칙 정본은 `_system/commands/ingest.md` Step 4** ("referenced_by 삽입 경계 조건 4종") 다.
+본 검사는 그 규칙이 지켜졌는지 사후 확인하는 역할이다.
+
+`ingest.md` Step 4 의 들여쓰기 규칙과 동일하게 — **2칸 고정을 강제하지 않는다.** 0칸 run 은
+정상이며 YAML block sequence 로 유효하다. 페이지 단위 혼용(0칸+2칸)만 결함으로 본다.
+(운영 실측 기준 0칸 run 이 다수 — 정확한 항목 수는 `ingest.md` Step 4 의 실측치를 참조.
+ wiki 는 매 cycle 갱신되므로 수치는 고정값이 아니다.)
+
 **검증 기준** (ADR-0039 정합):
 - 비교는 **alias 셋의 lowercase normalize** — `MiniMax` 와 `minimax` 의 alias 셋이 공통 lowercase form 1+ 공유하면 같은 entity (단일 page 내 변형 alias 들은 다른 page 와 분리).
 - case-variant = 같은 카테고리 내 2+ page 가 공통 lowercase form 보유.
@@ -198,7 +218,7 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 **Alias migration** (idempotent, 매 cycle — 기존 유지, Python subprocess 외 보조):
 - 각 entity/concept page 의 frontmatter `aliases` 부재 시 — `aliases: [<canonical>]` 자동 추가 (canonical = 페이지 파일명 base).
 - 빈 `aliases: []` 도 동일 처리.
-- **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (ingest.md:152) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
+- **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (`ingest.md` Step 4.3) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
 
 ### Step 5. wiki/index.md 재구성 (자동)
@@ -286,6 +306,52 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - archive 후 lint 가 다시 stale 을 graph source 로 읽지 않음 + Step 3 의 절대 경로 정합으로 회귀 차단.
 
 **v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출도 즉시 적용 (호출 경로는 `## 호출` 참조 — systemd 경유 권장). 진단만 받고 싶으면 `wiki/_lint/report.md` read.
+
+### Step 7.1. 편입 등록 원장 형식 정본 (issue #191)
+
+편입(embedding) 등록 회차는 `_state/<vault>/_semantic_<YYYYMMDD>_<HHMM>.json` 원장에 결과를 기록한다.
+**원장 형식이 회차마다 달라 실제 상태와 문자열 대조가 어긋난다** — 아래를 정본으로 고정한다.
+
+> 파일명은 **`_semantic_<YYYYMMDD>_<HHMM>.json`** (날짜 포함). 과거 `_semantic_<HHMM>.json`
+> (날짜 없음) 형식은 다른 날 같은 시각 회차가 서로를 덮어쓰므로 신규 회차에 사용하지 않는다.
+> 기존 파일명은 소급 변경하지 않는다 (`round` 필드가 정본 시각을 갖는다).
+
+```json
+{
+  "round": "YYYYMMDD__HH_MM__lint",
+  "applied": ["concepts/Durable-Workflow.md", "entities/Google-Drive.md"],
+  "skipped": {},
+  "base": "<canonical 집합 산출 근거>",
+  "backup": "/tmp/wi_backup_<vault>_<YYYYMMDD_HHMM>",
+  "applied_at": "<UTC ISO-8601>",
+  "source": "sources/<vault>/project/wikihub/report/<round>.md"
+}
+```
+
+**필수 규칙**
+
+1. `applied` 항목은 **canonical 경로 + `.md` 접미 포함**으로 기록한다
+   (현행 wiki 파일명 규약: 공백 → 하이픈, 카테고리 귀속 반영). 접미 없는 항목은
+   실제 파일과 문자열 대조가 불가능하다.
+2. `base` 키를 **항상 포함**한다 — canonical 집합 산출 근거(어느 회차·페이지 수)를 남긴다.
+3. `applied_at` 은 UTC ISO-8601, `backup` 은 실제 존재하는 경로여야 한다.
+
+**회차 검증 (필수)**
+
+`applied` 기록 후 **실제 반영 수를 대조**해 `_lint/report.md` 에 1줄 남긴다.
+
+```
+applied=N 실제=M  (경로 정규화: NFC + .md 접미 정규화 후 실재 + 참조 보유 검사)
+```
+
+- `N == M` → 정상
+- `N != M` → **보고** + 누락 항목을 경로와 함께 기재. 누락 유형을 구분해 적는다.
+  - `NOFILE` — 원장 경로에 파일 없음 (파일명 규약 불일치 또는 아카이브 이동)
+  - `NO_REF` — 파일은 있으나 해당 회차 참조가 없음 (실제 등록 실패)
+
+**대조 시 정규화 주의**: 원장 경로와 실제 파일명이 공백↔하이픈·카테고리(entities↔concepts)·
+NFC/NFD 로 다를 수 있다. **정규화 후 비교**하고, 정규화로도 대응이 없을 때만 `NOFILE` 로
+판정한다 — 그렇지 않으면 형식 차이를 등록 실패로 오탐한다.
 
 ### Step 8. log 작성
 

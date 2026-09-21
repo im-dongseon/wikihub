@@ -29,6 +29,7 @@ import os
 import re
 import tempfile
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,10 +92,15 @@ class SyncResult:
 # ---------------------------------------------------------------------------
 
 def _sanitize_relpath(raw: str) -> str | None:
-    """traversal · invalid char 차단. 부적합 시 None.
+    """traversal · invalid char 차단. 부적합 시 None. 성공 시 NFC 정규화된 경로 반환.
 
     rclone lsjson 의 ``Path`` 는 mount 의 relative path — Drive 운영자 제어 입력.
     ``../`` 절대경로, control char 차단 후 vault 경계 안에만 저장.
+
+    반환값은 NFC 정규화한다 — NAS vault source 가 macOS origin 으로 NFD 일 수 있는
+    반면 wiki layer 는 NFC 이고, mount_diff 가 listing ``Path`` 와 file_map
+    ``source_relpath`` 를 plain string 으로 비교하므로 NFD/NFC 불일치 시
+    created+deleted pair 가 조용히 발생하기 때문이다.
     """
     if not raw:
         return None
@@ -110,7 +116,7 @@ def _sanitize_relpath(raw: str) -> str | None:
         return None
     if Path(candidate).is_absolute():
         return None
-    return candidate
+    return unicodedata.normalize("NFC", candidate)
 
 
 def _virtual_ext_for_native(mime: str) -> str:
