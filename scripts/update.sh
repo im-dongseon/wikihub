@@ -13,6 +13,16 @@
 # Design: thin wrapper — delegates git fetch/reset, systemd stop/start, rollback to
 # install.sh. All hard guarantees (lock, trap rollback, systemd stop sequence, verify)
 # come from install.sh untouched.
+#
+# ⚠️ 프로필 운용 환경 (issue #184): `WIKIHUB_SRC` 를 반드시 명시하세요. Hermes 프로필
+# 운용에서는 운영 트리가 `<hermes_root>/profiles/<profile>/home/.local/share/wikihub/src`
+# 이고, 미설정 시 기본값은 프로필 밖 트리를 가리켜 그 트리 기준으로 unit 이 퇴행합니다.
+# install.sh 가 미설정 + 프로필 환경을 탐지하면 fail-fast 합니다 (강제는 install.sh 담당 —
+# 본 wrapper 는 중복 구현하지 않습니다).
+#
+#   WIKIHUB_SRC=/home/ubuntu/.hermes/profiles/jisaseo/home/.local/share/wikihub/src \
+#   VENV_PATH=/home/ubuntu/.hermes/profiles/jisaseo/home/.local/share/wikihub/venv \
+#     scripts/update.sh --version v0.1.17
 
 set -euo pipefail
 

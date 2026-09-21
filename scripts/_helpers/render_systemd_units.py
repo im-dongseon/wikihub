@@ -11,6 +11,7 @@ modes (mutually exclusive):
     --list-enabled             : enabled vault id 목록 (1줄 1개) stdout
     --get-mount-path VAULT_ID  : 해당 vault 의 options.mount_path stdout
     --validate                 : yaml schema validate only
+    --verify-paths VENV_PATH SRC_PATH : rendered unit 의 PATH/WIKIHUB_SRC advisory 검증 (issue #184)
 
 options:
     --yaml PATH                : yaml 경로. default `$WIKIHUB_HOME/wikihub.yaml`
@@ -701,6 +702,98 @@ def _do_validate(cfg: dict) -> int:
     return EXIT_OK
 
 
+def _do_verify_paths(out_dir: Path, expected_venv: str, expected_src: str) -> int:
+    """advisory mode (issue #184): rendered unit 이 이번 install 의 트리/venv 를 가리키는지 검증.
+
+    install.sh render 직후 호출. fail 시키지 않음 (항상 EXIT_OK) — degrade 감지용 경고만.
+
+    ⚠️ 검증 기준을 template 에서 얻지 않는다. render 와 같은 process env 를 쓰므로 퇴행
+    시나리오에서는 template 자체가 오염된 트리에서 온다 (실측: 구 트리 template 은
+    `WIKIHUB_SRC` 를 아예 주입하지 않아 "누락" 판정의 기준이 될 수 없다). 따라서
+    **렌더 결과에 박힌 값**을 이번 install 의 기대값과 직접 비교한다.
+
+    조건 (하나라도 참이면 WARN):
+      (a) `Environment=WIKIHUB_SRC=` 가 있는데 expected_src 와 다름 (다른 트리 참조)
+      (b) `Environment=PATH=` 의 첫 entry 가 expected_venv/bin 과 다름 (다른 venv 참조)
+      (c) WIKIHUB_SRC 를 주입하는 정본 template 목록에 속하는 unit 인데
+          `Environment=WIKIHUB_SRC=` 자체가 없음 (substitution 누락 = 퇴행 신호)
+    """
+    if not out_dir.is_dir():
+        return EXIT_OK
+
+    expected_bin = os.path.normpath(os.path.join(os.path.expanduser(expected_venv), "bin"))
+    expected_src_n = os.path.normpath(os.path.expanduser(expected_src))
+    path_re = re.compile(r"^Environment=PATH=(.*)$", re.MULTILINE)
+    src_re = re.compile(r"^Environment=WIKIHUB_SRC=(.*)$", re.MULTILINE)
+
+    # (c) 판정용 — WIKIHUB_SRC 를 주입하는 template stem. 이 목록만 template 에서 얻으며,
+    # 목록이 비면(퇴행으로 template 부재) (c) 는 발동하지 않는다. (a)(b) 는 영향 없음.
+    src_templates: set[str] = set()
+    try:
+        tpl_dir = _systemd_templates_dir()
+        if tpl_dir.is_dir():
+            for tpl in tpl_dir.glob("*.template"):
+                if "WIKIHUB_SRC" in tpl.read_text(encoding="utf-8"):
+                    stem = tpl.name[: -len(".template")]
+                    if stem.endswith(".service"):
+                        stem = stem[: -len(".service")]
+                    src_templates.add(stem)
+    except OSError:
+        pass
+
+    def _injecting(stem: str) -> bool:
+        # 정본 목록이 비어있으면 (c) 를 신뢰할 수 없으므로 발동 금지
+        if not src_templates:
+            return False
+        return stem in src_templates
+
+    warn_count = 0
+    for svc in sorted(out_dir.glob("*.service")):
+        try:
+            text = svc.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        path_m = path_re.search(text)
+        if path_m is None:
+            # PATH 자체가 없는 unit — 정상, skip.
+            continue
+        path_value = path_m.group(1).strip()
+        first_entry = os.path.normpath(path_value.split(":", 1)[0].strip())
+
+        src_m = src_re.search(text)
+        if src_m is not None:
+            src_value = os.path.normpath(os.path.expanduser(src_m.group(1).strip()))
+            if src_value != expected_src_n:
+                print(
+                    f"WARN: {svc.name}: Environment=WIKIHUB_SRC={src_value} "
+                    f"!= 이번 install src={expected_src_n} (다른 트리를 가리킴)",
+                )
+                warn_count += 1
+        else:
+            base = svc.name[: -len(".service")] if svc.name.endswith(".service") else svc.name
+            stem = base.split("@", 1)[0] + "@" if "@" in base else base
+            if _injecting(stem) or _injecting(base):
+                print(
+                    f"WARN: {svc.name}: Environment=WIKIHUB_SRC= 누락 "
+                    f"(정본 template 은 inject 하는데 render 결과에 없음)",
+                )
+                warn_count += 1
+
+        if first_entry != expected_bin:
+            print(
+                f"WARN: {svc.name}: PATH 첫 entry={first_entry} != 이번 install venv bin={expected_bin} "
+                f"(다른 트리/venv 를 가리킬 수 있음)",
+            )
+            warn_count += 1
+
+    if warn_count:
+        print(
+            f"INFO: --verify-paths: {warn_count} warning(s) — "
+            f"rendered unit 이 이번 install 의 트리/venv 를 가리키지 않을 수 있습니다.",
+        )
+    return EXIT_OK
+
+
 # ── main ──────────────────────────────────────────────────────────────
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
@@ -712,8 +805,23 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--list-enabled", action="store_true", help="enabled vault id stdout")
     g.add_argument("--get-mount-path", metavar="VAULT_ID", help="해당 vault 의 mount_path stdout")
     g.add_argument("--validate", action="store_true", help="yaml schema validate only")
+    g.add_argument(
+        "--verify-paths",
+        nargs=2,
+        metavar=("VENV_PATH", "SRC_PATH"),
+        help="rendered unit 의 PATH/WIKIHUB_SRC advisory 검증 (issue #184) — "
+             "이번 install 의 기대 venv 경로와 src 경로를 함께 받는다",
+    )
     parser.add_argument("--out", type=Path, help="render 출력 디렉토리 (--render 필수)")
     args = parser.parse_args(argv)
+
+    # --verify-paths 는 yaml 미사용 (rendered unit 만 검사) — yaml load 전에 dispatch.
+    if args.verify_paths:
+        if not args.out:
+            print("ERROR: --verify-paths 는 --out DIR 필수", file=sys.stderr)
+            return EXIT_OPERATIONAL
+        _venv_arg, _src_arg = args.verify_paths
+        return _do_verify_paths(args.out.expanduser().resolve(), _venv_arg, _src_arg)
 
     yaml_path = args.yaml or (_wikihub_home() / "wikihub.yaml")
     cfg = _load_yaml(yaml_path)

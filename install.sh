@@ -36,6 +36,15 @@ err()   { echo "${C_ERR}ERROR${C_RST} [$(_ts)] $*" >&2; }
 # WIKIHUB_HOME 의미 swap (v0.2.0): 운영 자산 dir (이전 repo dir 의미는 WIKIHUB_SRC 로 이전).
 # WIKIHUB_INSTANCE_ROOT 폐기 — _step0_env_semantic_check 가 detect 시 fail-fast.
 export WIKIHUB_HOME="${WIKIHUB_HOME:-$HOME/wikihub}"                            # 운영 자산 dir
+# issue #184 — default 적용 전 explicitness 캡처 (fail-fast 판정 입력). 이 줄이 없으면
+# ${VAR:-default} 가 "명시 여부"를 소거해 미명시 실행을 탐지할 수 없다.
+#
+# ⚠️ 플래그는 **operator 가 직접 넘긴 경우에만** `1` 로 세운다. `bootstrap_clone_then_exec`
+# 가 `exec bash install.sh` 로 self-replace 하면 `export WIKIHUB_SRC`(defaulted) 가
+# 상속되므로, `${WIKIHUB_SRC:-}` 를 그대로 쓰면 child 가 "명시됨"으로 오판해 가드가
+# 무력화된다 (실측). 상속되지 않는 별도 플래그로만 판정한다.
+export WIKIHUB_SRC_EXPLICIT_FLAG="${WIKIHUB_SRC_EXPLICIT_FLAG:-}"
+[[ -n "${WIKIHUB_SRC:-}" ]] && WIKIHUB_SRC_EXPLICIT_FLAG=1
 export WIKIHUB_SRC="${WIKIHUB_SRC:-$HOME/.local/share/wikihub/src}"             # 시스템 코드 dir (XDG, ADR-0020 venv 와 동일 root)
 WIKIHUB_REPO_URL="${WIKIHUB_REPO_URL:-https://github.com/im-dongseon/wikihub.git}"
 # BRANCH default empty (ADR-0030) — `_resolve_ref` 가 우선순위 chain 으로 결정.
@@ -49,6 +58,7 @@ INSTALL_MODE=""                            # update | fresh — _detect_mode 가
 PRE_UPDATE_REF=""                          # _step2_update 가 capture
 # ADR-0035: gws CLI 폐기. GWS_VERSION 변수 제거. GWS_BIN_DIR → LOCAL_BIN_DIR (uv binary 위치만 유지).
 SKIP_CONFIRM="${SKIP_CONFIRM:-${WIKIHUB_NONINTERACTIVE:-}}"
+VENV_PATH_EXPLICIT="${VENV_PATH:-}"    # issue #184 — explicitness 캡처
 VENV_PATH="${VENV_PATH:-$HOME/.local/share/wikihub/venv}"
 LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
 ALLOW_NON_UBUNTU="${ALLOW_NON_UBUNTU:-}"      # R10 MED-4: 메인테이너 macOS dev box 실수 호출 차단
@@ -174,6 +184,19 @@ done
 # ──────────────────────────────────────────────────────────────────────
 # $BASH_SOURCE[0] 단독 감지 — env variable 의존 안 함 → exec 후 자연 분기 미진입.
 
+_self_replace_exec() {
+    # issue #184 — self-replace 시 "operator 가 실제 넘긴" env 만 상속시킨다.
+    # defaulted WIKIHUB_SRC 를 그대로 상속하면 child 가 "명시됨"으로 오판해
+    # WIKIHUB_SRC 미명시 가드가 무력화된다 (실측).
+    #   1. operator 명시(WIKIHUB_SRC_EXPLICIT_FLAG=1) → WIKIHUB_SRC + 플래그 그대로 전달
+    #   2. 미명시 → 둘 다 제거해 child 가 자기 env 로 재판정하게 한다
+    if [[ -n "${WIKIHUB_SRC_EXPLICIT_FLAG:-}" ]]; then
+        exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+    fi
+    exec env -u WIKIHUB_SRC -u WIKIHUB_SRC_EXPLICIT_FLAG \
+        bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+}
+
 bootstrap_clone_then_exec() {
     # ADR-0030 (C1 + HIGH-N4): mode-aware bootstrap.
     # _detect_mode 가 이미 INSTALL_MODE set. update mode 면 clone 없이 in-place exec.
@@ -186,18 +209,18 @@ bootstrap_clone_then_exec() {
             err "$WIKIHUB_SRC/install.sh 부재 — partial state 의심. --force-fresh 권장."
             exit 2
         fi
-        exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+        _self_replace_exec
     fi
     # fresh path — repo clone (기존 동작)
     info "curl-pipe + fresh mode — repo 부트스트랩 진행"
     _step2_clone
     if [ ! -f "$WIKIHUB_SRC/install.sh" ]; then
-        err "clone 후 $WIKIHUB_SRC/install.sh 가 없음 — repo 구조 결함 의심"
+        err "clone 후 $WIKIHUB_SRC/install.sh 가 없음 — repo 구조 결함 의심."
         exit 2
     fi
     info "→ $WIKIHUB_SRC/install.sh 로 self-replace (args: ${ORIGINAL_ARGS[*]:-(none)})"
     # R9 HIGH-2 fix: ORIGINAL_ARGS 보존 — CLI 파싱 후 $@ 가 비어 있어도 운영자 원본 args 전달
-    exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+    _self_replace_exec
 }
 
 # Step 0 의 감지 — curl-pipe 모드 판별
@@ -220,6 +243,9 @@ fi
 # ──────────────────────────────────────────────────────────────────────
 
 _step1_env_check() {
+    # issue #184 — 프로필 환경에서 WIKIHUB_SRC 미명시면 오대상 트리 갱신을 차단 (fail-fast)
+    _verify_wikihub_src_explicit_in_profile
+
     # EUID assert — 메인테이너가 `sudo ./install.sh` 호출하면 즉시 exit 1
     if [ "$EUID" -eq 0 ]; then
         err "install.sh 는 일반 user 로 실행하세요. (현재 user: root)"
@@ -870,9 +896,25 @@ _hermes_agent_profile() {
     fi
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
-    "$VENV_PATH/bin/python3" -c \
-        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('profile','') or '')" \
-        "$yaml" 2>/dev/null || true
+    # 1순위: venv python (yaml 파싱 정확). fresh install 등 venv 부재 시 2순위로.
+    if [[ -x "$VENV_PATH/bin/python3" ]]; then
+        local _out
+        _out="$("$VENV_PATH/bin/python3" -c \
+            "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('profile','') or '')" \
+            "$yaml" 2>/dev/null)" && { printf '%s\n' "$_out"; return 0; }
+    fi
+    # 2순위: bash fallback (issue #184 — venv 부재 시에도 프로필 판정 가능해야 함).
+    # 최상위 `agent:` 블록 안의 `profile:` 만 취한다. `graphify_profile:` /
+    # `graphify_profiles:` 는 다른 키이므로 정확히 키 이름으로 앵커한다.
+    awk '
+        /^[^[:space:]#]/ { in_agent = ($0 ~ /^agent:[[:space:]]*$/) ; next }
+        in_agent && /^[[:space:]]+profile:[[:space:]]*/ {
+            sub(/^[[:space:]]+profile:[[:space:]]*/, "")
+            sub(/[[:space:]]*#.*$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            print ; exit
+        }
+    ' "$yaml" 2>/dev/null || true
 }
 
 # Hermes root directory (profiles/ 의 부모). Hermes 자체의 get_default_hermes_root() 를 mirror.
@@ -902,6 +944,29 @@ _hermes_root() {
         return 0
     fi
     echo "$_h/.hermes"
+}
+
+# WIKIHUB_SRC 미명시 + 프로필 환경 정합 검증 (issue #184 — fail-fast).
+# update 경로가 프로필 밖 트리를 갱신 대상으로 잡고 그 트리 기준으로 unit 을 재렌더해
+# 미사용 venv/트리를 가리키도록 퇴행시키는 것을 차단한다.
+# 아래 4조건이 모두 성립할 때만 중단한다 — 명시 실행 / 비프로필 / 도출 경로 부재는
+# 기존 동작을 유지해 하위 호환을 깨지 않는다.
+_verify_wikihub_src_explicit_in_profile() {
+    local _profile; _profile="$(_hermes_agent_profile)"
+    [[ -z "$_profile" ]] && return 0
+    [[ -n "${WIKIHUB_SRC_EXPLICIT_FLAG:-}" ]] && return 0
+    local _root; _root="$(_hermes_root)"
+    local _expected="$_root/profiles/$_profile/home/.local/share/wikihub/src"
+    [[ -d "$_expected" ]] || return 0
+    if [[ "$WIKIHUB_SRC" != "$_expected" ]]; then
+        err "WIKIHUB_SRC 미설정 + 프로필 환경 — 기본값이 운영 트리를 가리키지 않습니다."
+        err "  WIKIHUB_SRC      = $WIKIHUB_SRC"
+        err "  운영 트리 (도출) = $_expected"
+        err "  대처: WIKIHUB_SRC=\"$_expected\" 로 명시해 재실행하거나,"
+        err "        기본값 트리를 의도했다면 WIKIHUB_SRC=\"$WIKIHUB_SRC\" 를 명시하세요."
+        exit 1
+    fi
+    return 0
 }
 
 # Hermes config path. resolution order (issue #190 — Hermes 가 profile config 를 profile dir /
@@ -2305,6 +2370,14 @@ _step8_systemd_render() {
         --yaml "$yaml" \
         --render --out "$HOME/.config/systemd/user/" \
         || { err "render_systemd_units.py 실패"; return 2; }
+    # issue #184 (c) — 재렌더 전후 검증. 렌더 결과가 이번 install 의 트리/venv 를
+    # 가리키지 않으면 경고만 (exit 0 — 렌더 자체는 정상). advisory 이므로 실패로 취급하지 않는다.
+    while IFS= read -r _vp_line; do
+        [[ -n "$_vp_line" ]] && warn "$_vp_line"
+    done < <("$VENV_PATH/bin/python3" \
+        "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" \
+        --verify-paths "$VENV_PATH" "$WIKIHUB_SRC" \
+        --out "$HOME/.config/systemd/user/" 2>/dev/null || true)
     systemctl --user daemon-reload
     # ADR-0030 §Note (v0.1.4, 2026-05-20) — daemon-reload 는 active unit 의 "active since" 미갱신.
     # fresh / --force-fresh 경로에서 이미 enable+start 상태인 timer 의 새 template (OnActiveSec 등)
