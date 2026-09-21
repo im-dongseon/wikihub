@@ -23,7 +23,7 @@
       }
     },
     "research": {
-      "model": "ollama-cloud/deepseek-v4-flash",
+      "model": "ollama-cloud/deepseek-v4.1-flash",
       "mode": "primary",
       "tools": {
         "write": true,
@@ -32,13 +32,13 @@
       "prompt": "You handle exploration, understanding, research, and analysis of the codebase: from quick lookups (where is X, what does Y do) through deeper analysis. On request, save your findings as a markdown note. Do NOT modify existing source code (code changes belong to build/plan) — you may only create new .md notes. If a task needs a deep architecture decision or an implementation spec, hand it to @plan. Be concise and direct."
     },
     "explore": {
-      "model": "ollama-cloud/deepseek-v4-flash"
+      "model": "ollama-cloud/deepseek-v4.1-flash"
     },
     "build": {
-      "model": "ollama-cloud/deepseek-v4-flash"
+      "model": "ollama-cloud/deepseek-v4.1-flash"
     },
     "build-hard": {
-      "model": "ollama-cloud/glm-5.2",
+      "model": "ollama-cloud/glm-5.3",
       "tools": {
         "write": true,
         "edit": true,
@@ -50,7 +50,7 @@
       "model": "ollama-cloud/kimi-k3"
     },
     "review-quality": {
-      "model": "ollama-cloud/qwen3.5:397b"
+      "model": "ollama-cloud/minimax-m3"
     }
   }
 }

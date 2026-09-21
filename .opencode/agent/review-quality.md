@@ -1,7 +1,7 @@
 ---
 description: Reviews a diff for quality — security, performance, maintainability, and dependencies. Read-only.
 mode: subagent
-model: ollama-cloud/qwen3.5:397b
+model: ollama-cloud/minimax-m3
 temperature: 0.1
 tools:
   write: true
