@@ -292,6 +292,14 @@ install.sh `_step6_agent_skill` 가 wikihub skill entry 를 Hermes config 의 `s
 - `wikihub.yaml` 의 `agent.profile` 값이 step 3·4 의 경로 해석을 구동한다. 비어있으면 default (step 5) — backward-compat.
 - 과거 buggy install.sh 이 profile mode 에서 stray 파일(`<hermes_root>/profiles/<profile>/home/.hermes/config.yaml` 및 `$HOME/.hermes/config.yaml`)에 wikihub entry 를 잘못 기록한 잔재는 `_migrate_hermes_stray_config()` 가 `_hermes_stray_candidates()` 후보를 순회하며 정리. 단 FAIL-CLOSED GUARD 로 canonical path 와 default profile canonical(`<hermes_root>/config.yaml`)은 건드리지 않는다 (marker comment `managed by wikihub install.sh — remove to disable auto-discovery` 로 wikihub entry 식별, 비-wikihub entry 보존, 정리 후 남은 매핑이 비면 — 주석만 남은 경우 포함 — 파일 삭제. 삭제 전 백업 유지).
 
+### Hermes session env — `session-env.sh` (issue #186)
+
+`_system/commands/*.md` playbooks 가 helper script 를 bare interpreter (`python3 ...`) 로 호출하는데, Hermes terminal 세션의 `PATH` 가 mise python (extraction deps 미설치) 을 우선하면 `pdfminer`/`openpyxl` import fail. 또한 Hermes 세션은 `WIKIHUB_*` env var 가 unset 이라 `"$WIKIHUB_SRC/..."` 확장이 빈 path 가 된다. install.sh 가 이 둘을 shell init file 로 주입해 해결.
+
+- **`~/.config/wikihub/session-env.sh`** (mode 644, dir 700) — `_ensure_session_env_file()` 가 install 마다 idempotent 재생성 (atomic `mv`). 비밀값 없음 — `WIKIHUB_HOME`·`WIKIHUB_SRC`·`WIKIHUB_YAML`·`WIKIHUB_VENV` 4개 export + `PATH` 에 `$WIKIHUB_VENV/bin` prepend (중복 시 skip). Hermes `terminal.shell_init_files` 가 source — `_patch_hermes_shell_init_files()` 가 active profile config 의 리스트에 append (marker comment `managed by wikihub install.sh — remove to disable session env`, realpath idempotency, 기존 entries 보존).
+- **비밀 분리 규칙**: `~/.config/wikihub/env` (mode 600, API key / bot token 7개) 는 systemd unit 의 `EnvironmentFile=` 전용 — **session 에 source 금지**. `session-env.sh` (mode 644, 비밀 0) 가 Hermes 세션 전용. 두 파일은 `_step5_instance_dirs` (env) 와 `_ensure_session_env_file` (session-env.sh) 가 각각 관리.
+- **`WIKIHUB_VENV` 목적**: interpreter pinning — `"$WIKIHUB_VENV/bin/python3"` 명시 호출이 extraction deps (openpyxl/python-pptx/python-docx/pdfminer.six) 가 설치된 venv python 을 보증. `_system/commands/lint.md` 의 `detect_alias_duplicates.py` 호출이 이 패턴을 따른다.
+
 ### Feature 종료 처리 (필수)
 
 feature가 최종 단계까지 완료되면 (Step 5 수행 또는 생략 결정 후), 다음을 수행한다.

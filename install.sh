@@ -1253,6 +1253,198 @@ PYEOF
     find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
 }
 
+# Hermes terminal 세션용 non-secret env file 생성 (issue #186).
+# ~/.config/wikihub/session-env.sh (mode 644, dir 700) — 비밀값 없음.
+# terminal.shell_init_files 가 source. install.sh 가 매 호출 시 idempotent 재생성 (atomic mv).
+# 비밀값 (API key/token) 은 ~/.config/wikihub/env (mode 600, systemd EnvironmentFile 전용) — 본 fn 가 건드리지 않음.
+# 실패 시 return 1 — caller(_step6_agent_skill) 가 graceful skip 하므로 install 은 중단되지 않는다.
+# (성공 시에만 shell_init_files 등록을 진행해 미존재 파일 등록을 방지.)
+_ensure_session_env_file() {
+    local wh_config_dir="$HOME/.config/wikihub"
+    local session_env="$wh_config_dir/session-env.sh"
+    # dir 700 — 세션 init file 이 놓이므로 타 사용자 접근 차단
+    if ! mkdir -p "$wh_config_dir" 2>/dev/null || ! chmod 700 "$wh_config_dir" 2>/dev/null; then
+        warn "session env dir 생성/권한 실패 — $wh_config_dir (건너뜀)"
+        return 1
+    fi
+
+    local tmp="$session_env.tmp.$$"
+    # 주의: 여기 heredoc 은 install-time 확장(unquoted EOF)이지만 PATH 관련은 source-time
+    # 평가를 위해 escape 한다. $VENV_PATH 는 install-time bake 대신 source-time 변수를
+    # 쓰지 않고 그대로 bake 하되, PATH guard 도 동일 문자열을 쓰도록 $WIKIHUB_VENV 를
+    # escape 해 런타임 값으로 평가되게 한다 (review mid 반영).
+    if ! cat > "$tmp" <<EOF
+# wikihub session env — Hermes terminal 세션용 (issue #186).
+# 비밀값 없음 (API key/token 은 ~/.config/wikihub/env — systemd EnvironmentFile 전용).
+# install.sh 가 생성/갱신. terminal.shell_init_files 가 source.
+export WIKIHUB_HOME="$WIKIHUB_HOME"
+export WIKIHUB_SRC="$WIKIHUB_SRC"
+export WIKIHUB_YAML="$WIKIHUB_HOME/wikihub.yaml"
+export WIKIHUB_VENV="$VENV_PATH"
+case ":\$PATH:" in
+  *":\$WIKIHUB_VENV/bin:"*) ;;
+  *) PATH="\$WIKIHUB_VENV/bin:\$PATH" ;;
+esac
+export PATH
+EOF
+    then
+        rm -f "$tmp"
+        warn "session env file 작성 실패 — $session_env (건너뜀)"
+        return 1
+    fi
+
+    if ! mv -f "$tmp" "$session_env" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "session env file 교체 실패 — $session_env (건너뜀)"
+        return 1
+    fi
+    if ! chmod 644 "$session_env" 2>/dev/null; then
+        warn "session env file 권한 설정 실패 — $session_env"
+        return 1
+    fi
+    info "session env file 생성 — $session_env (mode 644)"
+    return 0
+}
+
+# Hermes config 의 terminal.shell_init_files 에 session-env.sh 등록 (issue #186).
+# _patch_hermes_external_dirs 의 pattern 을 그대로 reuse — flock + backup + ruamel atomic + realpath idempotency.
+# 기존 entries (예: mise/path.sh) 보존 — append only.
+_patch_hermes_shell_init_files() {
+    local hermes_config; hermes_config="$(_hermes_config_path)"
+    local hermes_dir; hermes_dir="$(dirname "$hermes_config")"
+    local lock_path="$hermes_config.lock"
+    # [review high 반영] $HOME 을 python source 에 interpolation 하면 HOME 에 quote 가 있을 때
+    # SyntaxError → 빈 target 이 등록된다. 경로는 argv 로 넘긴다.
+    local session_env
+    session_env="$("$VENV_PATH/bin/python3" - "$HOME/.config/wikihub/session-env.sh" <<'PYEOF'
+import os, sys
+print(os.path.realpath(os.path.expanduser(sys.argv[1])))
+PYEOF
+)"
+    if [[ -z "$session_env" ]]; then
+        err "session env 경로 도출 실패 — terminal.shell_init_files 등록 건너뜀"
+        return 2
+    fi
+
+    mkdir -p "$hermes_dir"
+
+    # flock advisory — 5초 retry × 12회 (총 60s)
+    exec 201>"$lock_path"
+    local retries=0
+    while ! flock -nx 201; do
+        retries=$((retries + 1))
+        if (( retries >= 12 )); then
+            err "Hermes config lock 획득 실패 (60s timeout) — 다른 Hermes/wikihub 인스턴스가 mutate 중"
+            exec 201>&-
+            return 2
+        fi
+        sleep 5
+    done
+
+    # PRE_HASH + backup
+    local pre_hash=""
+    local backup=""
+    if [[ -f "$hermes_config" ]]; then
+        pre_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+        backup="$hermes_config.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$hermes_config" "$backup"
+    fi
+
+    # ruamel atomic write + idempotent check (Python helper)
+    local result
+    result="$("$VENV_PATH/bin/python3" - "$hermes_config" "$session_env" <<'PYEOF'
+import os, sys
+import ruamel.yaml
+from ruamel.yaml.comments import CommentedSeq
+
+path = sys.argv[1]
+target = sys.argv[2]
+MARKER = "managed by wikihub install.sh — remove to disable session env"
+
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as f:
+        data = yaml.load(f) or {}
+else:
+    data = {}
+
+terminal = data.get("terminal")
+if terminal is None:
+    terminal = {}
+    data["terminal"] = terminal
+
+sif = terminal.get("shell_init_files")
+if sif is None:
+    sif = CommentedSeq()
+    terminal["shell_init_files"] = sif
+
+# realpath 정규화 비교
+existing_real = []
+for p in sif:
+    try:
+        existing_real.append(os.path.realpath(os.path.expanduser(str(p))))
+    except Exception:
+        existing_real.append(str(p))
+
+if target in existing_real:
+    # [review mid 반영] 첫 실행에서 marker 부착이 실패했을 수 있다. 이미 등록돼 있어도
+    # marker 가 없으면 재부착을 시도한다 — 실패하면 noop 유지.
+    idx = existing_real.index(target)
+    if MARKER not in (sif.ca.items.get(idx, [None])[0].value if sif.ca.items.get(idx, [None])[0] is not None else ""):
+        try:
+            sif.yaml_add_eol_comment(MARKER, idx, column=60)
+            tmpc = path + ".tmp"
+            with open(tmpc, "w", encoding="utf-8") as f:
+                yaml.dump(data, f)
+            os.replace(tmpc, path)
+            print("patched", end="")
+            sys.exit(0)
+        except Exception:
+            pass
+    print("noop", end="")
+    sys.exit(0)
+
+sif.append(target)
+# marker comment — ruamel 의 yaml_add_eol_comment (index = len(sif)-1)
+try:
+    sif.yaml_add_eol_comment(MARKER, len(sif) - 1, column=60)
+except Exception:
+    pass  # comment 부착 실패해도 entry 자체는 유지
+
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    yaml.dump(data, f)
+os.replace(tmp, path)
+print("patched", end="")
+PYEOF
+)"
+
+    # POST_HASH
+    local post_hash=""
+    [[ -f "$hermes_config" ]] && post_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+
+    flock -u 201
+    exec 201>&-
+
+    if [[ "$result" == "patched" ]]; then
+        info "Hermes config 패치 (terminal.shell_init_files) — $hermes_config (backup: ${backup:-신규생성})"
+        info "  pre_sha256:  ${pre_hash:-empty}"
+        info "  post_sha256: $post_hash"
+    elif [[ "$result" == "noop" ]]; then
+        info "Hermes config 이미 session-env.sh 포함 (terminal.shell_init_files) — 변경 없음"
+        # backup 도 불필요 — cleanup
+        [[ -n "$backup" && -f "$backup" ]] && rm -f "$backup"
+    else
+        err "Hermes config 패치 결과 비예상 (terminal.shell_init_files): $result"
+        return 2
+    fi
+
+    # 7일 초과 backup cleanup
+    find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+}
+
 # Stray Hermes config 단일 파일 정리 (issue #190). _migrate_hermes_stray_config 가
 # 각 candidate 마다 호출. python heredoc 안의 logic 은 issue #182 구현을 그대로 보존.
 # wikihub entry 판별: EOL marker comment 또는 realpath 가 /.local/share/wikihub/.../_system/skills/_generated.
@@ -1509,6 +1701,23 @@ _step6_agent_skill() {
 
     # 4.5. stray Hermes config 정리 (issue #182 — profile mode 전환 시 과거 잔재 제거)
     _migrate_hermes_stray_config
+
+    # 4.6. Hermes terminal 세션용 non-secret env file 생성 (issue #186)
+    # 실패해도 install 은 계속하되, 파일이 실제로 생기지 않았으면 4.7 등록은 건너뛴다
+    # (review mid 반영 — 존재하지 않는 파일을 shell_init_files 에 등록하는 것 방지).
+    local session_env_ok=false
+    if _ensure_session_env_file; then
+        session_env_ok=true
+    else
+        warn "session env file 미생성 — terminal.shell_init_files 등록 건너뜀 (수동 확인 필요)"
+    fi
+
+    # 4.7. Hermes config 의 terminal.shell_init_files 에 session-env.sh 등록 (issue #186)
+    # 실패 시 return 2 (hard fail) — 4.6(graceful skip)과 의도적 비대칭. 4.7 은 active profile
+    # config 를 직접 mutate 하는 단계라 _patch_hermes_external_dirs 와 동일한 실패 정책을 따른다.
+    if [[ "$session_env_ok" == true ]]; then
+        _patch_hermes_shell_init_files || return 2
+    fi
 
     # 5. 등록 후 검증
     _verify_hermes_skill_registration "$agent_binary"

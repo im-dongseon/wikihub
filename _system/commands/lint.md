@@ -158,7 +158,7 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 
 ```bash
 # WIKIHUB_HOME 기준 wiki/entities/ + wiki/concepts/ scan → JSON stdout
-python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
     --wiki-home "$WIKIHUB_HOME"
 ```
 
