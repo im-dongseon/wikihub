@@ -174,7 +174,15 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
    - **alias 인식 (ADR-0039)**: 본문 form 의 lowercase 가 기존 page 의 frontmatter `aliases` 셋 (lowercase normalize) 1+ 공통 → 기존 page 로 간주. `referenced_by` 만 추가 (alias 셋 미변경, stub 생성 skip — LLM 재생성 무한 loop 차단)
    - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 (위 alias 인식 포함) → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
    - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + `aliases: [<본문 form>]` + 본문은 1줄 요약, `referenced_by: [<source>]`)
-     - **referenced_by 들여쓰기**: block 들여쓰기는 반드시 **2칸 스페이스** (`"  - "`) 로 균일하게 정렬. 다른 들여쓰기 너비(예: 1칸·3칸·탭)와 혼용 금지 — 파서가 block 을 올바르게 인식. (단일 항목이어도 동일 규칙 적용)
+     - **referenced_by 들여쓰기**: **run 의 실제 들여쓰기를 재사용**한다 — 0칸 run 은 0칸으로, 2칸 run 은 2칸으로. 2칸 고정 삽입은 0칸 run 에서 YAML 을 파손한다(`expected <block end>, but found '-'`). `indent or '  '` 같은 폴백은 `''` 이 falsy 라 0칸을 2칸으로 승격시키므로 금지. 새 run 을 시작할 때만 0칸을 쓴다.
+       **스페이스만 허용 — 탭 혼입 금지.** 재사용 대상은 run 의 스페이스 개수이며, 탭이 섞인 run 은 그대로 재사용하면 YAML block sequence 로 성립하지 않는다.
+       (운영 실측 2026-09-21: 0칸 run 8,176 항목 · 2칸 run 6,450 항목 · 탭 run 0건. 페이지 단위로는 균일 — 혼용 0. wiki 는 매 cycle 갱신되므로 수치는 참고값이다. YAML block sequence 는 0칸도 유효하므로 파서 오류가 나지 않고 조용히 누적된다.)
+     - **referenced_by 삽입 경계 조건** (삽입기가 지켜야 할 4종):
+       1. **마지막 `referenced_by:` 키**를 대상으로 삼는다 — 키가 중복이면 YAML 은 마지막 블록만 채택하므로, 첫 블록에 넣으면 실효값에 반영되지 않는다.
+       2. run 스캔을 **다음 top-level 키까지만** 한정한다 — 경계를 두지 않으면 뒤따르는 `aliases:` 등의 리스트까지 흡수해 경로가 alias 로 등록된다.
+       3. 항목 삽입 시 **항상 선행 개행**을 붙인다 — 삽입 오프셋이 직전 항목 "줄 끝"이므로 그 `\n` 은 종결자이지 분리자가 아니다. 조건부로 판단하면 직전 항목에 병합된다.
+       4. frontmatter 재조립 시 **여는 `---` 뒤 개행을 보존**한다 — 소실되면 `---aliases:` 가 되어 frontmatter 가 파손되고 alias index 에서 탈락한다.
+     - **삽입 후 검증**: `yaml.safe_load` 통과만으로는 부족하다(경계 조건 1·2·3 은 파서를 통과한다). 백업 대비 파일별 diff 가 `+1/-0` 인지, `aliases` 에 `sources/` 가 없는지, `startswith('---\n')` 가 유지되는지를 함께 확인한다.
      - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행. 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
 4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
 5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wl`가 책임 (--apply 시 archive)

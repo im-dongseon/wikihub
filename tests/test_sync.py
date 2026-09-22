@@ -5,6 +5,7 @@ rclone subprocess 는 monkeypatch 로 mock — 실제 호출 없음.
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import pytest
 from lib import sync
 from lib.config import VaultConfig
 from lib.exceptions import VaultSyncFatal, VaultSyncFileFatal, VaultSyncRetryable
+from lib.mount_diff import _compute_diff_path_based
 from lib.sync import (
     SyncResult,
     _compute_wiki_path,
@@ -73,6 +75,49 @@ def test_sanitize_relpath_control_char_blocked() -> None:
 def test_sanitize_relpath_valid() -> None:
     assert _sanitize_relpath("notes/idea.md") == "notes/idea.md"
     assert _sanitize_relpath("/notes/idea.md") == "notes/idea.md"  # lstrip("/")
+
+
+def test_sanitize_relpath_nfc_normalized() -> None:
+    """issue #195 — NFD 입력이 NFC 로 정규화돼야 wiki/mount_diff 계층과 정합한다.
+
+    NAS vault source 가 macOS origin 으로 NFD 일 수 있는 반면 wiki layer 는 NFC 이고,
+    mount_diff 가 listing Path 와 file_map source_relpath 를 plain string 으로 비교하므로
+    정규화하지 않으면 created+deleted pair 가 조용히 매 cycle 재발한다.
+    """
+    nfd = unicodedata.normalize("NFD", "lecture/OpenClaw_v5_강의 버전.pdf")
+    nfc = unicodedata.normalize("NFC", nfd)
+    assert nfd != nfc, "fixture: NFD 와 NFC 표기가 달라야 검증이 성립"
+
+    out = _sanitize_relpath(nfd)
+    assert out is not None
+    assert unicodedata.is_normalized("NFC", out), "반환값이 NFC 여야 함"
+    assert out == nfc, "NFC 정규형과 정확히 일치해야 함"
+
+    # 이미 NFC 인 입력은 불변이어야 한다
+    assert _sanitize_relpath(nfc) == nfc
+
+    # 정규화가 기존 차단 규칙을 우회시키지 않아야 한다
+    assert _sanitize_relpath(unicodedata.normalize("NFD", "../etc/passwd")) is None
+    assert _sanitize_relpath(unicodedata.normalize("NFD", "a/../b")) is None
+
+
+def test_sanitize_relpath_nfc_matches_mount_diff() -> None:
+    """issue #195 — 정규화된 file_map key 가 NFC listing 과 diff 0 이어야 한다.
+
+    이슈 #195 의 실패 모드: vault 를 NFC 로 rename 해도 file_map 이 NFD 면
+    created+deleted pair 가 발생해 wiki 에 NFD 페이지가 재생성된다.
+    """
+    nfd = unicodedata.normalize("NFD", "lecture/OpenClaw_v5_강의 버전.pdf")
+    nfc = unicodedata.normalize("NFC", nfd)
+    stored = _sanitize_relpath(nfd)
+    assert stored == nfc
+
+    listing = [{"Path": nfc, "MimeType": "application/pdf",
+                "ModTime": "2026-09-19T00:00:00Z", "Size": 100}]
+    file_map = {"files": {stored: {"source_relpath": stored,
+                                   "source_mtime": "2026-09-19T00:00:00Z"}}}
+    result = _compute_diff_path_based(listing, file_map)
+    assert result.entries == [], f"NFC 정합이면 diff 0 이어야 함: {result.entries}"
 
 
 # ---------------------------------------------------------------------------
