@@ -6,11 +6,18 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.18] — 2026-09-22 (canary)
+## [v0.1.18] — 2026-09-22 (released)
 
-### 추가 (Added)
+### 수정 (Fixed)
 
-- (bootstrap — first feature commit 부터 entry 누적)
+- **정본 helper 이원화로 lint 판정이 오염** — v0.1.17 의 PR #205 가 사장(dead) 스크립트 `link_audit_v2.py` 를 `scripts/_helpers/` 정본으로 등재했다. 이 스크립트는 호출자·소비처가 0건이었고(산출물 4 키 전량 참조 0건), stale 한 `_lint/alias_index.json`(mtime 2026-09-01) 을 입력으로 읽어 fence 미스트립·카테고리 오판으로 정본과 **두 자릿수 차이**(위반 1 = 153 vs 정본 22, 위반 2 = 60 vs 0) 를 냈다. lint report 가 두 수치를 함께 실어 회차 비교를 오도할 수 있던 문제 (#206, PR #207)
+  - `scripts/_helpers/link_audit_v2.py` 제거 (199행) + `lint.md` Step 5 helper 목록에서 제외 + `tests/test_ops_helpers.py` 정합
+  - 정본 Step 2 스캔은 `_wl_step2_spec.py` 단일 경로로 유지
+
+### 변경 (Changed)
+
+- `docs/changelog.md` — v0.1.17 항목에서 `link_audit_v2` 를 실행 계층 목록에서 제거 (#206, PR #207)
+- `_system/VERSION` — `0.1.17` → `0.1.18` (bootstrap)
 
 ---
 
