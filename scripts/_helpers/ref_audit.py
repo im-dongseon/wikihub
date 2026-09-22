@@ -48,6 +48,7 @@ def audit(wiki_home: Path) -> dict:
     counts = collections.Counter()
     by_verdict: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     per_page: collections.Counter = collections.Counter()
+    dup_pages: collections.Counter = collections.Counter()
 
     for cat in _CATS:
         cat_dir = wiki / cat
@@ -62,7 +63,22 @@ def audit(wiki_home: Path) -> dict:
                 fm = yaml.safe_load(m.group(1)) or {}
             except Exception:
                 continue
+            if not isinstance(fm, dict):
+                continue
             names = {str(a) for a in (fm.get("aliases") or []) if a} | {page.stem}
+
+            # ── referenced_by 중복 검사 (issue #210 DoD 3) ──────────────────
+            # 삽입기가 set semantics(ingest.md L175·L188·L254) 를 지키지 못하면
+            # 같은 source 가 한 페이지에 2회 이상 들어간다. 현행 lint 는 단일
+            # 페이지만 보고해 전수를 놓쳤다 (실측: lint 2건 vs 실제 다수).
+            rb_all = [x for x in (fm.get("referenced_by") or []) if isinstance(x, str)]
+            if rb_all:
+                cnt = collections.Counter(rb_all)
+                dup = {k: v for k, v in cnt.items() if v > 1}
+                if dup:
+                    over = sum(v - 1 for v in dup.values())
+                    counts["duplicate_refs"] += over
+                    dup_pages[f"{cat}/{page.name}"] = over
 
             for src in fm.get("referenced_by") or []:
                 if not isinstance(src, str):
@@ -82,6 +98,9 @@ def audit(wiki_home: Path) -> dict:
     top = [
         {"page": p, "count": c} for p, c in per_page.most_common(30)
     ]
+    dup_top = [
+        {"page": p, "count": c} for p, c in dup_pages.most_common(30)
+    ]
     return {
         "wiki_home": str(wiki_home),
         "total": counts["total"],
@@ -92,6 +111,10 @@ def audit(wiki_home: Path) -> dict:
         "missing_file": counts["missing_file"],
         "contaminated": counts["p1"] + counts["p2"] + counts["p3"],
         "contaminated_pages": len(per_page),
+        # issue #210 DoD 3 — referenced_by 중복 전수 검사
+        "duplicate_refs": counts["duplicate_refs"],
+        "duplicate_pages": len(dup_pages),
+        "duplicate_top": dup_top,
         "top_pages": top,
     }
 
@@ -118,7 +141,8 @@ def main() -> int:
     print(
         f"ref_audit: total {res['total']} | OK {res['ok']} | "
         f"P1 {res['p1']} | P2 {res['p2']} | P3 {res['p3']} | "
-        f"missing {res['missing_file']} | 오염 {res['contaminated']}건 / {res['contaminated_pages']}페이지",
+        f"missing {res['missing_file']} | 오염 {res['contaminated']}건 / {res['contaminated_pages']}페이지 | "
+        f"중복 {res['duplicate_refs']}건 / {res['duplicate_pages']}페이지",
         file=sys.stderr,
     )
     return 0

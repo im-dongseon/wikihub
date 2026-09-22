@@ -202,6 +202,7 @@ def resolve_link(name, category):
   | `missing_file` | `referenced_by` 가 가리키는 source 파일 부재 | 별도 보고 |
 
   - **자동 제거하지 않는다** — 데이터 변경은 운영 소관이고, P3 는 문자열 매칭으로 진성/오염을 구분할 수 없어 제거하면 진성분을 잃는다 (`Go` 실측: 언어 14 / 동사 54).
+  - **`referenced_by` 중복 전수 검사 (issue #210)**: 같은 source 가 한 페이지에 2회 이상 들어간 경우를 **전수 스캔**한다 — 현행 Step 4.5 는 **alias 중복**만 보고 `referenced_by` 는 검사하지 않아, 편입 등록 페이지 1건만 보고했다 (실측: lint 2건 vs 실제 362페이지 823건). 출력은 `duplicate_refs`(초과분 합) · `duplicate_pages` 로 보고한다. 삽입기 set semantics(`ingest.md` L175·L188·L254) 위반의 재발 감시용이다.
   - 실행: `"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/ref_audit.py" --wiki-home "$WIKIHUB_HOME"`
   - 등록 근거는 `ref_ledger.py` 로 기록한다 (매칭된 이름·분기·줄). 판정 정본은 `scripts/_helpers/ref_match.py`.
 
