@@ -203,3 +203,63 @@ def test_short_link_resolution_present():
     """단축형을 판정 없이 전부 위반 1 로 넣으면 안 된다."""
     text = (HELPERS / "_wl_step2_spec.py").read_text(encoding="utf-8")
     assert 'resolve(link, "entities", idx)' in text, "단축형 해소 판정 부재"
+
+
+def test_aliases_parser_reads_column_zero_block(tmp_path):
+    r"""block aliases 가 **들여쓰기 없이** column 0 에 있어도 읽어야 한다 (#208).
+
+    실측 분포: column 0 2,020 / 들여쓰기 272.
+    구 정규식 `^\s+-\s+` 는 column-0 을 전량 놓쳐 alias 558건이 누락됐다.
+    """
+    mod = _load("_wl_step2_spec.py")
+    page = tmp_path / "P.md"
+    page.write_text(
+        "---\n"
+        "type: entity\n"
+        "aliases:\n"
+        "- ADR\n"
+        "- ADR-0028\n"
+        "- American Depositary Receipt\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+    got = mod.aliases_of(page)
+    assert {"adr", "adr-0028", "american depositary receipt"} <= got, got
+
+
+def test_aliases_parser_column_zero_does_not_swallow_next_key(tmp_path):
+    """column-0 block aliases 뒤의 top-level 키를 alias 로 삼키면 안 된다 (#208)."""
+    mod = _load("_wl_step2_spec.py")
+    page = tmp_path / "Q.md"
+    page.write_text(
+        "---\n"
+        "aliases:\n"
+        "- only-a\n"
+        "merged_from:\n"
+        "- concepts/Other\n"
+        "referenced_by:\n"
+        "- sources/x.md\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+    got = mod.aliases_of(page)
+    assert got == {"only-a"} or got == {"only-a", "q"}, got
+    assert "concepts/other" not in got, got
+    assert "sources/x.md" not in got, got
+
+
+def test_aliases_parser_mixed_indent(tmp_path):
+    """같은 페이지에 column-0 과 들여쓰기가 섞여도 전량 읽어야 한다 (#208)."""
+    mod = _load("_wl_step2_spec.py")
+    page = tmp_path / "R.md"
+    page.write_text(
+        "---\n"
+        "aliases:\n"
+        "- col0-a\n"
+        "  - indented-b\n"
+        "- col0-c\n"
+        "---\n\nbody\n",
+        encoding="utf-8",
+    )
+    got = mod.aliases_of(page)
+    assert {"col0-a", "indented-b", "col0-c"} <= got, got
