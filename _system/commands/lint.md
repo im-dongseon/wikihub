@@ -48,48 +48,89 @@ systemctl --user start wikihub-lint.service
 
 systemd 가 이미 실행 중인 유닛에 start 를 반복 요청해도 실제 실행 인스턴스는 1개입니다 (2026-09-14 실측: 실행 중 유닛에 start 3회 → 실행 1회). timer 와 수동 호출이 겹쳐도 동일 유닛이므로 중복이 생기지 않습니다.
 
-**2차 가드 = flock 파일** (보조 layer). **단일 bash 프로세스가 세션 전체를 소유할 때만** 유효합니다.
+**2차 가드 = flock 파일** (wrapper 가 세션을 소유 — `scripts/wl_guarded.sh`).
 
 ```bash
-# 세션 전체를 소유하는 단일 bash 프로세스 (예: 실행 스크립트) 내부에서만
+# scripts/wl_guarded.sh 가 하는 일 (요약)
 exec 200>"$WIKIHUB_HOME/.wl.lock"
-flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
-# lock 은 이 bash 프로세스가 종료할 때까지 유지 (kernel-managed)
+flock -n 200 || { echo "lint 이미 진행 중 — exit 0"; exit 0; }
+exec "$@"          # fd 200 을 상속한 채 세션 프로세스로 이미지 교체
+# lock 은 세션 프로세스가 끝날 때까지 유지 (kernel-managed)
 ```
 
-> **⚠️ 이 패턴은 Hermes 경유 호출에서 무력하다 (2026-09-14 실증)**
+**핵심은 `exec` 다.** `exec "$@"` 는 shell 프로세스 이미지를 **교체**하므로 lock 을 잡은
+fd 가 세션 프로세스에 상속되고, 세션이 끝날 때까지 유지된다 (2026-09-22 실측: wrapper 가
+`sleep` 을 보유하는 동안 `--probe` 가 `LOCK=HELD`, 종료 후 `LOCK=FREE`).
+
+⚠️ `flock -o`(`--close`) 를 쓰면 안 된다 — 명령 실행 전에 fd 를 닫아 이 성질을 깨뜨린다.
+`flock -n <fd> <cmd>` subshell 형도 안 된다 — fd 가 lock 보유 프로세스에서 상속되지 않는다.
+
+> **⚠️ 이전 fd 상속 패턴은 무력했다 (2026-09-14 실증 — 기록 보존)**
 >
-> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라집니다. Hermes agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과합니다. 실측:
+> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라진다. Hermes
+> agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을
+> 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과했다.
 >
 > ```
-> 명령 1: exec 200>lock; flock -n 200  → 획득 후 프로세스 종료
+> 명령 1: exec 200>lock; flock -n 200  → 획득 후 프로세스 종료 → 해제
 > 명령 2: exec 200>lock; flock -n 200  → 획득됨 (가드 무력)
-> flock -n 200 단독 실행 (해당 shell 에 fd 200 미할당) → "Bad file descriptor"
 > ```
 >
-> 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
-> **fd 상속 방식은 이 실행 모델에서 `race window 0%` 를 보장하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다.
+> 운영 로그: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
+> **교훈**: 세션을 소유하는 단일 프로세스가 없으면 fd 상속 방식은 성립하지 않는다.
+> 그래서 wrapper 로 **세션을 소유하는 단일 프로세스**를 만들었다 (아래 Step 0.5).
 
 **결론 — 본 가드의 실효 범위**
 
 | 계층 | 실효성 | 근거 |
 |---|---|---|
 | systemd 유닛 (`Type=oneshot`) | **유효 — 1차 가드** | 동일 유닛 중복 발화를 systemd 가 드롭 (실측: 실행 중 유닛에 start 3회 → 실행 1회) |
-| flock 파일 (보조) | **무효 — Hermes 경유 시** | fd-scoped lock 이 subprocess 종료와 함께 해제됨 (위 실측) |
+| flock wrapper (`wl_guarded.sh`) | **유효 — 2차 가드** | wrapper 가 `exec` 로 세션을 소유해 fd 가 세션 수명 동안 유지됨 (2026-09-22 실측) |
 
-따라서 **동시 실행 차단은 systemd 유닛에 의존한다.** flock 은 단일 bash 프로세스가 세션
-전체를 소유하는 경로(예: 실행 스크립트 내부)에서만 보조로 유효하다.
+따라서 동시 실행은 **2계층으로 차단된다** — systemd 가 동일 유닛 중복을 드롭하고,
+wrapper 가 그 밖의 경로(예: 직접 실행)까지 fd 수준에서 막는다.
 
-flock 무효를 이유로 **세션을 중단하거나 clarify 를 호출하지 않는다** — 중복 위험은
-systemd 계층이 막고 있으므로 본 Step 은 그대로 진행한다.
+### Step 0.5. 가드 적용 범위와 silent skip (해소 — 2026-09-22)
 
-### Step 0.5. Hermes 채팅 `/wl` 직접 호출 경로 (미해결 — 후속 결정)
+**결정: B안 (세션 소유 wrapper)** 채택. 경로 폐기(A안)가 아니다 — `/wl` 직접 호출은
+수동 테스트에 필요하므로 **허용**한다.
 
-Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 유닛을 경유하지 않으므로 **1차 가드가 적용되지 않습니다.** 이 경로에서는 위 flock 2차 가드도 무력합니다 (fd 상속 불가).
+| 경로 | 가드 | 비고 |
+|---|---|---|
+| systemd timer → `wikihub-lint.service` | **1차 + 2차** | ExecStart 가 `wl_guarded.sh` 를 경유 |
+| `systemctl --user start wikihub-lint.service` | **1차 + 2차** | 동일 유닛 |
+| Hermes 채팅 `/wl` 직접 호출 | **없음** | systemd 를 우회하고 wrapper 도 안 거침 — 수동 테스트용으로 허용 |
 
-- 현재 상태: 메인테이너가 timer 발화와 겹쳐 `/wl` 을 직접 호출하면 lint cycle 이 중복 실행될 수 있음
-- **권장 경로**: 수동 실행도 `systemctl --user start wikihub-lint.service` 를 사용 (1차 가드 적용)
-- 처리 방향(경로 폐기 / 프로세스-무관 가드 도입)은 후속 결정 사항 — 이슈 #180 참조
+- **가드가 필요한 실행**은 `systemctl --user start wikihub-lint.service` 를 쓴다.
+- `/wl` 직접 호출은 lint 중복 위험을 감수하되, 수동 테스트 목적이므로 금지하지 않는다.
+
+**silent skip (설계 결정)** — wrapper 가 lock 을 못 잡으면 **exit 0** 으로 조용히 건너뛴다.
+stderr 1줄 + `logger -t wl_guarded` 로 흔적만 남긴다. 비영(非零) exit 을 하지 않는다 —
+`OnFailure=ops-alert.service` 가 benign skip 에 발화하면 안 되기 때문이다.
+**따라서 "lint 가 예정대로 돌았는가"를 journal 이 아닌 별도로 확인해야 할 수 있다.**
+
+### Step 0.6. `log.md` 계상 기준 (정본 — 2026-09-22)
+
+**모든 회차는 `log.md` 수치를 "발화 시점 스냅샷" 으로 계상하고, 측정 시각을 함께 적는다.**
+
+```
+계상 형식: <bytes> bytes / <행수>행  (발화 시점 YYYY-MM-DD HH:MM KST)
+```
+
+**왜 기준이 필요한가**: `log.md` 는 append-only 이고 ingest 가 **상시 append** 하므로,
+측정 시점이 다르면 값이 비교 불가능하다. 실측 (2026-09-22):
+
+```
+09:12 회차   1,075,741 bytes
+12:19 회차   1,084,964 bytes
+13:52 회차   1,092,143 bytes   ← 13:50 ingest 발화 시점 접두값
+14:24 회차   1,095,980 bytes   ← 그때 재측정값
+```
+
+같은 파일을 재는데 기준이 달라 "회차 대비 증가분" 을 계산할 수 없었다. 그래서 **발화 시점
+스냅샷**으로 통일한다. 발화 시점 이후의 증가분은 **동시 ingest 소관이며 본 회차 계상이
+아니다** — 비교 시 이 점을 명시한다. `index.md` 등 lint 가 직접 생성하는 산출물은 값이
+안정적이므로 이 규정의 대상이 아니다.
 
 ### Step 1. 디렉토리 구조 검증 (자동)
 
