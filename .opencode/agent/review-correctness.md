@@ -1,7 +1,7 @@
 ---
 description: Reviews a diff for correctness — bugs, logic errors, edge cases, spec adherence. Read-only.
 mode: subagent
-model: ollama-cloud/kimi-k3
+model: ollama-cloud/kimi-k2.7-code
 temperature: 0.1
 tools:
   write: true

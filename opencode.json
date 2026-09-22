@@ -87,7 +87,7 @@
     // REVIEW-CORRECTNESS — correctness review subagent.
     // NOTE: 실행 모델 정본은 .opencode/agent/review-correctness.md frontmatter.
     "review-correctness": {
-      "model": "ollama-cloud/kimi-k3"
+      "model": "ollama-cloud/kimi-k2.7-code"
     },
 
     // REVIEW-QUALITY — quality review subagent.
