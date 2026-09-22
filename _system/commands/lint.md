@@ -264,6 +264,36 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 - **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (`ingest.md` Step 4.3) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
 
+### Step 4.7. log.md 무결성 검사 (자동, 보고만 — issue #211)
+
+`wiki/sources/<vault>/log.md` 전량을 스캔해 append 규약 위반을 보고한다.
+**log.md 는 append-only 이력이므로 자동 수정하지 않는다** — 진단만 한다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/log_integrity.py" \
+  --wiki-home "$WIKIHUB_HOME" --json "$WIKIHUB_HOME/wiki/_lint/_log_integrity.json"
+```
+
+| 검출 항목 | 판정 | 함정 |
+|---|---|---|
+| **헤더 시각 역행** | 인접 헤더의 시각이 감소 (초 단위 포함) | 파일 순서 = append 순서인데 시각만 이르다. 스테일 시각을 쓴 흔적 |
+| **비정상 접두** | 행이 `|` 로 시작 | log 내용을 markdown 표로 오인한 흔적 (실측 860행) |
+| **헤더 형식 불일치** | `## 날짜` 인데 `## YYYY-MM-DD HH:MM(:SS) KST` 불충족 | 초 단위/분 단위 혼용, tz 표기 누락 |
+| **Trigger 필드 부재** | 헤더 블록에 `- **Trigger**:` 없음 | 규약 미준수 — 상태 판정 불가 |
+
+**작성 규약 정본은 `_system/commands/ingest.md` Step 5** ("헤더 시각 규약") 다.
+본 검사는 그 규약이 지켜졌는지 사후 확인한다.
+
+**판정 기준 (실측 근거)**:
+- 시각 비교는 **문자열 비교로 충분**하다 — `YYYY-MM-DD HH:MM:SS` 는 zero-padding
+  덕에 사전순 = 시간순이다 (초 생략 표기도 유지).
+- **역행은 단발**로 나타난다 (연쇄 오염 아님 — 실측: 역행 직후 정상 복귀).
+  "역행 발견 = 그 헤더의 시각이 스테일" 로 읽고, 이후를 오염으로 단정하지 않는다.
+- 위반이 0건이면 본 항목을 report 에 싣지 않는다 (노이즈 방지).
+
+**⚠️ 헤더 시각 역행은 자동 수정 대상이 아니다** — 원래 시각을 알 수 없으므로
+(이슈 #211 실측에서도 8건 전량 미조치로 남았다) 검출만 하고 운영자 판단에 맡긴다.
+
 ### Step 5. wiki/index.md 재구성 (자동)
 
 ADR-0005에 따라 `/wl`가 index 재구성 책임 보유:

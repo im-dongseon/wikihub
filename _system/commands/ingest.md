@@ -219,6 +219,25 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
 - `Status: skipped` — has_changes=false (Script duration만, Semantic 줄 생략)
 - `Status: failure` — script exit 75 또는 semantic 실패 (Reason 줄 추가)
 
+#### ⚠️ 헤더 시각 규약 (issue #211)
+
+**헤더 시각은 그 항목을 append 하는 시점의 실제 시각**이어야 한다. 파일 순서가
+append 순서이므로 **시각은 단조 증가**한다. 실측으로 두 결함이 누적됐다:
+
+- 헤더 시각이 직전 항목보다 **이른 값**(역행) 8건 — 그 세션의 실제 시각이 아니라
+  스테일 값을 쓴 흔적. KST/UTC 혼재(−9h) 가설은 실측으로 **기각**됐다
+  (Δ 가 −1h/−7h/−8h/−13h 로 불규칙). 역행은 **단발**로 나타나고 직후 정상 복귀한다.
+- 선행 `|` 접두 860행 — log 내용을 markdown 표로 오인한 흔적 (운영 복원 완료).
+
+**작성 시 자기 검증**:
+1. append 직전에 `tail -1` 로 직전 헤더 시각을 읽고, **현재 시각과 비교**한다.
+   현재 시각이 더 이르면 **중단하고 조사**한다 (시계 문제 또는 동시 실행).
+2. 본문에 `|` 로 시작하는 줄이 들어가지 않게 한다. log 항목은 `- **Field**:` 형식만 쓴다.
+3. 헤더 형식은 `## YYYY-MM-DD HH:MM:SS KST` 를 유지한다 (초 생략 표기와 혼용 금지 —
+   초를 쓸 거면 전량 초 단위로).
+
+**사후 검출**: `lint.md` Step 4.7 이 전량 스캔해 위반을 보고한다 (report-only).
+
 ### Step 6. pending_ingest.json 삭제
 
 Step 5까지 무에러 완료 시:
