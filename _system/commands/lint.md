@@ -31,6 +31,23 @@ systemctl --user start wikihub-lint.service
 - **출력 언어 = 한국어** (wiki 의 source 본문이 한국어 위주, ADR-0001 vault-prefix link 도 한국어 entity/concept 명 정합).
 - **한자 (漢字) 감지 시 한글로 변환** — MiniMax M2.5 등 일부 모델이 동음이의 한국어를 한자 표기로 출력하는 결함 발견 (Hermes OCI 실증, 2026-05-20). 예: "기획(企劃)" → "기획"; "권한(權限)" → "권한". 고유명사 (인명·지명·조직명 중 한국 외 출처) 는 예외 허용.
 - **영어 약어** (OKR, PM, CRM, API 등) 는 그대로 유지 — 한국어 source 의 관용.
+- **⚠️ report 가 한자를 인용하지 않는다 (issue #213)** — 결함을 보고할 때 그 한자를 그대로 옮기면 **report 자신이 다음 회차의 검출 대상**이 된다. report 는 `sources/nas/project/wikihub/report/` 로 발행되어 다음 회차 `sources/` 스캔에 다시 들어가므로 **자기 재생산 경로**가 성립한다.
+
+  ```
+  실측 (2026-09-22): report 1건의 한자 20자 중 20자가 lint 자기 산출이었다 (47자 중)
+  ```
+
+  인용이 필요하면 `_lint_step6.py` 의 살균 함수를 쓴다:
+
+  ```bash
+  # 코드포인트 표기 — U+590D → U+590D (원문을 쓰지 않는다)
+  python3 -c "import sys; sys.path.insert(0,'scripts/_helpers'); import _lint_step6 as S; print(S.sanitize_hanja('<인용할 텍스트>'))"
+  # 개수만 요약 — "7자 1건 · 4자 1건 · 2자 2건"
+  python3 -c "import sys; sys.path.insert(0,'scripts/_helpers'); import _lint_step6 as S; print(S.summarize_hanja('<인용할 텍스트>'))"
+  ```
+
+  **권장 서술**: `analyses 5페이지 — 한자 7자 1건 · 4자 1건 · 2자 2건 · 1자 1건` (문자 없이 개수만).
+  부득이 원문을 보여야 하면 `U+590D U+5EA6 …` 형태로 적는다. **가나·한글은 살균 대상이 아니다** (한자만).
 
 본 정책은 wiki-schema.md 의 신뢰 경계 출력 sanitize layer 와 정합.
 
@@ -314,6 +331,19 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 - 페이지 간 모순되는 클레임
 - 더 최신 source로 무효화 가능성 있는 내용
 - 본문에 언급되지만 entity·concept 페이지가 없는 항목 (Step 3에서 자동 생성됐어야 하나 누락 케이스)
+
+**후보 생성 근거 (issue #214 교정)** — 위 4번째 항목의 후보는 `_lint_step6.py` 가 만든다.
+근거는 **코드 펜스 밖 본문 헤딩**이다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/_lint_step6.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+- ⚠️ **코드 펜스(```` ``` ````) 내부의 `# ...` 는 헤딩이 아니다** — 예시로 제시된 코드/출력이므로 스캔에서 제외한다. 실측(2026-09-22): 후보 13건 중 **11건이 펜스 내부**였고, 그것이 "전량 노이즈" 의 실제 원인이었다 (`설치 및 실행` · `저장소 클론` · `wikihub.yaml` 등).
+- **후보 제외** — URL(`://`·`localhost`) · 확장자 보유(`.md`·`.yaml`·`.service`) · 순수 숫자 · 셸/템플릿 신호(`$`·`==`·`<...>`·`...`·`/`) · 문서 구조 헤딩(`skip_common`).
+- ⚠️ **`[[...]]` 링크를 근거로 쓰지 않는다** — `[[` 는 마크다운 위키링크이자 **bash 조건 연산자**라 문자열로 구분 불가하다. 실측: source 전체 `[[...]]` 537건 중 shell 32건 · path 148건 · template 41건. 링크 기반으로 바꾸면 후보가 13 → **26건으로 증가**한다.
+- 교정 후 후보는 **1건**(`Superpowers` — 실제 문서 헤딩 + 대응 페이지 부재)이다. 0건이면 report 에서 본 항목을 "해당 없음" 으로 종료할 수 있다.
 
 → `_lint/report.md`에 보고 + Step 7 에서 LLM 본문 갱신 자동. wikihub `wiki/` = LLM derivative 라 원본 변경 0 (ADR-0039 정합).
 
