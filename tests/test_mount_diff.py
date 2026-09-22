@@ -338,3 +338,69 @@ def test_nas_legacy_empty_source_id_entry(caplog: pytest.LogCaptureFixture) -> N
     assert e.source_relpath == "a.txt"
 
 
+
+
+# ---------------------------------------------------------------------------
+# _normalize_mtime (issue #201 ②)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_mtime_same_instant_different_spelling() -> None:
+    """같은 시각의 다른 ISO-8601 표기가 동일 문자열로 정규화돼야 한다.
+
+    rclone backend/버전에 따라 ModTime 이 offset 형태(`+09:00`)로 올 수 있다.
+    정규화 없이 plain `!=` 로 비교하면 같은 시각을 modified 로 오판해
+    불필요한 재추출이 매 cycle 발생한다.
+    """
+    from lib.mount_diff import _normalize_mtime as n
+
+    utc_z = n("2026-06-03T21:03:07Z")
+    utc_off = n("2026-06-03T21:03:07+00:00")
+    kst = n("2026-06-04T06:03:07+09:00")  # 같은 instant
+
+    assert utc_z == utc_off == kst
+    assert utc_z == "2026-06-03T21:03:07Z"
+
+
+def test_normalize_mtime_edge_inputs_never_raise() -> None:
+    from lib.mount_diff import _normalize_mtime as n
+
+    assert n("") == ""
+    assert n("   ") == ""
+    assert n(None) == ""
+    # 인식 불가 형식은 원문 유지 (sync loop 를 깨지 않는다)
+    assert n("not-a-date") == "not-a-date"
+
+
+def test_path_based_diff_offset_mtime_is_not_modified() -> None:
+    """path 기반 diff (NAS) — 저장 Z vs listing +09:00 동일 시각 → diff 0."""
+    from lib.mount_diff import _compute_diff_path_based
+
+    listing = [{"Path": "a/b.pdf", "MimeType": "application/pdf",
+                "ModTime": "2026-06-04T06:03:07+09:00", "Size": 10}]
+    file_map = {"files": {"a/b.pdf": {"source_relpath": "a/b.pdf",
+                                      "source_mtime": "2026-06-03T21:03:07Z"}}}
+    diff = _compute_diff_path_based(listing, file_map)
+    assert diff.entries == [], f"동일 시각인데 diff 발생: {diff.entries}"
+
+
+def test_id_based_diff_offset_mtime_is_not_modified() -> None:
+    """id 기반 diff — 같은 조건에서 diff 0."""
+    listing = [_listing_item(id="id1", path="a/b.pdf",
+                             mtime="2026-06-04T06:03:07+09:00")]
+    file_map = {"files": {"id1": {"source_relpath": "a/b.pdf",
+                                  "source_mtime": "2026-06-03T21:03:07Z"}}}
+    diff = compute_diff(listing, file_map)
+    assert diff.entries == [], f"동일 시각인데 diff 발생: {diff.entries}"
+
+
+def test_real_mtime_change_still_detected() -> None:
+    """정규화가 실제 변경을 놓치면 안 된다 (회귀 가드)."""
+    from lib.mount_diff import _compute_diff_path_based
+
+    listing = [{"Path": "a/b.pdf", "MimeType": "application/pdf",
+                "ModTime": "2026-06-03T22:00:00Z", "Size": 10}]
+    file_map = {"files": {"a/b.pdf": {"source_relpath": "a/b.pdf",
+                                      "source_mtime": "2026-06-03T21:03:07Z"}}}
+    diff = _compute_diff_path_based(listing, file_map)
+    assert [e.operation for e in diff.entries] == ["modified"]

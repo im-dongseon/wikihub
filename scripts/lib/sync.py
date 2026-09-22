@@ -29,6 +29,7 @@ import os
 import re
 import tempfile
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,10 +92,15 @@ class SyncResult:
 # ---------------------------------------------------------------------------
 
 def _sanitize_relpath(raw: str) -> str | None:
-    """traversal · invalid char 차단. 부적합 시 None.
+    """traversal · invalid char 차단. 부적합 시 None. 성공 시 NFC 정규화된 경로 반환.
 
     rclone lsjson 의 ``Path`` 는 mount 의 relative path — Drive 운영자 제어 입력.
     ``../`` 절대경로, control char 차단 후 vault 경계 안에만 저장.
+
+    반환값은 NFC 정규화한다 — NAS vault source 가 macOS origin 으로 NFD 일 수 있는
+    반면 wiki layer 는 NFC 이고, mount_diff 가 listing ``Path`` 와 file_map
+    ``source_relpath`` 를 plain string 으로 비교하므로 NFD/NFC 불일치 시
+    created+deleted pair 가 조용히 발생하기 때문이다.
     """
     if not raw:
         return None
@@ -110,7 +116,7 @@ def _sanitize_relpath(raw: str) -> str | None:
         return None
     if Path(candidate).is_absolute():
         return None
-    return candidate
+    return unicodedata.normalize("NFC", candidate)
 
 
 def _virtual_ext_for_native(mime: str) -> str:
@@ -264,7 +270,17 @@ def _read_from_mount(
 # ---------------------------------------------------------------------------
 
 def _atomic_write_wiki_page(full_path: Path, content: str) -> None:
-    """tempfile + fsync + os.replace 패턴 (state._atomic_write_json 과 통일)."""
+    """tempfile + fsync + os.replace 패턴 (state._atomic_write_json 과 통일).
+
+    wiki page 는 **0644 를 코드로 보장**한다. ``tempfile.mkstemp`` 는 기본 0600
+    파일을 만들고 ``os.replace`` 는 그 mode 를 그대로 보존하므로, chmod 없이는
+    기록된 page 가 0600 이 된다. 기존에는 ``_system/commands/ingest.md`` 의
+    ``chmod 644`` playbook 지시로만 보정했으나 이는 LLM 이 지시를 빠뜨리면
+    깨지는 취약한 보상이다 — 코드가 직접 강제한다.
+
+    chmod 실패 (소유권·읽기전용 FS·NFS ACL 등) 시 page 를 잃지 않도록 module
+    관례대로 warning 만 남기고 계속한다 (lint.md §실패 처리 정합).
+    """
     full_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_name = tempfile.mkstemp(
         prefix=f".{full_path.name}.",
@@ -277,6 +293,11 @@ def _atomic_write_wiki_page(full_path: Path, content: str) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, full_path)
+        try:
+            os.chmod(full_path, 0o644)
+        except OSError as e:
+            log.warning("wiki page chmod 644 실패 (내용은 보존): path=%s err=%s",
+                        full_path, e)
     except Exception:
         try:
             os.unlink(tmp_name)

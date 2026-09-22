@@ -36,6 +36,15 @@ err()   { echo "${C_ERR}ERROR${C_RST} [$(_ts)] $*" >&2; }
 # WIKIHUB_HOME 의미 swap (v0.2.0): 운영 자산 dir (이전 repo dir 의미는 WIKIHUB_SRC 로 이전).
 # WIKIHUB_INSTANCE_ROOT 폐기 — _step0_env_semantic_check 가 detect 시 fail-fast.
 export WIKIHUB_HOME="${WIKIHUB_HOME:-$HOME/wikihub}"                            # 운영 자산 dir
+# issue #184 — default 적용 전 explicitness 캡처 (fail-fast 판정 입력). 이 줄이 없으면
+# ${VAR:-default} 가 "명시 여부"를 소거해 미명시 실행을 탐지할 수 없다.
+#
+# ⚠️ 플래그는 **operator 가 직접 넘긴 경우에만** `1` 로 세운다. `bootstrap_clone_then_exec`
+# 가 `exec bash install.sh` 로 self-replace 하면 `export WIKIHUB_SRC`(defaulted) 가
+# 상속되므로, `${WIKIHUB_SRC:-}` 를 그대로 쓰면 child 가 "명시됨"으로 오판해 가드가
+# 무력화된다 (실측). 상속되지 않는 별도 플래그로만 판정한다.
+export WIKIHUB_SRC_EXPLICIT_FLAG="${WIKIHUB_SRC_EXPLICIT_FLAG:-}"
+[[ -n "${WIKIHUB_SRC:-}" ]] && WIKIHUB_SRC_EXPLICIT_FLAG=1
 export WIKIHUB_SRC="${WIKIHUB_SRC:-$HOME/.local/share/wikihub/src}"             # 시스템 코드 dir (XDG, ADR-0020 venv 와 동일 root)
 WIKIHUB_REPO_URL="${WIKIHUB_REPO_URL:-https://github.com/im-dongseon/wikihub.git}"
 # BRANCH default empty (ADR-0030) — `_resolve_ref` 가 우선순위 chain 으로 결정.
@@ -49,6 +58,7 @@ INSTALL_MODE=""                            # update | fresh — _detect_mode 가
 PRE_UPDATE_REF=""                          # _step2_update 가 capture
 # ADR-0035: gws CLI 폐기. GWS_VERSION 변수 제거. GWS_BIN_DIR → LOCAL_BIN_DIR (uv binary 위치만 유지).
 SKIP_CONFIRM="${SKIP_CONFIRM:-${WIKIHUB_NONINTERACTIVE:-}}"
+VENV_PATH_EXPLICIT="${VENV_PATH:-}"    # issue #184 — explicitness 캡처
 VENV_PATH="${VENV_PATH:-$HOME/.local/share/wikihub/venv}"
 LOCAL_BIN_DIR="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
 ALLOW_NON_UBUNTU="${ALLOW_NON_UBUNTU:-}"      # R10 MED-4: 메인테이너 macOS dev box 실수 호출 차단
@@ -174,6 +184,19 @@ done
 # ──────────────────────────────────────────────────────────────────────
 # $BASH_SOURCE[0] 단독 감지 — env variable 의존 안 함 → exec 후 자연 분기 미진입.
 
+_self_replace_exec() {
+    # issue #184 — self-replace 시 "operator 가 실제 넘긴" env 만 상속시킨다.
+    # defaulted WIKIHUB_SRC 를 그대로 상속하면 child 가 "명시됨"으로 오판해
+    # WIKIHUB_SRC 미명시 가드가 무력화된다 (실측).
+    #   1. operator 명시(WIKIHUB_SRC_EXPLICIT_FLAG=1) → WIKIHUB_SRC + 플래그 그대로 전달
+    #   2. 미명시 → 둘 다 제거해 child 가 자기 env 로 재판정하게 한다
+    if [[ -n "${WIKIHUB_SRC_EXPLICIT_FLAG:-}" ]]; then
+        exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+    fi
+    exec env -u WIKIHUB_SRC -u WIKIHUB_SRC_EXPLICIT_FLAG \
+        bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+}
+
 bootstrap_clone_then_exec() {
     # ADR-0030 (C1 + HIGH-N4): mode-aware bootstrap.
     # _detect_mode 가 이미 INSTALL_MODE set. update mode 면 clone 없이 in-place exec.
@@ -186,18 +209,18 @@ bootstrap_clone_then_exec() {
             err "$WIKIHUB_SRC/install.sh 부재 — partial state 의심. --force-fresh 권장."
             exit 2
         fi
-        exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+        _self_replace_exec
     fi
     # fresh path — repo clone (기존 동작)
     info "curl-pipe + fresh mode — repo 부트스트랩 진행"
     _step2_clone
     if [ ! -f "$WIKIHUB_SRC/install.sh" ]; then
-        err "clone 후 $WIKIHUB_SRC/install.sh 가 없음 — repo 구조 결함 의심"
+        err "clone 후 $WIKIHUB_SRC/install.sh 가 없음 — repo 구조 결함 의심."
         exit 2
     fi
     info "→ $WIKIHUB_SRC/install.sh 로 self-replace (args: ${ORIGINAL_ARGS[*]:-(none)})"
     # R9 HIGH-2 fix: ORIGINAL_ARGS 보존 — CLI 파싱 후 $@ 가 비어 있어도 운영자 원본 args 전달
-    exec bash "$WIKIHUB_SRC/install.sh" "${ORIGINAL_ARGS[@]}"
+    _self_replace_exec
 }
 
 # Step 0 의 감지 — curl-pipe 모드 판별
@@ -220,6 +243,9 @@ fi
 # ──────────────────────────────────────────────────────────────────────
 
 _step1_env_check() {
+    # issue #184 — 프로필 환경에서 WIKIHUB_SRC 미명시면 오대상 트리 갱신을 차단 (fail-fast)
+    _verify_wikihub_src_explicit_in_profile
+
     # EUID assert — 메인테이너가 `sudo ./install.sh` 호출하면 즉시 exit 1
     if [ "$EUID" -eq 0 ]; then
         err "install.sh 는 일반 user 로 실행하세요. (현재 user: root)"
@@ -582,7 +608,10 @@ _install_graphify() {
     # ADR-0036 — graphify CLI (PyPI graphifyy) PyPI 설치 + version 검증.
     # rclone 의 binary 설치 (_install_rclone) 와 달리 PyPI 패키지 — pip 의 hash-based install 의존.
     # supply chain hash pin enforce 는 v0.2.x 검토 트리거.
-    local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.8.0,<1.0.0}"
+    # min 0.9.20 (option C, issue #170): 0.9.21 이 OLLAMA_HOST auto-detection 을 추가했으나
+    # 하한은 0.9.20 으로 둔다 — 0.9.x 계열 진입 자체가 목적이고, 실설치(0.9.32)와 정합한다.
+    # max <1.0.0 은 breaking-change 방어선 유지 (메이저 bump 시 재검토).
+    local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.9.20,<1.0.0}"
 
     # install_update_hardening (v0.1.8): venv 의 bin/ 이 install-time PATH 에 우선해야
     # `command -v graphify` check 가 정합 동작. 운영자 shell PATH 에 venv/bin 자연 없음 (OCI default)
@@ -870,29 +899,136 @@ _hermes_agent_profile() {
     fi
     local yaml="$WIKIHUB_HOME/wikihub.yaml"
     [[ -f "$yaml" ]] || return 0
-    "$VENV_PATH/bin/python3" -c \
-        "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('profile','') or '')" \
-        "$yaml" 2>/dev/null || true
+    # 1순위: venv python (yaml 파싱 정확). fresh install 등 venv 부재 시 2순위로.
+    if [[ -x "$VENV_PATH/bin/python3" ]]; then
+        local _out
+        _out="$("$VENV_PATH/bin/python3" -c \
+            "import yaml,sys; print(yaml.safe_load(open(sys.argv[1])).get('agent',{}).get('profile','') or '')" \
+            "$yaml" 2>/dev/null)" && { printf '%s\n' "$_out"; return 0; }
+    fi
+    # 2순위: bash fallback (issue #184 — venv 부재 시에도 프로필 판정 가능해야 함).
+    # 최상위 `agent:` 블록 안의 `profile:` 만 취한다. `graphify_profile:` /
+    # `graphify_profiles:` 는 다른 키이므로 정확히 키 이름으로 앵커한다.
+    awk '
+        /^[^[:space:]#]/ { in_agent = ($0 ~ /^agent:[[:space:]]*$/) ; next }
+        in_agent && /^[[:space:]]+profile:[[:space:]]*/ {
+            sub(/^[[:space:]]+profile:[[:space:]]*/, "")
+            sub(/[[:space:]]*#.*$/, "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            print ; exit
+        }
+    ' "$yaml" 2>/dev/null || true
 }
 
-# Hermes config path. resolution order (issue #182 — Hermes 가 profile config 를 profile dir 에 anchor):
-#   1. $HERMES_CONFIG_HOME set -> ${HERMES_CONFIG_HOME}/config.yaml   (operator override, 테스트 용도)
-#   2. agent.profile 세팅 + $HOME == */profiles/<profile>/home -> $(dirname "$HOME")/config.yaml
-#      (Hermes profile mode 의 canonical — profile home 이 아닌 profile dir 에 config.yaml anchor)
-#   3. fallback -> $HOME/.hermes/config.yaml                          (backward-compat)
+# Hermes root directory (profiles/ 의 부모). Hermes 자체의 get_default_hermes_root() 를 mirror.
+# install 중단 금지 — 모호 시 빈 출력 보다 $HOME/.hermes fallback 선호.
+#   - HERMES_HOME 이 */profiles/* 형태면 root = $(dirname "$(dirname "$HERMES_HOME")")
+#     (예: /home/ubuntu/.hermes/profiles/jisaseo -> /home/ubuntu/.hermes)
+#   - HERMES_HOME 이 설정됐으나 */profiles/* 가 아니면 Docker/custom root -> 그대로 사용
+#   - HERMES_HOME 미설정 시 $HOME 가 */profiles/<name>/home 형태면 trailing 3-segment 를
+#     잘라내 $HOME/.hermes 유추 (아래 pure-bash 3-step strip), 아니면 $HOME/.hermes
+_hermes_root() {
+    if [[ -n "${HERMES_HOME:-}" ]]; then
+        local _env="${HERMES_HOME%/}"
+        if [[ "$_env" == */profiles/* ]]; then
+            echo "$(dirname "$(dirname "$_env")")"
+        else
+            echo "$_env"
+        fi
+        return 0
+    fi
+    local _h="${HOME%/}"
+    local _r
+    if [[ "$_h" == */profiles/*/home ]]; then
+        # three-segment suffix "/profiles/<name>/home" 제거 — 순수 bash parameter expansion.
+        # /home/ubuntu/.hermes/profiles/jisaseo/home -> /home/ubuntu/.hermes
+        _r="${_h%/home}"; _r="${_r%/*}"; _r="${_r%/profiles*}"
+        echo "$_r"
+        return 0
+    fi
+    echo "$_h/.hermes"
+}
+
+# WIKIHUB_SRC 미명시 + 프로필 환경 정합 검증 (issue #184 — fail-fast).
+# update 경로가 프로필 밖 트리를 갱신 대상으로 잡고 그 트리 기준으로 unit 을 재렌더해
+# 미사용 venv/트리를 가리키도록 퇴행시키는 것을 차단한다.
+# 아래 4조건이 모두 성립할 때만 중단한다 — 명시 실행 / 비프로필 / 도출 경로 부재는
+# 기존 동작을 유지해 하위 호환을 깨지 않는다.
+_verify_wikihub_src_explicit_in_profile() {
+    local _profile; _profile="$(_hermes_agent_profile)"
+    [[ -z "$_profile" ]] && return 0
+    [[ -n "${WIKIHUB_SRC_EXPLICIT_FLAG:-}" ]] && return 0
+    local _root; _root="$(_hermes_root)"
+    local _expected="$_root/profiles/$_profile/home/.local/share/wikihub/src"
+    [[ -d "$_expected" ]] || return 0
+    if [[ "$WIKIHUB_SRC" != "$_expected" ]]; then
+        err "WIKIHUB_SRC 미설정 + 프로필 환경 — 기본값이 운영 트리를 가리키지 않습니다."
+        err "  WIKIHUB_SRC      = $WIKIHUB_SRC"
+        err "  운영 트리 (도출) = $_expected"
+        err "  대처: WIKIHUB_SRC=\"$_expected\" 로 명시해 재실행하거나,"
+        err "        기본값 트리를 의도했다면 WIKIHUB_SRC=\"$WIKIHUB_SRC\" 를 명시하세요."
+        exit 1
+    fi
+    return 0
+}
+
+# Hermes config path. resolution order (issue #190 — Hermes 가 profile config 를 profile dir /
+# HERMES_HOME 에 anchor, profile-home-derived path 가 아님):
+#   1. $HERMES_CONFIG_HOME set  -> ${HERMES_CONFIG_HOME}/config.yaml   (operator override, 테스트 용도)
+#   2. $HERMES_HOME set         -> ${HERMES_HOME}/config.yaml          (Hermes canonical — get_config_path)
+#   3. agent.profile set + <hermes_root>/profiles/<profile> 가 dir -> <hermes_root>/profiles/<profile>/config.yaml
+#   4. $HOME == */profiles/<profile>/home -> $(dirname "${HOME%/}")/config.yaml (legacy profile-home 감지)
+#   5. fallback                  -> $HOME/.hermes/config.yaml           (backward-compat)
+# 정상 운용 시 HERMES_HOME 이 profile 식별, HOME 은 OS user home (=/home/ubuntu). Hermes 는 profile
+# config 를 profile dir / HERMES_HOME 에 anchor 하므로 step 2·3 가 canonical, step 4 는 legacy fallback.
 _hermes_config_path() {
     if [[ -n "${HERMES_CONFIG_HOME:-}" ]]; then
-        echo "${HERMES_CONFIG_HOME}/config.yaml"
+        echo "${HERMES_CONFIG_HOME%/}/config.yaml"
+        return 0
+    fi
+    if [[ -n "${HERMES_HOME:-}" ]]; then
+        echo "${HERMES_HOME%/}/config.yaml"
         return 0
     fi
     local _profile; _profile="$(_hermes_agent_profile)"
     # trailing slash 정규화 — ${HOME%/} 로 glob 매칭 견고화 (reviewer mid 반영)
     local _home_norm="${HOME%/}"
+    local _root
+    if [[ -n "$_profile" ]]; then
+        _root="$(_hermes_root)"
+        if [[ -d "${_root}/profiles/${_profile}" ]]; then
+            echo "${_root}/profiles/${_profile}/config.yaml"
+            return 0
+        fi
+    fi
     if [[ -n "$_profile" && "$_home_norm" == */profiles/"$_profile"/home ]]; then
         echo "$(dirname "$_home_norm")/config.yaml"
         return 0
     fi
-    echo "$HOME/.hermes/config.yaml"
+    echo "$_home_norm/.hermes/config.yaml"
+}
+
+# Stray Hermes config 후보 경로 (issue #190). 과거 buggy install.sh 이 wikihub entry 를
+# 잘못 기록했을 수 있는 위치를 한 줄씩 출력. canonical path (= _hermes_config_path) 및
+# default profile canonical (<hermes_root>/config.yaml) 과 문자열이 같으면 제외 —
+# 어느 profile 의 canonical config 도 stray 로 분류하지 않는다. 파일 존재 여부는 caller 가 판별.
+#   (a) <hermes_root>/profiles/<profile>/home/.hermes/config.yaml — agent.profile set 시만
+#   (b) $HOME/.hermes/config.yaml
+_hermes_stray_candidates() {
+    local canonical; canonical="$(_hermes_config_path)"
+    local _root; _root="$(_hermes_root)"
+    local default_canonical="${_root}/config.yaml"
+    local _profile; _profile="$(_hermes_agent_profile)"
+    local _a=""
+    if [[ -n "$_profile" ]]; then
+        _a="${_root}/profiles/${_profile}/home/.hermes/config.yaml"
+        [[ "$_a" != "$canonical" && "$_a" != "$default_canonical" ]] && echo "$_a" || _a=""
+    fi
+    # dedup — 구 실행 방식(HOME=<profile_home>)에서는 후보 a 와 b 가 동일 경로가 된다.
+    # HOME trailing slash 정규화 — 비교·경로 일관성 (reviewer mid 반영).
+    local _b="${HOME%/}/.hermes/config.yaml"
+    [[ -n "$_a" && "$_b" == "$_a" ]] && return 0
+    [[ "$_b" != "$canonical" && "$_b" != "$default_canonical" ]] && echo "$_b"
 }
 
 # operational yaml 의 schema 보강 — v0.1.5+ 신설 field 자동 추가 (부재 시만).
@@ -1185,20 +1321,204 @@ PYEOF
     find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
 }
 
-# Stray Hermes config 정리 (issue #182). 과거 install.sh 이 profile mode 에서
-# $HOME/.hermes/config.yaml (stray) 에 wikihub skill entry 를 잘못 기록한 잔재 제거.
-# canonical path (= _hermes_config_path) 와 stray path 가 다를 때만 작동.
+# Hermes terminal 세션용 non-secret env file 생성 (issue #186).
+# ~/.config/wikihub/session-env.sh (mode 644, dir 700) — 비밀값 없음.
+# terminal.shell_init_files 가 source. install.sh 가 매 호출 시 idempotent 재생성 (atomic mv).
+# 비밀값 (API key/token) 은 ~/.config/wikihub/env (mode 600, systemd EnvironmentFile 전용) — 본 fn 가 건드리지 않음.
+# 실패 시 return 1 — caller(_step6_agent_skill) 가 graceful skip 하므로 install 은 중단되지 않는다.
+# (성공 시에만 shell_init_files 등록을 진행해 미존재 파일 등록을 방지.)
+_ensure_session_env_file() {
+    local wh_config_dir="$HOME/.config/wikihub"
+    local session_env="$wh_config_dir/session-env.sh"
+    # dir 700 — 세션 init file 이 놓이므로 타 사용자 접근 차단
+    if ! mkdir -p "$wh_config_dir" 2>/dev/null || ! chmod 700 "$wh_config_dir" 2>/dev/null; then
+        warn "session env dir 생성/권한 실패 — $wh_config_dir (건너뜀)"
+        return 1
+    fi
+
+    local tmp="$session_env.tmp.$$"
+    # 주의: 여기 heredoc 은 install-time 확장(unquoted EOF)이지만 PATH 관련은 source-time
+    # 평가를 위해 escape 한다. $VENV_PATH 는 install-time bake 대신 source-time 변수를
+    # 쓰지 않고 그대로 bake 하되, PATH guard 도 동일 문자열을 쓰도록 $WIKIHUB_VENV 를
+    # escape 해 런타임 값으로 평가되게 한다 (review mid 반영).
+    if ! cat > "$tmp" <<EOF
+# wikihub session env — Hermes terminal 세션용 (issue #186).
+# 비밀값 없음 (API key/token 은 ~/.config/wikihub/env — systemd EnvironmentFile 전용).
+# install.sh 가 생성/갱신. terminal.shell_init_files 가 source.
+export WIKIHUB_HOME="$WIKIHUB_HOME"
+export WIKIHUB_SRC="$WIKIHUB_SRC"
+export WIKIHUB_YAML="$WIKIHUB_HOME/wikihub.yaml"
+export WIKIHUB_VENV="$VENV_PATH"
+case ":\$PATH:" in
+  *":\$WIKIHUB_VENV/bin:"*) ;;
+  *) PATH="\$WIKIHUB_VENV/bin:\$PATH" ;;
+esac
+export PATH
+EOF
+    then
+        rm -f "$tmp"
+        warn "session env file 작성 실패 — $session_env (건너뜀)"
+        return 1
+    fi
+
+    if ! mv -f "$tmp" "$session_env" 2>/dev/null; then
+        rm -f "$tmp"
+        warn "session env file 교체 실패 — $session_env (건너뜀)"
+        return 1
+    fi
+    if ! chmod 644 "$session_env" 2>/dev/null; then
+        warn "session env file 권한 설정 실패 — $session_env"
+        return 1
+    fi
+    info "session env file 생성 — $session_env (mode 644)"
+    return 0
+}
+
+# Hermes config 의 terminal.shell_init_files 에 session-env.sh 등록 (issue #186).
+# _patch_hermes_external_dirs 의 pattern 을 그대로 reuse — flock + backup + ruamel atomic + realpath idempotency.
+# 기존 entries (예: mise/path.sh) 보존 — append only.
+_patch_hermes_shell_init_files() {
+    local hermes_config; hermes_config="$(_hermes_config_path)"
+    local hermes_dir; hermes_dir="$(dirname "$hermes_config")"
+    local lock_path="$hermes_config.lock"
+    # [review high 반영] $HOME 을 python source 에 interpolation 하면 HOME 에 quote 가 있을 때
+    # SyntaxError → 빈 target 이 등록된다. 경로는 argv 로 넘긴다.
+    local session_env
+    session_env="$("$VENV_PATH/bin/python3" - "$HOME/.config/wikihub/session-env.sh" <<'PYEOF'
+import os, sys
+print(os.path.realpath(os.path.expanduser(sys.argv[1])))
+PYEOF
+)"
+    if [[ -z "$session_env" ]]; then
+        err "session env 경로 도출 실패 — terminal.shell_init_files 등록 건너뜀"
+        return 2
+    fi
+
+    mkdir -p "$hermes_dir"
+
+    # flock advisory — 5초 retry × 12회 (총 60s)
+    exec 201>"$lock_path"
+    local retries=0
+    while ! flock -nx 201; do
+        retries=$((retries + 1))
+        if (( retries >= 12 )); then
+            err "Hermes config lock 획득 실패 (60s timeout) — 다른 Hermes/wikihub 인스턴스가 mutate 중"
+            exec 201>&-
+            return 2
+        fi
+        sleep 5
+    done
+
+    # PRE_HASH + backup
+    local pre_hash=""
+    local backup=""
+    if [[ -f "$hermes_config" ]]; then
+        pre_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+        backup="$hermes_config.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$hermes_config" "$backup"
+    fi
+
+    # ruamel atomic write + idempotent check (Python helper)
+    local result
+    result="$("$VENV_PATH/bin/python3" - "$hermes_config" "$session_env" <<'PYEOF'
+import os, sys
+import ruamel.yaml
+from ruamel.yaml.comments import CommentedSeq
+
+path = sys.argv[1]
+target = sys.argv[2]
+MARKER = "managed by wikihub install.sh — remove to disable session env"
+
+yaml = ruamel.yaml.YAML(typ="rt")
+yaml.preserve_quotes = True
+
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as f:
+        data = yaml.load(f) or {}
+else:
+    data = {}
+
+terminal = data.get("terminal")
+if terminal is None:
+    terminal = {}
+    data["terminal"] = terminal
+
+sif = terminal.get("shell_init_files")
+if sif is None:
+    sif = CommentedSeq()
+    terminal["shell_init_files"] = sif
+
+# realpath 정규화 비교
+existing_real = []
+for p in sif:
+    try:
+        existing_real.append(os.path.realpath(os.path.expanduser(str(p))))
+    except Exception:
+        existing_real.append(str(p))
+
+if target in existing_real:
+    # [review mid 반영] 첫 실행에서 marker 부착이 실패했을 수 있다. 이미 등록돼 있어도
+    # marker 가 없으면 재부착을 시도한다 — 실패하면 noop 유지.
+    idx = existing_real.index(target)
+    if MARKER not in (sif.ca.items.get(idx, [None])[0].value if sif.ca.items.get(idx, [None])[0] is not None else ""):
+        try:
+            sif.yaml_add_eol_comment(MARKER, idx, column=60)
+            tmpc = path + ".tmp"
+            with open(tmpc, "w", encoding="utf-8") as f:
+                yaml.dump(data, f)
+            os.replace(tmpc, path)
+            print("patched", end="")
+            sys.exit(0)
+        except Exception:
+            pass
+    print("noop", end="")
+    sys.exit(0)
+
+sif.append(target)
+# marker comment — ruamel 의 yaml_add_eol_comment (index = len(sif)-1)
+try:
+    sif.yaml_add_eol_comment(MARKER, len(sif) - 1, column=60)
+except Exception:
+    pass  # comment 부착 실패해도 entry 자체는 유지
+
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    yaml.dump(data, f)
+os.replace(tmp, path)
+print("patched", end="")
+PYEOF
+)"
+
+    # POST_HASH
+    local post_hash=""
+    [[ -f "$hermes_config" ]] && post_hash="$(sha256sum "$hermes_config" | awk '{print $1}')"
+
+    flock -u 201
+    exec 201>&-
+
+    if [[ "$result" == "patched" ]]; then
+        info "Hermes config 패치 (terminal.shell_init_files) — $hermes_config (backup: ${backup:-신규생성})"
+        info "  pre_sha256:  ${pre_hash:-empty}"
+        info "  post_sha256: $post_hash"
+    elif [[ "$result" == "noop" ]]; then
+        info "Hermes config 이미 session-env.sh 포함 (terminal.shell_init_files) — 변경 없음"
+        # backup 도 불필요 — cleanup
+        [[ -n "$backup" && -f "$backup" ]] && rm -f "$backup"
+    else
+        err "Hermes config 패치 결과 비예상 (terminal.shell_init_files): $result"
+        return 2
+    fi
+
+    # 7일 초과 backup cleanup
+    find "$hermes_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+}
+
+# Stray Hermes config 단일 파일 정리 (issue #190). _migrate_hermes_stray_config 가
+# 각 candidate 마다 호출. python heredoc 안의 logic 은 issue #182 구현을 그대로 보존.
 # wikihub entry 판별: EOL marker comment 또는 realpath 가 /.local/share/wikihub/.../_system/skills/_generated.
-# install 중단 금지 — 모든 error 는 warn + return 0.
-_migrate_hermes_stray_config() {
-    local canonical; canonical="$(_hermes_config_path)"
-    local stray="$HOME/.hermes/config.yaml"
-
-    # canonical == stray 면 정리 대상 아님 (non-profile mode)
-    [[ "$stray" == "$canonical" ]] && return 0
-    # stray 부재 시 조용히 종료
-    [[ -f "$stray" ]] || return 0
-
+# 결과 token: cleaned | removed | noop | read_error:<msg>. 항상 return 0 (install 중단 금지).
+_clean_hermes_stray_file() {
+    local stray="$1"
     local backup="$stray.wikihub-bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -p "$stray" "$backup"
 
@@ -1324,9 +1644,54 @@ PYEOF
             warn "stray Hermes config 정리 결과 비예상: $result — install 계속 진행"
             ;;
     esac
+    return 0
+}
 
-    # 7일 초과 stray backup cleanup — _patch_hermes_external_dirs 와 동일 정책 (reviewer minor 반영)
-    find "$HOME/.hermes" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+# Stray Hermes config 정리 (issue #182/#190). 과거 buggy install.sh 이 profile mode 에서
+# wikihub skill entry 를 잘못 기록한 잔재 파일들을 순회하며 정리.
+# 후보는 _hermes_stray_candidates 가 한 줄씩 출력. FAIL-CLOSED GUARD — 어떤 profile 의
+# canonical config 도 건드리지 않는다 (canonical 및 default profile canonical 을 skip).
+# install 중단 금지 — 모든 error 는 warn + return 0.
+_migrate_hermes_stray_config() {
+    local canonical; canonical="$(_hermes_config_path)"
+    local _root; _root="$(_hermes_root)"
+    local default_canonical="${_root}/config.yaml"
+
+    # 후보를 1회만 계산해 재사용 — 중복 재계산 및 TOCTOU 회피 (reviewer mid 반영).
+    # _hermes_stray_candidates 는 내부에서 config_path/root 를 다시 계산하므로
+    # 반복 호출 시 _hermes_agent_profile subprocess 가 매번 재실행된다.
+    local -a _cands=()
+    local _p
+    while IFS= read -r _p; do
+        [[ -n "$_p" ]] && _cands+=("$_p")
+    done < <(_hermes_stray_candidates)
+
+    local stray
+    for stray in "${_cands[@]}"; do
+        # FAIL-CLOSED GUARD — 어떤 profile 의 canonical config 도 건드리지 않는다
+        [[ "$stray" == "$canonical" ]] && continue
+        [[ "$stray" == "$default_canonical" ]] && continue
+        [[ -f "$stray" ]] || continue
+        _clean_hermes_stray_file "$stray" || true
+    done
+
+    # 7일 초과 stray backup cleanup — _patch_hermes_external_dirs 와 동일 정책 (reviewer minor 반영).
+    # candidate 의 부모 dir 과 hermes_root dir 양쪽에 모두 적용 (서로 다를 때).
+    local _dirs=("$_root")
+    local _d
+    for _p in "${_cands[@]}"; do
+        _d="$(dirname "$_p")"
+        local _seen=0
+        local _x
+        for _x in "${_dirs[@]}"; do
+            [[ "$_d" == "$_x" ]] && { _seen=1; break; }
+        done
+        (( _seen == 0 )) && _dirs+=("$_d")
+    done
+    local _dir
+    for _dir in "${_dirs[@]}"; do
+        find "$_dir" -maxdepth 1 -name 'config.yaml.wikihub-bak.*' -mtime +7 -delete 2>/dev/null || true
+    done
     return 0
 }
 
@@ -1404,6 +1769,23 @@ _step6_agent_skill() {
 
     # 4.5. stray Hermes config 정리 (issue #182 — profile mode 전환 시 과거 잔재 제거)
     _migrate_hermes_stray_config
+
+    # 4.6. Hermes terminal 세션용 non-secret env file 생성 (issue #186)
+    # 실패해도 install 은 계속하되, 파일이 실제로 생기지 않았으면 4.7 등록은 건너뛴다
+    # (review mid 반영 — 존재하지 않는 파일을 shell_init_files 에 등록하는 것 방지).
+    local session_env_ok=false
+    if _ensure_session_env_file; then
+        session_env_ok=true
+    else
+        warn "session env file 미생성 — terminal.shell_init_files 등록 건너뜀 (수동 확인 필요)"
+    fi
+
+    # 4.7. Hermes config 의 terminal.shell_init_files 에 session-env.sh 등록 (issue #186)
+    # 실패 시 return 2 (hard fail) — 4.6(graceful skip)과 의도적 비대칭. 4.7 은 active profile
+    # config 를 직접 mutate 하는 단계라 _patch_hermes_external_dirs 와 동일한 실패 정책을 따른다.
+    if [[ "$session_env_ok" == true ]]; then
+        _patch_hermes_shell_init_files || return 2
+    fi
 
     # 5. 등록 후 검증
     _verify_hermes_skill_registration "$agent_binary"
@@ -1991,6 +2373,14 @@ _step8_systemd_render() {
         --yaml "$yaml" \
         --render --out "$HOME/.config/systemd/user/" \
         || { err "render_systemd_units.py 실패"; return 2; }
+    # issue #184 (c) — 재렌더 전후 검증. 렌더 결과가 이번 install 의 트리/venv 를
+    # 가리키지 않으면 경고만 (exit 0 — 렌더 자체는 정상). advisory 이므로 실패로 취급하지 않는다.
+    while IFS= read -r _vp_line; do
+        [[ -n "$_vp_line" ]] && warn "$_vp_line"
+    done < <("$VENV_PATH/bin/python3" \
+        "$WIKIHUB_SRC/scripts/_helpers/render_systemd_units.py" \
+        --verify-paths "$VENV_PATH" "$WIKIHUB_SRC" \
+        --out "$HOME/.config/systemd/user/" 2>/dev/null || true)
     systemctl --user daemon-reload
     # ADR-0030 §Note (v0.1.4, 2026-05-20) — daemon-reload 는 active unit 의 "active since" 미갱신.
     # fresh / --force-fresh 경로에서 이미 enable+start 상태인 timer 의 새 template (OnActiveSec 등)

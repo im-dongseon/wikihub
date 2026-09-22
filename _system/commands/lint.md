@@ -70,6 +70,19 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 > 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
 > **fd 상속 방식은 이 실행 모델에서 `race window 0%` 를 보장하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다.
 
+**결론 — 본 가드의 실효 범위**
+
+| 계층 | 실효성 | 근거 |
+|---|---|---|
+| systemd 유닛 (`Type=oneshot`) | **유효 — 1차 가드** | 동일 유닛 중복 발화를 systemd 가 드롭 (실측: 실행 중 유닛에 start 3회 → 실행 1회) |
+| flock 파일 (보조) | **무효 — Hermes 경유 시** | fd-scoped lock 이 subprocess 종료와 함께 해제됨 (위 실측) |
+
+따라서 **동시 실행 차단은 systemd 유닛에 의존한다.** flock 은 단일 bash 프로세스가 세션
+전체를 소유하는 경로(예: 실행 스크립트 내부)에서만 보조로 유효하다.
+
+flock 무효를 이유로 **세션을 중단하거나 clarify 를 호출하지 않는다** — 중복 위험은
+systemd 계층이 막고 있으므로 본 Step 은 그대로 진행한다.
+
 ### Step 0.5. Hermes 채팅 `/wl` 직접 호출 경로 (미해결 — 후속 결정)
 
 Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 유닛을 경유하지 않으므로 **1차 가드가 적용되지 않습니다.** 이 경로에서는 위 flock 2차 가드도 무력합니다 (fd 상속 불가).
@@ -134,6 +147,35 @@ def resolve_link(name, category):
 
 **graphify schema 호환 (v0.7 → v0.8+ migration)**: graph.json 의 edge 키가 v0.7 = `edges`, v0.8+ = `links` 로 변경됨. parsing 시 `d.get('links', d.get('edges', []))` 패턴으로 양쪽 호환 (graphify CLI 버전 transition 중 silent break 회피).
 
+**graphify 질의 우선 (3계층 — issue #173)**
+
+전체 `graph.json`(수 MB)을 컨텍스트에 올리는 대신 아래 순서로 질의한다.
+
+| 계층 | 도구 | 용도 | 비용 |
+|---|---|---|---|
+| **1차** | `graphify query` / `graphify explain` | 특정 노드·source 의 연결/이웃 확인 | ~1-2k tokens |
+| **2차** | `graph.json` 직접 읽기 | 1차로 전체 구조가 필요하다고 판명된 경우 (폴백) | 기존과 동일 |
+| **3차** | deterministic helper | 고아 페이지 등 **전체 노드 순회** 필요 항목 | 0 (LLM 호출 없음) |
+
+호출 형식:
+
+```bash
+"$WIKIHUB_VENV/bin/graphify" query "<질의>" --graph "$WIKIHUB_HOME/graphify-out/graph.json"
+"$WIKIHUB_VENV/bin/graphify" explain "<노드명>" --graph "$WIKIHUB_HOME/graphify-out/graph.json"
+```
+
+- `$WIKIHUB_VENV` 는 `~/.config/wikihub/session-env.sh`(#186)가 export 하고,
+  Hermes `terminal.shell_init_files` 등록으로 세션에 주입된다 (Step 5 의 다른 helper 호출과 동일 패턴).
+- PATH 에도 venv `bin` 이 있으므로(unit) `graphify` 단독 호출도 동작한다 — 경로가 확실한 쪽을 쓴다.
+- `--graph` 는 **절대 경로**로 넘긴다 (CWD-independent).
+- **고아 페이지(degree=0) 탐지는 query 로 불가**하다 — 전체 노드 순회가 필요하므로 3차 계층(helper)을 쓴다.
+  1차 계층으로 시도하지 않는다.
+- ⚠️ `graphify god-nodes` 는 **고아 탐지가 아니다** — "가장 연결이 많은 노드(architectural hubs)"를 나열한다
+  (실측 2026-09-22: `God nodes (most connected): ... - 67 edges`). degree=0 탐지에 쓰면 **정반대 결과**를 얻는다.
+  고아 탐지는 Python helper(전체 노드 순회)로만 가능하다.
+- 1차 질의가 빈 결과·오류를 내면 **2차로 폴백**하고 그 사실을 report 에 1줄 기록한다.
+- 질의 실패를 이유로 **중단하거나 clarify 를 호출하지 않는다** (headless 규칙).
+
 진단 항목:
 
 - **고아 페이지** (인바운드 엣지 0건):
@@ -142,12 +184,13 @@ def resolve_link(name, category):
 - **dangling 엣지** (존재하지 않는 노드 가리킴): Step 2와 중복 가능. 통합 보고
 - **언급된 개념의 페이지 부재**: source 본문에서 LLM이 식별한 entity·concept 중 `wiki/entities/`·`wiki/concepts/`에 페이지 없음 → **자동 stub 생성** (frontmatter + 1줄 LLM 요약 + `referenced_by`)
   - **alias 인식 (v0.1.8 — ADR-0039)**: stub 생성 전 wiki/entities/ + wiki/concepts/ 의 기존 page frontmatter `aliases` 셋을 lowercase 로 normalize 한 후, 본문 form 의 lowercase 가 그 셋에 포함되면 stub 생성 **skip** (LLM 재생성 무한 loop 차단). 기존 page 의 referenced_by 만 갱신.
-  - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행 (Step 5·8과 동일 패턴). 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
+  - **권한 설정**: `_atomic_write_wiki_page` 가 write 시 `chmod 644` 를 코드로 보장한다 (issue #201 ①). 별도 `chmod` 는 불필요하다 — 과거 mktemp 기본값 600 보정용 지시였으나 코드가 흡수했다.
 
 ### Step 4. 자동 cross-ref 추가 (자동)
 
 - 각 source의 본문에서 entity·concept 언급 식별
 - 해당 entity·concept 페이지의 `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
+  - **`referenced_by:` 가 빈 값(`''`/`null`)인 페이지는 제외**한다 — 빈 값에 항목을 넣는 것은 "등록"이며 자동 등록 금지 대상이다 (issue #167, `## 실패 처리` 표). 리스트 0건(`[]`)은 추가 대상이다
 - 추가 외에 본문·다른 frontmatter 필드는 수정 안 함
 
 ### Step 4.5. Duplicate detection (자동, 보고만 — v0.1.8 ADR-0039)
@@ -158,7 +201,7 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 
 ```bash
 # WIKIHUB_HOME 기준 wiki/entities/ + wiki/concepts/ scan → JSON stdout
-python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
     --wiki-home "$WIKIHUB_HOME"
 ```
 
@@ -190,6 +233,26 @@ python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
 
 → `_lint/report.md` 의 `## Duplicates (case-variant)` + `## Duplicates (cross-category)` 섹션에 결과를 변환해 기록. Step 7 에서 자동 처리.
 
+### Step 4.6. frontmatter 무결성 검사 (자동, 보고만)
+
+매 cycle 아래 4종을 검사해 `_lint/report.md` 에 기록한다. **4종 모두 `yaml.safe_load` 를
+통과**하므로 파서 검증만으로는 검출되지 않는다 — 별도 검사가 필요하다.
+
+| 검출 항목 | 판정 | 함정 |
+|---|---|---|
+| **키 중복** | frontmatter top-level 키가 2회 이상 (특히 `referenced_by`·`aliases`) | YAML 은 마지막 키만 채택 → 첫 블록에 쓴 갱신이 실효값에 반영되지 않음 |
+| **여는 `---` 뒤 개행 소실** | `startswith('---\n')` 가 거짓 | `---aliases:` 로 붙어 frontmatter 파손 + alias index 탈락 |
+| **`aliases` 안의 경로 문자열** | `aliases` 항목에 `sources/` 포함 | run 경계 없이 스캔해 뒤따르는 키의 리스트를 흡수 (alias 오염) |
+| **항목 병합** | `referenced_by` **항목 값 안에** `.md-` 가 포함 | 삽입 오프셋이 직전 항목 "줄 끝" 이라 개행 없이 붙음 (`sources/a/x.md- sources/a/y.md`) |
+
+**삽입 규칙 정본은 `_system/commands/ingest.md` Step 4** ("referenced_by 삽입 경계 조건 4종") 다.
+본 검사는 그 규칙이 지켜졌는지 사후 확인하는 역할이다.
+
+`ingest.md` Step 4 의 들여쓰기 규칙과 동일하게 — **2칸 고정을 강제하지 않는다.** 0칸 run 은
+정상이며 YAML block sequence 로 유효하다. 페이지 단위 혼용(0칸+2칸)만 결함으로 본다.
+(운영 실측 기준 0칸 run 이 다수 — 정확한 항목 수는 `ingest.md` Step 4 의 실측치를 참조.
+ wiki 는 매 cycle 갱신되므로 수치는 고정값이 아니다.)
+
 **검증 기준** (ADR-0039 정합):
 - 비교는 **alias 셋의 lowercase normalize** — `MiniMax` 와 `minimax` 의 alias 셋이 공통 lowercase form 1+ 공유하면 같은 entity (단일 page 내 변형 alias 들은 다른 page 와 분리).
 - case-variant = 같은 카테고리 내 2+ page 가 공통 lowercase form 보유.
@@ -198,7 +261,7 @@ python3 "$WIKIHUB_SRC/scripts/_helpers/detect_alias_duplicates.py" \
 **Alias migration** (idempotent, 매 cycle — 기존 유지, Python subprocess 외 보조):
 - 각 entity/concept page 의 frontmatter `aliases` 부재 시 — `aliases: [<canonical>]` 자동 추가 (canonical = 페이지 파일명 base).
 - 빈 `aliases: []` 도 동일 처리.
-- **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (ingest.md:152) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
+- **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (`ingest.md` Step 4.3) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
 
 ### Step 5. wiki/index.md 재구성 (자동)
@@ -261,7 +324,8 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 매 cycle 진행:
 
 - dangling link 제거 (Step 2 보고 항목)
-- `referenced_by` 0건 entity·concept → `wiki/.archived/<category>/<name>-<utc_iso>.md` 이동
+- `referenced_by` 가 **리스트이고 0건**인 entity·concept → `wiki/.archived/<category>/<name>-<utc_iso>.md` 이동
+  - **`referenced_by:` 가 빈 값(`''`/`null`)인 경우는 archive 대상이 아니다** — 리스트 0건(`[]`)과 의미가 다르다. 자동 등록·archive 모두 금지하고 보고만 한다 (issue #167, `## 실패 처리` 표 동일 항목)
 - 폴더 위반 페이지 → 적절한 카테고리 이동 (단 vault prefix 필요한 sources는 메인테이너 명시 매핑)
 - 모순 클레임 본문 갱신 (Step 6 보고 항목)
 - **case-variant duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
@@ -286,6 +350,52 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
   - archive 후 lint 가 다시 stale 을 graph source 로 읽지 않음 + Step 3 의 절대 경로 정합으로 회귀 차단.
 
 **v0.1.8 정책 (확정, --apply flag 폐기)**: 매 cycle 일괄 적용 (interactive per-item confirm 없음). 메인테이너 수동 호출도 즉시 적용 (호출 경로는 `## 호출` 참조 — systemd 경유 권장). 진단만 받고 싶으면 `wiki/_lint/report.md` read.
+
+### Step 7.1. 편입 등록 원장 형식 정본 (issue #191)
+
+편입(embedding) 등록 회차는 `_state/<vault>/_semantic_<YYYYMMDD>_<HHMM>.json` 원장에 결과를 기록한다.
+**원장 형식이 회차마다 달라 실제 상태와 문자열 대조가 어긋난다** — 아래를 정본으로 고정한다.
+
+> 파일명은 **`_semantic_<YYYYMMDD>_<HHMM>.json`** (날짜 포함). 과거 `_semantic_<HHMM>.json`
+> (날짜 없음) 형식은 다른 날 같은 시각 회차가 서로를 덮어쓰므로 신규 회차에 사용하지 않는다.
+> 기존 파일명은 소급 변경하지 않는다 (`round` 필드가 정본 시각을 갖는다).
+
+```json
+{
+  "round": "YYYYMMDD__HH_MM__lint",
+  "applied": ["concepts/Durable-Workflow.md", "entities/Google-Drive.md"],
+  "skipped": {},
+  "base": "<canonical 집합 산출 근거>",
+  "backup": "/tmp/wi_backup_<vault>_<YYYYMMDD_HHMM>",
+  "applied_at": "<UTC ISO-8601>",
+  "source": "sources/<vault>/project/wikihub/report/<round>.md"
+}
+```
+
+**필수 규칙**
+
+1. `applied` 항목은 **canonical 경로 + `.md` 접미 포함**으로 기록한다
+   (현행 wiki 파일명 규약: 공백 → 하이픈, 카테고리 귀속 반영). 접미 없는 항목은
+   실제 파일과 문자열 대조가 불가능하다.
+2. `base` 키를 **항상 포함**한다 — canonical 집합 산출 근거(어느 회차·페이지 수)를 남긴다.
+3. `applied_at` 은 UTC ISO-8601, `backup` 은 실제 존재하는 경로여야 한다.
+
+**회차 검증 (필수)**
+
+`applied` 기록 후 **실제 반영 수를 대조**해 `_lint/report.md` 에 1줄 남긴다.
+
+```
+applied=N 실제=M  (경로 정규화: NFC + .md 접미 정규화 후 실재 + 참조 보유 검사)
+```
+
+- `N == M` → 정상
+- `N != M` → **보고** + 누락 항목을 경로와 함께 기재. 누락 유형을 구분해 적는다.
+  - `NOFILE` — 원장 경로에 파일 없음 (파일명 규약 불일치 또는 아카이브 이동)
+  - `NO_REF` — 파일은 있으나 해당 회차 참조가 없음 (실제 등록 실패)
+
+**대조 시 정규화 주의**: 원장 경로와 실제 파일명이 공백↔하이픈·카테고리(entities↔concepts)·
+NFC/NFD 로 다를 수 있다. **정규화 후 비교**하고, 정규화로도 대응이 없을 때만 `NOFILE` 로
+판정한다 — 그렇지 않으면 형식 차이를 등록 실패로 오탐한다.
 
 ### Step 8. log 작성
 
@@ -333,6 +443,66 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 - **권한 설정**: report.md write 직후 `chmod 644 "<path>"`. `_lint/` 디렉토리 write 전 `mkdir -p` 후 `chmod 755`.
+
+### Step 8.1. 보고만 항목 이월 규칙 (issue #167)
+
+`## 보고만 (승인 대기)` 항목이 회차마다 반복되어도 **매번 재판단하지 않는다.**
+판단 주체가 다르거나 자동 적용이 금지된 항목이므로, 반복 자체는 결함이 아니다.
+
+**이월 표기 (필수)** — 매 회차 보고 시 각 항목에 아래를 함께 적는다:
+
+| 필드 | 내용 |
+|---|---|
+| **회차 수** | `(N회차 유지)` — 동일 항목이 몇 회차 연속 보고됐는지 |
+| **귀속** | `메인테이너 판단` / `개발 소관` / `운영 소관` 중 하나 |
+| **변화** | 직전 회차 대비 증감. 변화 없으면 `변화 없음` |
+
+**회차 수·변화 산출 출처** — `_lint/report.md` 는 overwrite 이므로 직전 회차 내용이 남지 않는다.
+**발행된 이전 report 를 읽어 산출**한다:
+
+```bash
+# 직전 회차 report (vault 실경로, 발행본)
+ls -t "$WIKIHUB_HOME/vault/<vault>/project/wikihub/report/"*lint.md 2>/dev/null | sed -n '2p'
+```
+
+발행본이 없으면(신규 vault·발행 실패) 회차 수를 `(1회차)` 로 적고 변화는 `기준 없음` 으로
+표기한다 — **산출 불가를 이유로 판단을 유보하거나 clarify 를 호출하지 않는다.**
+
+**재판단 금지** — 이미 `귀속` 이 정해진 항목은 회차마다 판단 근거를 다시 서술하지 않는다.
+1줄 이월 표기만 한다. 판단 근거 전문은 **최초 보고 회차에만** 적는다.
+
+**자동 적용 금지 목록** (위반 시 되돌리기 어려운 변경이 발생):
+
+- append-only 파일(`log.md`) 의 접두 보존 대상 — 플레이스홀더 치환 포함
+- `referenced_by:` 가 빈 값인 페이지의 등록·archive
+- sources 본문 (vault 원문) 의 한자·표기 변환
+- 구조 잔재 페이지(본문 실질 1줄 이하·frontmatter 다중 빈 줄 등)의 삭제·이동 (편집 여부는 메인테이너 결정)
+
+**개발 소관 승격 조건** — 아래에 해당하면 `메인테이너 판단` 이 아니라 `개발 소관` 으로
+분류하고, report 의 개발 소관 절에 모아 적는다:
+
+- playbook(`_system/commands/*.md`) 또는 `scripts/lib/*` 의 규칙 부재·결함이 원인일 때
+- 운영 로컬 헬퍼(`_scripts/*`) 의 계상이 정본과 다를 때
+- 구조적 결함(경로 이중 계상, 권한 코드 누락 등)이 원인일 때
+
+**정본 우선 원칙** — 운영 로컬 헬퍼와 정본 계상이 다르면 **정본을 인용**하고 불일치
+사실만 1줄 기록한다. 헬퍼 수치를 report 본문에 그대로 싣지 않는다.
+
+**정본 helper 실행 (issue #201 ⑥, 2026-09-22)** — lint 실행 계층은
+`scripts/_helpers/` 정본을 쓴다. 운영 로컬 `_scripts/` 사본에 의존하지 않는다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/<name>.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+- 정본 경로 복원: `--wiki-home` arg > `$WIKIHUB_HOME` > `$WIKIHUB_YAML` 부모 > `~/wikihub`
+- 대상: Step 1·1.5·2·4.5 (`lint_mechanical.py`), Step 2.5 (`link_audit_v2.py`),
+  Step 3 (`analyze_graph_v3.py`), Step 5 (`rebuild_index.py`),
+  Step 7 (`step7_apply.py`·`apply_fixes.py`), 계상 보조 (`_wl_step2_spec.py`·
+  `_wl_check_missing_cycle.py`)
+- **하드코딩 경로 금지** — `/home/ubuntu/wikihub` 리터럴은 이식성을 깨뜨린다.
+  회귀 테스트 `tests/test_ops_helpers.py` 가 이를 강제한다.
 
 ### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
@@ -382,6 +552,31 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 - **미해결 경로**: Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 를 경유하지 않아 1차 가드가 적용되지 않는다. 이 경로의 처리(폐기 또는 프로세스-무관 가드 도입)는 후속 결정 사항 — Step 0.5.
 - ingest 는 vault별 unit + per-vault lock 으로 직렬화한다 (ingest.md `## 동시성` 참조). lint 는 wiki-wide 단일 unit 이며 vault 무관.
 
+## headless 실행 규칙 (issue #167)
+
+본 playbook 은 `wikihub-lint.service` (systemd oneshot, `--quiet --yolo`) 로 실행되며
+**사용자 응답을 받을 수단이 없다.** 따라서:
+
+1. **사용자 입력을 요구하는 도구를 호출하지 않는다.** `clarify` 를 비롯해 운영자 응답을
+   기다리는 모든 tool(`clarify`, 승인 confirm 계열 등)이 대상이다. `--yolo` 는 **위험 명령
+   승인 프롬프트만** 우회하고, agent 가 자율 호출하는 tool 은 범위 밖이다.
+   호출 시 증상: 응답 불가 → tool 자체 timeout(실측 120s) → 복구 시도 실패 →
+   `TimeoutStartSec` 소진 → systemd SIGINT → **exit 130** (실측, 2026-07).
+
+2. **판단이 필요한 상황의 기본값은 "보고만"이다.** 예외·대량 오류·모호한 상태를 만나면
+   자동 수정하지 않고 report 에 기록한 뒤 **다음 Step 으로 진행**한다. "이걸 자동 처리해도
+   되는가" 를 묻지 않고 "기본값은 보고만" 을 적용한다.
+
+3. **규모와 무관하게 동일하다.** 오류 157건이든 1건이든 skip-and-continue. 규모가 크다는
+   이유로 판단을 유보하거나 사용자에게 넘기지 않는다.
+
+4. **메인테이너 판단 항목은 결정을 요구하지 않는다.** §Step 8.1 의 이월 규칙에 따라
+   기록·이월만 하고, 회차마다 동일 질문을 반복하지 않는다.
+
+> 위반 시 증상: 세션이 응답 대기로 멈추고 `TimeoutStartSec` (unit 실측 `1800sec`) 소진 후
+> systemd 가 SIGINT 를 보내 `exit 130`. journal 에 `Deactivated successfully` 없이 `Failed` 로
+> 남는다. (tool 자체 timeout 은 120s, unit timeout 은 1800s — 두 값은 별개다.)
+
 ## 실패 처리
 
 | 실패 시점 | 동작 |
@@ -391,6 +586,12 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 | index.md write 실패 (disk full 등) | exit 1 + ops-alert |
 | 카테고리 디렉토리 생성 실패 | exit 2 (Fatal, 권한 문제 의심) + notify |
 | chmod 실패 (소유권·읽기전용 FS·NFS ACL) | warn-only + report에 노트. exit 0 (권한 실패가 wiki 내용 손실로 이어지지 않음) |
+| **frontmatter parse error (N건)** | 해당 page skip + report 에 건수·패턴 기록. **exit 0** (다음 cycle 재시도). 규모와 무관하게 skip-and-continue — 대량 오류를 한 회차에 자동 수정하려 시도하지 않는다 (issue #167 재발 방지) |
+| **판단 보류 항목 (보고만)** | 자동 적용 금지. `## 보고만 (승인 대기)` 에 기록만 하고 **exit 0**. 매 cycle 동일 항목이 반복되어도 회차마다 재판단하지 않는다 — §Step 8.1 의 이월 규칙을 따른다 |
+| **`referenced_by:` 가 빈 값** | 자동 등록·archive **모두 금지**. 보고만. `''` 은 리스트 0건과 의미가 다르므로 Step 7 archive 조건에 포함하지 않는다 |
+| **append-only 파일의 미치환 플레이스홀더** | 보고만. 접두 보존이 원칙이므로 자동 수정 금지. 건수만 계상하고 이월 기록 |
+| **sources 본문 한자** | 보고만. vault 원문이므로 ingest 책임 경계 — lint 가 변환하지 않는다 |
+| **검출기와 정본 계상 불일치** | 정본 계상을 신뢰하고 헬퍼 계상은 인용하지 않는다. 불일치 사실을 report 에 1줄 기록 (정본 수치를 함께 적음) |
 
 ## 멱등성 보장
 

@@ -448,3 +448,22 @@
   - #183 은 운영 트리에 손으로 적용돼 있던 동일 패치를 upstream 정본으로 대체한다 — 반영 후 로컬 패치 제거 필요 (#184).
 - **결론**: main merge + annotated tag `v0.1.16` + `latest` (2026-09-21). 운영자 `install.sh --branch latest`.
 - **참조**: `docs/changelog.md` [v0.1.16]. 관련 open issue — #184(update 경로 로컬 패치 보존), #185(`/opt/wikihub` 하드코딩), #186(bare python3), #187(프로필별 환경 독립성 정리).
+
+---
+
+## [2026-09-22] v0.1.17 — 프로필 환경 독립성 정리 + lint 실행 계층 정본화
+
+- **목적**: 프로필(다중 Hermes agent) 운용에서 경로·환경이 조용히 틀어지는 결함군과, lint 판정의 절반이 git 밖 코드에 의존하던 구조를 정리한다. 동시에 graphify 0.8.x → 0.9.x 정합과 lint headless timeout 을 해소한다.
+- **로직**:
+  - **환경 경로** — `/opt/wikihub` fallback 제거(`WIKIHUB_YAML` 우선) · `WIKIHUB_SRC` 미명시 fail-fast + 렌더 결과 경로 검증 · `_hermes_config_path` 가 `HERMES_HOME` 기준으로 해석.
+  - **세션 env** — `~/.config/wikihub/session-env.sh`(비밀 아닌 변수만) 를 Hermes `terminal.shell_init_files` 에 등록해 extraction deps 불일치 해소. API 키가 든 `env`(0600) 는 세션에 미source.
+  - **lint 실행 계층 정본화** — 운영 로컬 `_scripts/` 의 실행 계층 6종 + 계상 보조 2종을 `scripts/_helpers/` 로 승격. 경로 복원 4단계(`--wiki-home` arg > `$WIKIHUB_HOME` > `$WIKIHUB_YAML` 부모 > ADR-0034 default)로 하드코딩 제거.
+  - **검출기 교정** — aliases block 형 인식(alias index 1,750→1,870), `.md` 이중 부착 오탐 제거(위반 3 52→0), `concepts/` 은닉 제거.
+  - **graphify** — pin `>=0.9.20,<1.0.0` · 구 ID 스킴 캐시 정리 + `.graphifyignore` report 차단(WARNING 0건) · Step 3 3계층 질의(query/explain 우선, ≈26만→1-2k tokens).
+  - **정합** — `sync.py` NFC 정규화(유일 입구) · `mount_diff` mtime UTC 정규화(fails-safe) · wiki 권한 코드 보장(`chmod 644`) · lint headless clarify 금지.
+- **트레이드오프**:
+  - 운영 로컬 `_scripts/` 사본은 당분간 병존한다 — 정본과 출력 동일을 실측 확인했으나(`_run_lint_session.sh` 는 호출처 0건) 물리 제거는 별도 판단.
+  - `_wl_buckets.py` 는 일회성 진단으로 분류해 운영 로컬 유지 — 하드코딩 경로가 남으나 lint 판정 경로가 아니다.
+  - #186 반영은 `install.sh` 재실행이 필요하다 — 코드만으로는 세션 env 가 주입되지 않는다.
+- **결론**: main merge + annotated tag `v0.1.17` + `latest` (2026-09-22). 운영자 `install.sh --branch latest`.
+- **참조**: `docs/changelog.md` [v0.1.17]. 관련 open issue — #149(데이터 백업 시스템), #116(PDF 추출 방법론), #201(DoD 6 다음 lint 회차 판정 대기).

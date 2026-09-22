@@ -1,18 +1,25 @@
 {
   // ============================================================
-  // wikihub — OpenCode config (root template)
+  // wikihub — OpenCode config (root)
   //
-  // THE SOURCE OF TRUTH is .opencode/opencode.json (project-local).
-  // This file exists as a REFERENCE / TEMPLATE for other repositories
-  // that want to adopt wikihub's agent configuration approach.
+  // Role: .opencode/ 가 없는 저장소에 복사해 쓰는 REFERENCE / TEMPLATE.
+  //       값 정본은 .opencode/opencode.json 이다.
   //
-  // OpenCode resolution priority:
-  //   1. ~/.config/opencode/opencode.jsonc  (global, lowest)
-  //   2. <project-root>/.opencode/opencode.json  (project-local, highest)
-  //   3. <project-root>/opencode.json  (root, only used if .opencode/ absent)
+  // OpenCode resolution (실측, opencode 1.17.18 — --print-logs 의 loading path):
+  //   1. ~/.config/opencode/{config.json,opencode.json,opencode.jsonc}  (global)
+  //   2. <project-root>/opencode.json           ← 실제로 로드된다
+  //   3. <project-root>/.opencode/opencode.json ← 최우선
   //
-  // Since wikihub has .opencode/opencode.json, this file is NOT loaded
-  // by OpenCode sessions inside wikihub. It is kept for reference.
+  // root 와 .opencode 파일은 BOTH loaded 이며 .opencode 값이 root 를 덮어쓴다.
+  // 따라서 모델을 바꿀 때는 두 파일을 함께 수정해야 한다.
+  // (실측 사고: commit 91c73c9 가 opencode.json 2개만 고치고
+  //  .opencode/agent/*.md frontmatter 를 누락해, review subagent 가
+  //  옛 모델로 계속 실행됨)
+  //
+  // agent prompt 를 가진 agent (plan / research / build-hard / review-*) 는
+  // .opencode/agent/<name>.md 에 정의되며, 그 frontmatter 의 model: 이
+  // 여기 opencode.json 값보다 우선한다. 우선순위:
+  //   .opencode/agent/<name>.md frontmatter > .opencode/opencode.json > root opencode.json
   // ============================================================
   "$schema": "https://opencode.ai/config.json",
 
@@ -54,7 +61,7 @@
     // RESEARCH — exploration, understanding, analysis.
     // Read + create-new-files only (no editing existing source).
     "research": {
-      "model": "ollama-cloud/deepseek-v4-flash",
+      "model": "ollama-cloud/deepseek-v4.1-flash",
       "mode": "primary",
       "tools": { "write": true, "edit": false },
       "prompt": "You handle exploration, understanding, research, and analysis of the codebase: from quick lookups (where is X, what does Y do) through deeper analysis. On request, save your findings as a markdown note. Do NOT modify existing source code (code changes belong to build/plan) — you may only create new .md notes. If a task needs a deep architecture decision or an implementation spec, hand it to @plan. Be concise and direct."
@@ -62,29 +69,31 @@
 
     // EXPLORE — general exploration tasks.
     "explore": {
-      "model": "ollama-cloud/deepseek-v4-flash"
+      "model": "ollama-cloud/deepseek-v4.1-flash"
     },
 
     // BUILD — implementation. Default for [easy] work.
     "build": {
-      "model": "ollama-cloud/deepseek-v4-flash"
+      "model": "ollama-cloud/deepseek-v4.1-flash"
     },
 
     // BUILD-HARD — escalation target for chunks the plan tagged [hard].
     "build-hard": {
-      "model": "ollama-cloud/glm-5.2",
+      "model": "ollama-cloud/glm-5.3",
       "tools": { "write": true, "edit": true, "bash": true },
       "prompt": "Implement ONLY the [hard]-tagged chunk(s) from the approved spec. Match the specified signatures, contracts, and completion criteria exactly. Do not expand scope or touch unrelated code."
     },
 
     // REVIEW-CORRECTNESS — correctness review subagent.
+    // NOTE: 실행 모델 정본은 .opencode/agent/review-correctness.md frontmatter.
     "review-correctness": {
       "model": "ollama-cloud/kimi-k2.7-code"
     },
 
     // REVIEW-QUALITY — quality review subagent.
+    // NOTE: 실행 모델 정본은 .opencode/agent/review-quality.md frontmatter.
     "review-quality": {
-      "model": "ollama-cloud/qwen3.5:397b"
+      "model": "ollama-cloud/minimax-m3"
     },
 
     // ----------------------------------------------------------------

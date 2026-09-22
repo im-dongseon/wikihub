@@ -64,8 +64,8 @@ EOF
 
 # Step 1. graphify CLI 존재 확인
 if ! command -v graphify >/dev/null; then
-    echo "ERROR: graphify CLI 미설치 — install.sh 재실행 또는 'pip install graphifyy>=0.8.0,<1.0.0'" >&2
-    _write_graphify_failure "graphify CLI 미설치" "pip install graphify 또는 PATH 확인"
+    echo "ERROR: graphify CLI 미설치 — install.sh 재실행 또는 'pip install graphifyy>=0.9.20,<1.0.0'" >&2
+    _write_graphify_failure "graphify CLI 미설치" "pip install graphifyy 또는 PATH 확인"
     exit 2
 fi
 

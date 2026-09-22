@@ -8,8 +8,8 @@
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.17%20canary-orange)](docs/changelog.md)
-[![Version](https://img.shields.io/badge/Version-0.1.16-blue)](_system/VERSION)
+[![Status](https://img.shields.io/badge/Status-v0.1.17%20released-brightgreen)](docs/changelog.md)
+[![Version](https://img.shields.io/badge/Version-0.1.17-blue)](_system/VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -213,7 +213,7 @@ flowchart LR
 - **[Architecture Decision Records (Nygard)](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)** — 본 repo 의 ADR 컨벤션 출처
 - **[MCP spec](https://modelcontextprotocol.io)** — v0.1.10 의 MCP integration 표준
 - **[WikiCurate v0.2.6](https://github.com/im-dongseon/wikicurate)** — macOS 로컬 단일 vault 모델의 선행 시스템
-- **[graphify](https://github.com/safishamsi/graphify)** — 위키 페이지 간 지식 그래프
+- **[graphify](https://github.com/Graphify-Labs/graphify)** — 위키 페이지 간 지식 그래프
 - **Hermes** — Telegram 연동 에이전트 (외부 컴포넌트)
 
 ---
@@ -221,6 +221,10 @@ flowchart LR
 ## 라이선스
 
 [MIT License](LICENSE)
+
+### 의존성 라이선스
+
+본 프로젝트는 지식 그래프 생성을 위해 [graphify](https://github.com/Graphify-Labs/graphify) (PyPI `graphifyy`) 를 의존성으로 사용한다. graphify 는 **Apache-2.0** 라이선스이며, 이는 wikihub 의 MIT 와 호환된다. Apache-2.0 의 NOTICE 의무는 graphify 자체를 재배포할 때 적용되며, 의존성으로 사용하는 본 프로젝트에는 해당하지 않는다.
 
 ---
 
