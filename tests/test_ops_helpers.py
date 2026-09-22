@@ -21,7 +21,6 @@ HELPERS = REPO / "scripts" / "_helpers"
 
 CANON_HELPERS = [
     "lint_mechanical.py",
-    "link_audit_v2.py",
     "analyze_graph_v3.py",
     "rebuild_index.py",
     "step7_apply.py",
