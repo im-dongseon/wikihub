@@ -8,8 +8,8 @@
 
 **Server-first LLM wiki hub aggregating multiple source backends.**
 
-[![Status](https://img.shields.io/badge/Status-v0.1.19%20canary-orange)](docs/changelog.md)
-[![Version](https://img.shields.io/badge/Version-0.1.18-blue)](_system/VERSION)
+[![Status](https://img.shields.io/badge/Status-v0.1.19%20released-brightgreen)](docs/changelog.md)
+[![Version](https://img.shields.io/badge/Version-0.1.19-blue)](_system/VERSION)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
