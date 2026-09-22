@@ -278,6 +278,10 @@ def _instance_wide_subs(cfg: dict) -> dict[str, str]:
         "lint_interval_hours": str(ops.get("lint_interval_hours", 3)),   # v0.1.6 default (was 24 — v0.1.0 era stale)
         "agent_invocation": agent_invocation,
         "skill_prefix": agent.get("skill_prefix", "wh-"),
+        # (f) flock 가드 wrapper (issue #201, 2026-09-22) — lint unit 전용.
+        # lint 의 2차 가드(flock)를 세션 수명 동안 유지하기 위해 agent invocation
+        # 앞에 wrapper 를 둔다. ingest unit 은 감싸지 않는다 (per-vault 병렬 허용).
+        "wl_guarded_path": str(wikihub_src / "scripts" / "wl_guarded.sh"),
         # F5 — yaml.agent.timeout_sec ↔ systemd TimeoutStartSec sync (R3-CR3-2 B-HIGH-2)
         # Issue #104: lint/ingest 각각 yaml override 지원. 우선순위:
         # operations.lint_timeout_start_sec → agent.timeout_sec → 600

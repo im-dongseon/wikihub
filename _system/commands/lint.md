@@ -31,6 +31,23 @@ systemctl --user start wikihub-lint.service
 - **출력 언어 = 한국어** (wiki 의 source 본문이 한국어 위주, ADR-0001 vault-prefix link 도 한국어 entity/concept 명 정합).
 - **한자 (漢字) 감지 시 한글로 변환** — MiniMax M2.5 등 일부 모델이 동음이의 한국어를 한자 표기로 출력하는 결함 발견 (Hermes OCI 실증, 2026-05-20). 예: "기획(企劃)" → "기획"; "권한(權限)" → "권한". 고유명사 (인명·지명·조직명 중 한국 외 출처) 는 예외 허용.
 - **영어 약어** (OKR, PM, CRM, API 등) 는 그대로 유지 — 한국어 source 의 관용.
+- **⚠️ report 가 한자를 인용하지 않는다 (issue #213)** — 결함을 보고할 때 그 한자를 그대로 옮기면 **report 자신이 다음 회차의 검출 대상**이 된다. report 는 `sources/nas/project/wikihub/report/` 로 발행되어 다음 회차 `sources/` 스캔에 다시 들어가므로 **자기 재생산 경로**가 성립한다.
+
+  ```
+  실측 (2026-09-22): report 1건의 한자 20자 중 20자가 lint 자기 산출이었다 (47자 중)
+  ```
+
+  인용이 필요하면 `_lint_step6.py` 의 살균 함수를 쓴다:
+
+  ```bash
+  # 코드포인트 표기 — U+590D → U+590D (원문을 쓰지 않는다)
+  python3 -c "import sys; sys.path.insert(0,'scripts/_helpers'); import _lint_step6 as S; print(S.sanitize_hanja('<인용할 텍스트>'))"
+  # 개수만 요약 — "7자 1건 · 4자 1건 · 2자 2건"
+  python3 -c "import sys; sys.path.insert(0,'scripts/_helpers'); import _lint_step6 as S; print(S.summarize_hanja('<인용할 텍스트>'))"
+  ```
+
+  **권장 서술**: `analyses 5페이지 — 한자 7자 1건 · 4자 1건 · 2자 2건 · 1자 1건` (문자 없이 개수만).
+  부득이 원문을 보여야 하면 `U+590D U+5EA6 …` 형태로 적는다. **가나·한글은 살균 대상이 아니다** (한자만).
 
 본 정책은 wiki-schema.md 의 신뢰 경계 출력 sanitize layer 와 정합.
 
@@ -48,48 +65,89 @@ systemctl --user start wikihub-lint.service
 
 systemd 가 이미 실행 중인 유닛에 start 를 반복 요청해도 실제 실행 인스턴스는 1개입니다 (2026-09-14 실측: 실행 중 유닛에 start 3회 → 실행 1회). timer 와 수동 호출이 겹쳐도 동일 유닛이므로 중복이 생기지 않습니다.
 
-**2차 가드 = flock 파일** (보조 layer). **단일 bash 프로세스가 세션 전체를 소유할 때만** 유효합니다.
+**2차 가드 = flock 파일** (wrapper 가 세션을 소유 — `scripts/wl_guarded.sh`).
 
 ```bash
-# 세션 전체를 소유하는 단일 bash 프로세스 (예: 실행 스크립트) 내부에서만
+# scripts/wl_guarded.sh 가 하는 일 (요약)
 exec 200>"$WIKIHUB_HOME/.wl.lock"
-flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0; }
-# lock 은 이 bash 프로세스가 종료할 때까지 유지 (kernel-managed)
+flock -n 200 || { echo "lint 이미 진행 중 — exit 0"; exit 0; }
+exec "$@"          # fd 200 을 상속한 채 세션 프로세스로 이미지 교체
+# lock 은 세션 프로세스가 끝날 때까지 유지 (kernel-managed)
 ```
 
-> **⚠️ 이 패턴은 Hermes 경유 호출에서 무력하다 (2026-09-14 실증)**
+**핵심은 `exec` 다.** `exec "$@"` 는 shell 프로세스 이미지를 **교체**하므로 lock 을 잡은
+fd 가 세션 프로세스에 상속되고, 세션이 끝날 때까지 유지된다 (2026-09-22 실측: wrapper 가
+`sleep` 을 보유하는 동안 `--probe` 가 `LOCK=HELD`, 종료 후 `LOCK=FREE`).
+
+⚠️ `flock -o`(`--close`) 를 쓰면 안 된다 — 명령 실행 전에 fd 를 닫아 이 성질을 깨뜨린다.
+`flock -n <fd> <cmd>` subshell 형도 안 된다 — fd 가 lock 보유 프로세스에서 상속되지 않는다.
+
+> **⚠️ 이전 fd 상속 패턴은 무력했다 (2026-09-14 실증 — 기록 보존)**
 >
-> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라집니다. Hermes agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과합니다. 실측:
+> `flock(2)` 는 **열린 fd** 에 lock 을 걸고, fd 는 프로세스 수명과 함께 사라진다. Hermes
+> agent 가 terminal tool 로 **명령을 매번 별도 subprocess 로 실행**하는 환경에서는 lock 을
+> 잡은 명령이 끝나는 순간 커널이 해제되므로, 다음 명령은 새 fd 라 무관하게 통과했다.
 >
 > ```
-> 명령 1: exec 200>lock; flock -n 200  → 획득 후 프로세스 종료
+> 명령 1: exec 200>lock; flock -n 200  → 획득 후 프로세스 종료 → 해제
 > 명령 2: exec 200>lock; flock -n 200  → 획득됨 (가드 무력)
-> flock -n 200 단독 실행 (해당 shell 에 fd 200 미할당) → "Bad file descriptor"
 > ```
 >
-> 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
-> **fd 상속 방식은 이 실행 모델에서 `race window 0%` 를 보장하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다.
+> 운영 로그: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
+> **교훈**: 세션을 소유하는 단일 프로세스가 없으면 fd 상속 방식은 성립하지 않는다.
+> 그래서 wrapper 로 **세션을 소유하는 단일 프로세스**를 만들었다 (아래 Step 0.5).
 
 **결론 — 본 가드의 실효 범위**
 
 | 계층 | 실효성 | 근거 |
 |---|---|---|
 | systemd 유닛 (`Type=oneshot`) | **유효 — 1차 가드** | 동일 유닛 중복 발화를 systemd 가 드롭 (실측: 실행 중 유닛에 start 3회 → 실행 1회) |
-| flock 파일 (보조) | **무효 — Hermes 경유 시** | fd-scoped lock 이 subprocess 종료와 함께 해제됨 (위 실측) |
+| flock wrapper (`wl_guarded.sh`) | **유효 — 2차 가드** | wrapper 가 `exec` 로 세션을 소유해 fd 가 세션 수명 동안 유지됨 (2026-09-22 실측) |
 
-따라서 **동시 실행 차단은 systemd 유닛에 의존한다.** flock 은 단일 bash 프로세스가 세션
-전체를 소유하는 경로(예: 실행 스크립트 내부)에서만 보조로 유효하다.
+따라서 동시 실행은 **2계층으로 차단된다** — systemd 가 동일 유닛 중복을 드롭하고,
+wrapper 가 그 밖의 경로(예: 직접 실행)까지 fd 수준에서 막는다.
 
-flock 무효를 이유로 **세션을 중단하거나 clarify 를 호출하지 않는다** — 중복 위험은
-systemd 계층이 막고 있으므로 본 Step 은 그대로 진행한다.
+### Step 0.5. 가드 적용 범위와 silent skip (해소 — 2026-09-22)
 
-### Step 0.5. Hermes 채팅 `/wl` 직접 호출 경로 (미해결 — 후속 결정)
+**결정: B안 (세션 소유 wrapper)** 채택. 경로 폐기(A안)가 아니다 — `/wl` 직접 호출은
+수동 테스트에 필요하므로 **허용**한다.
 
-Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 유닛을 경유하지 않으므로 **1차 가드가 적용되지 않습니다.** 이 경로에서는 위 flock 2차 가드도 무력합니다 (fd 상속 불가).
+| 경로 | 가드 | 비고 |
+|---|---|---|
+| systemd timer → `wikihub-lint.service` | **1차 + 2차** | ExecStart 가 `wl_guarded.sh` 를 경유 |
+| `systemctl --user start wikihub-lint.service` | **1차 + 2차** | 동일 유닛 |
+| Hermes 채팅 `/wl` 직접 호출 | **없음** | systemd 를 우회하고 wrapper 도 안 거침 — 수동 테스트용으로 허용 |
 
-- 현재 상태: 메인테이너가 timer 발화와 겹쳐 `/wl` 을 직접 호출하면 lint cycle 이 중복 실행될 수 있음
-- **권장 경로**: 수동 실행도 `systemctl --user start wikihub-lint.service` 를 사용 (1차 가드 적용)
-- 처리 방향(경로 폐기 / 프로세스-무관 가드 도입)은 후속 결정 사항 — 이슈 #180 참조
+- **가드가 필요한 실행**은 `systemctl --user start wikihub-lint.service` 를 쓴다.
+- `/wl` 직접 호출은 lint 중복 위험을 감수하되, 수동 테스트 목적이므로 금지하지 않는다.
+
+**silent skip (설계 결정)** — wrapper 가 lock 을 못 잡으면 **exit 0** 으로 조용히 건너뛴다.
+stderr 1줄 + `logger -t wl_guarded` 로 흔적만 남긴다. 비영(非零) exit 을 하지 않는다 —
+`OnFailure=ops-alert.service` 가 benign skip 에 발화하면 안 되기 때문이다.
+**따라서 "lint 가 예정대로 돌았는가"를 journal 이 아닌 별도로 확인해야 할 수 있다.**
+
+### Step 0.6. `log.md` 계상 기준 (정본 — 2026-09-22)
+
+**모든 회차는 `log.md` 수치를 "발화 시점 스냅샷" 으로 계상하고, 측정 시각을 함께 적는다.**
+
+```
+계상 형식: <bytes> bytes / <행수>행  (발화 시점 YYYY-MM-DD HH:MM KST)
+```
+
+**왜 기준이 필요한가**: `log.md` 는 append-only 이고 ingest 가 **상시 append** 하므로,
+측정 시점이 다르면 값이 비교 불가능하다. 실측 (2026-09-22):
+
+```
+09:12 회차   1,075,741 bytes
+12:19 회차   1,084,964 bytes
+13:52 회차   1,092,143 bytes   ← 13:50 ingest 발화 시점 접두값
+14:24 회차   1,095,980 bytes   ← 그때 재측정값
+```
+
+같은 파일을 재는데 기준이 달라 "회차 대비 증가분" 을 계산할 수 없었다. 그래서 **발화 시점
+스냅샷**으로 통일한다. 발화 시점 이후의 증가분은 **동시 ingest 소관이며 본 회차 계상이
+아니다** — 비교 시 이 점을 명시한다. `index.md` 등 lint 가 직접 생성하는 산출물은 값이
+안정적이므로 이 규정의 대상이 아니다.
 
 ### Step 1. 디렉토리 구조 검증 (자동)
 
@@ -192,6 +250,19 @@ def resolve_link(name, category):
 - 해당 entity·concept 페이지의 `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
   - **`referenced_by:` 가 빈 값(`''`/`null`)인 페이지는 제외**한다 — 빈 값에 항목을 넣는 것은 "등록"이며 자동 등록 금지 대상이다 (issue #167, `## 실패 처리` 표). 리스트 0건(`[]`)은 추가 대상이다
 - 추가 외에 본문·다른 frontmatter 필드는 수정 안 함
+- **`referenced_by` 실재성 전수 감사 (issue #215)**: `ref_audit.py` 로 **전수 스캔**한다 (현행은 단일 페이지만 보고 — `entities/AGENTS.md` 중복 2건 수준). 결과를 4계층으로 분류해 보고한다.
+
+  | 분류 | 정의 | 조치 |
+  |---|---|---|
+  | **P1** | 이름·alias 가 source 어디에도 없음 (완전부재) | 제거 대상 — **보고만** |
+  | **P2** | source frontmatter 에만 있고 본문엔 없음 | 제거 대상 — **보고만** |
+  | **P3** | 동형명사 페이지 (`Go`·`OS`·`PR`) — **판정 불가** | **자동 제거 금지**, 목록만 |
+  | `missing_file` | `referenced_by` 가 가리키는 source 파일 부재 | 별도 보고 |
+
+  - **자동 제거하지 않는다** — 데이터 변경은 운영 소관이고, P3 는 문자열 매칭으로 진성/오염을 구분할 수 없어 제거하면 진성분을 잃는다 (`Go` 실측: 언어 14 / 동사 54).
+  - **`referenced_by` 중복 전수 검사 (issue #210)**: 같은 source 가 한 페이지에 2회 이상 들어간 경우를 **전수 스캔**한다 — 현행 Step 4.5 는 **alias 중복**만 보고 `referenced_by` 는 검사하지 않아, 편입 등록 페이지 1건만 보고했다 (실측: lint 2건 vs 실제 362페이지 823건). 출력은 `duplicate_refs`(초과분 합) · `duplicate_pages` 로 보고한다. 삽입기 set semantics(`ingest.md` L175·L188·L254) 위반의 재발 감시용이다.
+  - 실행: `"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/ref_audit.py" --wiki-home "$WIKIHUB_HOME"`
+  - 등록 근거는 `ref_ledger.py` 로 기록한다 (매칭된 이름·분기·줄). 판정 정본은 `scripts/_helpers/ref_match.py`.
 
 ### Step 4.5. Duplicate detection (자동, 보고만 — v0.1.8 ADR-0039)
 
@@ -264,6 +335,39 @@ wiki/entities/ + wiki/concepts/ 의 page list 를 scan 해 두 종류 duplicate 
 - **책임 경계 (ingest vs lint)**: ingest 가 stub 생성 시 `aliases: [<본문 form>]` 명시 (`ingest.md` Step 4.3) → lint Step 4.5 는 ingest 미작성 page (legacy 또는 운영자 직접 생성) 만 보강. ingest 의 aliases 셋 위에 lint 가 overwrite 하지 않음.
 - **atomic write**: frontmatter 갱신은 `<page>.tmp` write → `os.rename` atomic 이동 패턴. concurrent ingest / 운영자 수동 편집과의 race 가드. (운영자가 `aliases:` 수동 편집 중 lint cycle fire 시에도 atomic 보장)
 
+### Step 4.7. log.md 무결성 검사 (자동, 보고만 — issue #211)
+
+`wiki/sources/<vault>/log.md` 전량을 스캔해 append 규약 위반을 보고한다.
+**log.md 는 append-only 이력이므로 자동 수정하지 않는다** — 진단만 한다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/log_integrity.py" \
+  --wiki-home "$WIKIHUB_HOME" --json "$WIKIHUB_HOME/wiki/_lint/_log_integrity.json"
+```
+
+| 검출 항목 | 판정 | 함정 |
+|---|---|---|
+| **헤더 시각 역행** | 인접 헤더의 시각이 감소 (초 단위 포함) | 파일 순서 = append 순서인데 시각만 이르다. 스테일 시각을 쓴 흔적 |
+| **비정상 접두** | 행이 `|` 로 시작 | log 내용을 markdown 표로 오인한 흔적 (실측 860행) |
+| **헤더 형식 불일치** | `## 날짜` 인데 `## YYYY-MM-DD HH:MM(:SS) KST` 불충족 | 초 단위/분 단위 혼용, tz 표기 누락 |
+| **Trigger 필드 부재** | 헤더 블록에 `- **Trigger**:` 없음 | 규약 미준수 — 상태 판정 불가 |
+
+**작성 규약 정본은 `_system/commands/ingest.md` Step 5** ("헤더 시각 규약") 다.
+본 검사는 그 규약이 지켜졌는지 사후 확인한다.
+
+**판정 기준 (실측 근거)**:
+- 시각 비교는 **정수 튜플 `(HH, MM, SS)`** 로 한다 — 문자열 비교는 초 생략 표기가
+  섞이면 `'10:00' > '10:00:30'` 이 참이 되어 같은 분의 순서를 역행으로 오탐한다
+  (2차 리뷰 실측). 날짜는 `YYYY-MM-DD` zero-padding 이라 문자열 비교로 충분하다.
+- **역행은 단발**로 나타난다 (연쇄 오염 아님 — 실측: 역행 직후 정상 복귀).
+  "역행 발견 = 그 헤더의 시각이 스테일" 로 읽고, 이후를 오염으로 단정하지 않는다.
+- kst/utc **tz 혼재는 역행이 아니라 별도 신호**(`tz_mixed`)로 잡는다 — tz 가 다른
+  인접 쌍은 역행 비교에서 제외한다.
+- 위반이 0건이면 본 항목을 report 에 싣지 않는다 (노이즈 방지).
+
+**⚠️ 헤더 시각 역행은 자동 수정 대상이 아니다** — 원래 시각을 알 수 없으므로
+(이슈 #211 실측에서도 8건 전량 미조치로 남았다) 검출만 하고 운영자 판단에 맡긴다.
+
 ### Step 5. wiki/index.md 재구성 (자동)
 
 ADR-0005에 따라 `/wl`가 index 재구성 책임 보유:
@@ -314,6 +418,19 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 - 페이지 간 모순되는 클레임
 - 더 최신 source로 무효화 가능성 있는 내용
 - 본문에 언급되지만 entity·concept 페이지가 없는 항목 (Step 3에서 자동 생성됐어야 하나 누락 케이스)
+
+**후보 생성 근거 (issue #214 교정)** — 위 4번째 항목의 후보는 `_lint_step6.py` 가 만든다.
+근거는 **코드 펜스 밖 본문 헤딩**이다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/_lint_step6.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+- ⚠️ **코드 펜스(```` ``` ````) 내부의 `# ...` 는 헤딩이 아니다** — 예시로 제시된 코드/출력이므로 스캔에서 제외한다. 실측(2026-09-22): 후보 13건 중 **11건이 펜스 내부**였고, 그것이 "전량 노이즈" 의 실제 원인이었다 (`설치 및 실행` · `저장소 클론` · `wikihub.yaml` 등).
+- **후보 제외** — URL(`://`·`localhost`) · 확장자 보유(`.md`·`.yaml`·`.service`) · 순수 숫자 · 셸/템플릿 신호(`$`·`==`·`<...>`·`...`·`/`) · 문서 구조 헤딩(`skip_common`).
+- ⚠️ **`[[...]]` 링크를 근거로 쓰지 않는다** — `[[` 는 마크다운 위키링크이자 **bash 조건 연산자**라 문자열로 구분 불가하다. 실측: source 전체 `[[...]]` 537건 중 shell 32건 · path 148건 · template 41건. 링크 기반으로 바꾸면 후보가 13 → **26건으로 증가**한다.
+- 교정 후 후보는 **1건**(`Superpowers` — 실제 문서 헤딩 + 대응 페이지 부재)이다. 0건이면 report 에서 본 항목을 "해당 없음" 으로 종료할 수 있다.
 
 → `_lint/report.md`에 보고 + Step 7 에서 LLM 본문 갱신 자동. wikihub `wiki/` = LLM derivative 라 원본 변경 0 (ADR-0039 정합).
 

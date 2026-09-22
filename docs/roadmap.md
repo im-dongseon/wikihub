@@ -8,7 +8,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 항목 | 상태 |
 |---|---|
-| (없음 — v0.1.18 릴리즈 대기) | — |
+| (없음 — v0.1.19 릴리즈) | — |
 
 ---
 
@@ -16,6 +16,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 버전 | 주요 내용 |
 |---|---|
+| [v0.1.19](changelog.md) | `referenced_by` 매칭 3중 분기 + 중복 전수 검출 (#215·#210) · lint report 한자 자기재생산 차단 (#213) · Step 6 후보 펜스 밖 한정 (#214) · log.md 무결성 검출기 (#211) · aliases column-0 파서 누락 558건 회복 (#208) · flock 세션 소유 wrapper (#201 ④) |
 | [v0.1.18](changelog.md) | 정본 helper 이원화 해소 — 사장 스크립트 `link_audit_v2.py` 제거 (#206) |
 | [v0.1.17](changelog.md#v0117--2026-09-22-released) | 프로필 환경 독립성 정리 — `/opt/wikihub` 하드코딩 제거 · `WIKIHUB_SRC` 명시 fail-fast · Hermes 세션 env 주입 · NFC 정규화 · 운영 로컬 helper 8종 정본화 · graphify pin 0.9.x · lint headless timeout 해소 |
 | [v0.1.16](changelog.md) | lint flock 가드 재설계 · alias 중복 탐지 오탐 · graphify openai endpoint · install.sh 프로필 skill 등록 |

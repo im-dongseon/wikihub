@@ -6,6 +6,38 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
+## [v0.1.19] — 2026-09-22 (released)
+
+### 수정 (Fixed)
+
+- **`referenced_by` 대량 오등록** — 이름 매칭이 부분문자열 기준이라 무관한 source 가 등록됐다 (#215). `OS`←`most/cost/host`, `AGENTS.md`←`agents⊂agents.md`, `SST`←`most/…`. 전역 정규화(`re.sub(r'[-_\s]+','',whole_body)`)는 개행까지 지워 인접 단어를 이어붙여 오탐을 **위조**하므로 금지하고, 이름 유형별 **3중 분기**로 규정했다.
+  - ① 확장자 포함(`AGENTS.md`·`wikihub.yaml`) → 완전 일치 (대소문자 무시)
+  - ② ASCII(`AST`·`OS`·`PR`) → 토큰 경계 (`re.I` 필수)
+  - ③ 한글·CJK(`에이닷`·`마이크론`) → 표기변형 정규화 후 **같은 줄** substring
+  - `scripts/_helpers/ref_match.py`(판정 정본) · `ref_ledger.py`(등록 근거 원장) · `ref_audit.py`(전수 검출기) + `ingest.md` Step 4 spec + `lint.md` Step 4 배선 (#216)
+- **`referenced_by` 중복 823건(362페이지)** — 삽입기가 set semantics 를 지키지 않아 같은 source 가 한 페이지에 2번 등록됐다 (#210). `detect_alias_duplicates.py` 가 `referenced_by` 를 아예 검사하지 않아 lint 가 편입 등록 **1페이지만** 보고했다(실제 362페이지 — **181배 격차**). `ref_audit.py` 전수 검출 + lint 배선으로 해소 (#216)
+- **lint report 자기 재생산(한자)** — lint 가 한자 결함을 보고하면서 그 한자를 그대로 인용해 report 자신이 다음 회차의 검출 대상이 됐다 (47자 중 20자가 lint 자기 산출) (#213). `sanitize_hanja()` / `summarize_hanja()` 로 `U+XXXX` 표기·개수 요약만 쓰게 하고 `lint.md` 에 인용 금지 규칙 추가 (#217)
+- **Step 6 모순 후보 전량 노이즈** — 후보 13건 중 **11건이 코드 펜스 내부**였다. 펜스 안 `# 설치 및 실행` 은 문서 구조가 아니라 예시 코드인데 헤딩으로 파싱됐다 (#214). 펜스 밖 본문 헤딩만 취하도록 교정 → 후보 **13 → 1건**(잔여는 진성) (#217)
+  - CommonMark 정합: 닫는 펜스는 같은 문자·길이 이상 + **뒤에 공백/탭만** (` ```bash ` 는 여는 펜스), ATX 헤딩 3칸 들여쓰기 한계, 닫는 `#` 시퀀스는 앞 공백이 있을 때만 제거
+  - 후보 키를 lowercase 로 통일 — 표기 변형(`CaseVar`/`casevar`)이 분리 집계되면 min_count 미달로 후보가 **통째로 소실**됐다
+- **`log.md` 무결성 검증 부재** — append-only 이력의 서식이 검증 없이 누적됐다 (#211). 헤더 시각 역행 **8건**(파일 순서 = append 순서인데 시각만 이르다. KST/UTC 혼재 −9h 가설은 Δ 불규칙으로 기각) + `|` 접두 손상 860행(운영 복원 완료) (#218)
+  - `scripts/_helpers/log_integrity.py` — report-only 검출기(역행·접두·헤더형식·Trigger). **역행은 자동 수정하지 않는다** (원래 시각을 알 수 없음)
+  - `ingest.md` Step 5 에 "헤더 시각 규약" 자기 검증 추가, `lint.md` Step 4.7 배선
+- **`_wl_step2_spec.py` aliases 파서가 column-0 block 을 놓침** — 구 정규식 `^\s+-\s+` 가 column-0 을 전량 미인식(실측 분포: column 0 이 2,020 / 들여쓰기 272 — 즉 다수 누락) (#208). `^\s*-\s+` + 다음 top-level 키 경계 처리로 교정 → **alias index 1,870 → 2,428**(누락 **558건 회복**), 위반 1 이 22 → 1건 (#209)
+- **lint flock 가드가 세션을 덮지 못함** — Hermes tool 호출마다 단명 subprocess 라 fd 상속 주체가 없다 (#201 ④). `scripts/wl_guarded.sh`(세션 소유 wrapper) 도입 + `wikihub-lint.service.template` 배선 (#212)
+
+### 변경 (Changed)
+
+- `lint.md` Step 0 — flock 을 "보조 layer" 로 명시하고 systemd 유닛 가드를 1차로 규정 (#203)
+- `docs/changelog.md` — v0.1.19 항목을 (canary) 에서 (released) 로 갱신
+
+### 검증
+
+- `tests/` 전체 **248 passed**, 1 skipped (머지본 v0.1.19 워크트리 실측, 5개 PR 합쳐 회귀 0)
+- 검출기 실데이터 실행 — `log_integrity` 역행 8 / 접두 0 · `_lint_step6` 후보 1 · `aliases` index 2,428
+
+---
+
 ## [v0.1.18] — 2026-09-22 (released)
 
 ### 수정 (Fixed)
