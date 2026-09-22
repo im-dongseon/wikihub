@@ -23,11 +23,15 @@ upstream 코드에 `|` 생성 로직은 0건이므로 둘 다 **LLM 서식 오�
 
 ## 판정 기준 (실측 근거)
 
-- **시각 비교는 문자열 비교로 충분**하다 — `YYYY-MM-DD HH:MM:SS` 는 zero-padding
-  덕에 사전순 = 시간순이다. 초가 생략된 표기(`HH:MM`)도 사전순이 유지된다.
+- **시각 비교는 문자열로 하면 안 된다** — 초 생략 표기(`HH:MM`)가 섞이면
+  `'10:00' > '10:00:30'` 이 참이 되어 같은 분의 순서를 역행으로 오탐한다
+  (실측: Δ-1m 오탐). `(HH, MM, SS)` 정수 튜플로 비교한다. 날짜는 `YYYY-MM-DD`
+  zero-padding 이라 문자열 비교가 곧 시간순이다.
 - **역행은 단발로 나타난다** (연쇄 오염 아님 — 실측: 역행 직후 정상 복귀).
   따라서 "역행 발견 = 그 헤더의 시각이 스테일" 이지 "이후 전부 오염" 이 아니다.
 - KST/UTC 혼재(−9h) 가설은 **기각됐다** (실측 Δ 가 −1h/−7h/−8h/−13h 로 불규칙).
+- **Trigger 필드 판정은 필드명 정확 일치**로 한다 — substring 검사는
+  `Trigger source` 같은 다른 필드를 통과시킨다.
 """
 
 from __future__ import annotations
@@ -50,6 +54,28 @@ _HEADER_LOOSE_RE = re.compile(r"^##\s+\d{4}-\d{2}-\d{2}")
 _FIELD_RE = re.compile(r"^\s*- \*\*([^*]+)\*\*:")
 # 비정상 접두 — 선행 `|` 등 (markdown 표로 오인한 흔적)
 _BAD_PREFIX_RE = re.compile(r"^\|")
+
+
+def _clock_key(clock: str) -> tuple[int, int, int]:
+    """`HH:MM` / `HH:MM:SS` → 정렬 가능한 정수 튜플.
+
+    **문자열 비교로는 부족하다** (2차 리뷰 [mid]): `'10:00' > '10:00:30'` 이 참이라
+    같은 분의 `HH:MM:SS` → `HH:MM` 순서를 역행으로 오탐한다 (실측 Δ-1m 오탐).
+    초 생략은 0 으로 채워 실제 시각 순서를 만든다.
+    """
+    parts = clock.split(":")
+    hh, mm = int(parts[0]), int(parts[1])
+    ss = int(parts[2]) if len(parts) > 2 else 0
+    return hh, mm, ss
+
+
+def _sortkey(date: str, clock: str) -> tuple[str, tuple[int, int, int]]:
+    """(날짜 문자열, 시각 정수 튜플).
+
+    날짜는 `YYYY-MM-DD` zero-padding 이라 문자열 비교가 곧 시간순이다.
+    시각은 초 생략 표기가 섞이므로 **정수 비교**가 필요하다.
+    """
+    return date, _clock_key(clock)
 
 
 def _resolve_wiki_home(explicit: str | None = None) -> Path:
@@ -99,7 +125,7 @@ def scan_log(path: Path) -> dict:
                 "date": date,
                 "clock": clock,
                 "tz": tz,
-                "sortkey": f"{date} {clock}",
+                "sortkey": _sortkey(date, clock),
                 "raw": line.strip(),
             })
             continue
@@ -131,7 +157,14 @@ def scan_log(path: Path) -> dict:
         start = h["line"]
         end = headers[idx + 1]["line"] if idx + 1 < len(headers) else len(lines) + 1
         block = lines[start:end - 1]
-        if not any(_FIELD_RE.match(b) and "Trigger" in b for b in block):
+        # 필드명이 **정확히** `Trigger` 인 줄만 인정한다 — substring 검사는
+        # `Trigger source` · `Triggered-by` 같은 다른 필드를 통과시킨다
+        # (2차 리뷰 [low], 실측 확인).
+        has_trigger = any(
+            (fm := _FIELD_RE.match(b)) and fm.group(1).strip() == "Trigger"
+            for b in block
+        )
+        if not has_trigger:
             missing_trigger.append({"line": h["line"], "header": h["raw"]})
 
     return {
@@ -147,20 +180,19 @@ def scan_log(path: Path) -> dict:
     }
 
 
-def _delta_minutes(prev: str, cur: str) -> int | None:
-    """`YYYY-MM-DD HH:MM(:SS)?` 두 개의 분 차이 (cur - prev). 음수면 역행."""
+def _delta_minutes(prev: tuple[str, tuple[int, int, int]],
+                   cur: tuple[str, tuple[int, int, int]]) -> int | None:
+    """두 sortkey 의 분 차이 (cur - prev). 음수면 역행.
+
+    sortkey 는 `(날짜, (HH, MM, SS))` 튜플이므로 문자열 파싱이 필요 없다 —
+    초 생략 표기가 섞여도 실제 시각 차이를 정확히 계산한다.
+    """
     import datetime as _dt
 
-    def parse(s: str):
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-            try:
-                return _dt.datetime.strptime(s, fmt)
-            except ValueError:
-                continue
-        return None
-
-    a, b = parse(prev), parse(cur)
-    if a is None or b is None:
+    try:
+        a = _dt.datetime(*map(int, prev[0].split("-")), *prev[1])
+        b = _dt.datetime(*map(int, cur[0].split("-")), *cur[1])
+    except (ValueError, TypeError):
         return None
     return int((b - a).total_seconds() // 60)
 
