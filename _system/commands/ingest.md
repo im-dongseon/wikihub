@@ -183,7 +183,7 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
        3. 항목 삽입 시 **항상 선행 개행**을 붙인다 — 삽입 오프셋이 직전 항목 "줄 끝"이므로 그 `\n` 은 종결자이지 분리자가 아니다. 조건부로 판단하면 직전 항목에 병합된다.
        4. frontmatter 재조립 시 **여는 `---` 뒤 개행을 보존**한다 — 소실되면 `---aliases:` 가 되어 frontmatter 가 파손되고 alias index 에서 탈락한다.
      - **삽입 후 검증**: `yaml.safe_load` 통과만으로는 부족하다(경계 조건 1·2·3 은 파서를 통과한다). 백업 대비 파일별 diff 가 `+1/-0` 인지, `aliases` 에 `sources/` 가 없는지, `startswith('---\n')` 가 유지되는지를 함께 확인한다.
-     - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행. 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
+     - **권한 설정**: `_atomic_write_wiki_page` 가 write 시 `chmod 644` 를 코드로 보장한다(issue #201 ①). 별도 `chmod` 는 불필요하다 — 과거 mktemp 기본값 600 보정용 지시였으나 코드가 흡수했다. 다른 경로로 파일을 만들 때만 명시 보정한다.
 4. **analyses는 갱신 안 함** — `/wh-query`가 분석 저장 트리거 (별도 명령)
 5. **referenced_by 정리는 set semantics**: 추가만, 제거 안 함. 새 본문에서 사라진 entity의 orphan ref는 `/wl`가 책임 (--apply 시 archive)
 
