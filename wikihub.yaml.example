@@ -56,7 +56,7 @@ operations:
   vfs_cache_max_size: "10G"           # rclone mount `--vfs-cache-max-size`
   vfs_refresh_mode: recursive         # ADR-0026 K1 채택 (recursive | per-file | none — K2/K3 v0.2.x deferred)
   # ADR-0036 — graphify CLI (PyPI graphifyy):
-  graphify_min_version: "0.8.0"       # install.sh `_install_graphify` 의 min (v0.1.0 documentation only — 실 enforce 는 v0.2.x)
+  graphify_min_version: "0.9.20"      # install.sh `_install_graphify` 의 min (documentation only — code 가 읽지 않음, 실 enforce 는 v0.2.x)
   graphify_max_version: "0.99.99"     # ADR-0036 breaking change 방어
   graphify_backend: ollama            # graphify --backend = protocol (graphify CLI 의 코드 경로). v8 backends: gemini | kimi | claude | openai | deepseek | ollama. ADR-0036 §Note (2026-05-24, v0.1.7 follow-up) — `ollama` backend 는 endpoint 형식 자동 분기 (loopback → native OLLAMA_HOST API, 외부 → OLLAMA_BASE_URL OpenAI-compat).
   graphify_profile: ollama_gemma      # endpoint+key+model bundle 선택자. env 의 WIKIHUB_GRAPHIFY_<PROFILE_UPPER>_<ENDPOINT|API_KEY|MODEL> 와 1:1 매칭 (ADR-0038, v0.1.7 follow-up). 다중 profile 동시 보유 + yaml 한 줄 swap. 기본 ollama_gemma = local Ollama daemon + gemma4:31b-cloud. 추가 profile cookbook → docs/graphify-backend-test-reference.md §6.
