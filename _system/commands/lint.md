@@ -148,6 +148,7 @@ def resolve_link(name, category):
 
 - 각 source의 본문에서 entity·concept 언급 식별
 - 해당 entity·concept 페이지의 `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
+  - **`referenced_by:` 가 빈 값(`''`/`null`)인 페이지는 제외**한다 — 빈 값에 항목을 넣는 것은 "등록"이며 자동 등록 금지 대상이다 (issue #167, `## 실패 처리` 표). 리스트 0건(`[]`)은 추가 대상이다
 - 추가 외에 본문·다른 frontmatter 필드는 수정 안 함
 
 ### Step 4.5. Duplicate detection (자동, 보고만 — v0.1.8 ADR-0039)
@@ -281,7 +282,8 @@ contradiction_check="$(yq '.operations.lint_contradiction_check // true' "$WIKIH
 매 cycle 진행:
 
 - dangling link 제거 (Step 2 보고 항목)
-- `referenced_by` 0건 entity·concept → `wiki/.archived/<category>/<name>-<utc_iso>.md` 이동
+- `referenced_by` 가 **리스트이고 0건**인 entity·concept → `wiki/.archived/<category>/<name>-<utc_iso>.md` 이동
+  - **`referenced_by:` 가 빈 값(`''`/`null`)인 경우는 archive 대상이 아니다** — 리스트 0건(`[]`)과 의미가 다르다. 자동 등록·archive 모두 금지하고 보고만 한다 (issue #167, `## 실패 처리` 표 동일 항목)
 - 폴더 위반 페이지 → 적절한 카테고리 이동 (단 vault prefix 필요한 sources는 메인테이너 명시 매핑)
 - 모순 클레임 본문 갱신 (Step 6 보고 항목)
 - **case-variant duplicate 처리 (Step 4.5 보고 항목, ADR-0039)**:
@@ -400,6 +402,50 @@ NFC/NFD 로 다를 수 있다. **정규화 후 비교**하고, 정규화로도 �
 - `wiki/log.md`(global)는 만들지 않음. lint는 vault-agnostic이라 vault별 log에 append 부적합 → `_lint/report.md`가 진단 + 이력 통합 (overwrite는 진단 성격상 OK, 과거 보고서 보존 필요 시 향후 별도 ADR)
 - **권한 설정**: report.md write 직후 `chmod 644 "<path>"`. `_lint/` 디렉토리 write 전 `mkdir -p` 후 `chmod 755`.
 
+### Step 8.1. 보고만 항목 이월 규칙 (issue #167)
+
+`## 보고만 (승인 대기)` 항목이 회차마다 반복되어도 **매번 재판단하지 않는다.**
+판단 주체가 다르거나 자동 적용이 금지된 항목이므로, 반복 자체는 결함이 아니다.
+
+**이월 표기 (필수)** — 매 회차 보고 시 각 항목에 아래를 함께 적는다:
+
+| 필드 | 내용 |
+|---|---|
+| **회차 수** | `(N회차 유지)` — 동일 항목이 몇 회차 연속 보고됐는지 |
+| **귀속** | `메인테이너 판단` / `개발 소관` / `운영 소관` 중 하나 |
+| **변화** | 직전 회차 대비 증감. 변화 없으면 `변화 없음` |
+
+**회차 수·변화 산출 출처** — `_lint/report.md` 는 overwrite 이므로 직전 회차 내용이 남지 않는다.
+**발행된 이전 report 를 읽어 산출**한다:
+
+```bash
+# 직전 회차 report (vault 실경로, 발행본)
+ls -t "$WIKIHUB_HOME/vault/<vault>/project/wikihub/report/"*lint.md 2>/dev/null | sed -n '2p'
+```
+
+발행본이 없으면(신규 vault·발행 실패) 회차 수를 `(1회차)` 로 적고 변화는 `기준 없음` 으로
+표기한다 — **산출 불가를 이유로 판단을 유보하거나 clarify 를 호출하지 않는다.**
+
+**재판단 금지** — 이미 `귀속` 이 정해진 항목은 회차마다 판단 근거를 다시 서술하지 않는다.
+1줄 이월 표기만 한다. 판단 근거 전문은 **최초 보고 회차에만** 적는다.
+
+**자동 적용 금지 목록** (위반 시 되돌리기 어려운 변경이 발생):
+
+- append-only 파일(`log.md`) 의 접두 보존 대상 — 플레이스홀더 치환 포함
+- `referenced_by:` 가 빈 값인 페이지의 등록·archive
+- sources 본문 (vault 원문) 의 한자·표기 변환
+- 구조 잔재 페이지(본문 실질 1줄 이하·frontmatter 다중 빈 줄 등)의 삭제·이동 (편집 여부는 메인테이너 결정)
+
+**개발 소관 승격 조건** — 아래에 해당하면 `메인테이너 판단` 이 아니라 `개발 소관` 으로
+분류하고, report 의 개발 소관 절에 모아 적는다:
+
+- playbook(`_system/commands/*.md`) 또는 `scripts/lib/*` 의 규칙 부재·결함이 원인일 때
+- 운영 로컬 헬퍼(`_scripts/*`) 의 계상이 정본과 다를 때
+- 구조적 결함(경로 이중 계상, 권한 코드 누락 등)이 원인일 때
+
+**정본 우선 원칙** — 운영 로컬 헬퍼와 정본 계상이 다르면 **정본을 인용**하고 불일치
+사실만 1줄 기록한다. 헬퍼 수치를 report 본문에 그대로 싣지 않는다.
+
 ### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
 **책임 분리** (ADR-0036 §D6 single-source 정합):
@@ -448,6 +494,31 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 - **미해결 경로**: Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 를 경유하지 않아 1차 가드가 적용되지 않는다. 이 경로의 처리(폐기 또는 프로세스-무관 가드 도입)는 후속 결정 사항 — Step 0.5.
 - ingest 는 vault별 unit + per-vault lock 으로 직렬화한다 (ingest.md `## 동시성` 참조). lint 는 wiki-wide 단일 unit 이며 vault 무관.
 
+## headless 실행 규칙 (issue #167)
+
+본 playbook 은 `wikihub-lint.service` (systemd oneshot, `--quiet --yolo`) 로 실행되며
+**사용자 응답을 받을 수단이 없다.** 따라서:
+
+1. **사용자 입력을 요구하는 도구를 호출하지 않는다.** `clarify` 를 비롯해 운영자 응답을
+   기다리는 모든 tool(`clarify`, 승인 confirm 계열 등)이 대상이다. `--yolo` 는 **위험 명령
+   승인 프롬프트만** 우회하고, agent 가 자율 호출하는 tool 은 범위 밖이다.
+   호출 시 증상: 응답 불가 → tool 자체 timeout(실측 120s) → 복구 시도 실패 →
+   `TimeoutStartSec` 소진 → systemd SIGINT → **exit 130** (실측, 2026-07).
+
+2. **판단이 필요한 상황의 기본값은 "보고만"이다.** 예외·대량 오류·모호한 상태를 만나면
+   자동 수정하지 않고 report 에 기록한 뒤 **다음 Step 으로 진행**한다. "이걸 자동 처리해도
+   되는가" 를 묻지 않고 "기본값은 보고만" 을 적용한다.
+
+3. **규모와 무관하게 동일하다.** 오류 157건이든 1건이든 skip-and-continue. 규모가 크다는
+   이유로 판단을 유보하거나 사용자에게 넘기지 않는다.
+
+4. **메인테이너 판단 항목은 결정을 요구하지 않는다.** §Step 8.1 의 이월 규칙에 따라
+   기록·이월만 하고, 회차마다 동일 질문을 반복하지 않는다.
+
+> 위반 시 증상: 세션이 응답 대기로 멈추고 `TimeoutStartSec` (unit 실측 `1800sec`) 소진 후
+> systemd 가 SIGINT 를 보내 `exit 130`. journal 에 `Deactivated successfully` 없이 `Failed` 로
+> 남는다. (tool 자체 timeout 은 120s, unit timeout 은 1800s — 두 값은 별개다.)
+
 ## 실패 처리
 
 | 실패 시점 | 동작 |
@@ -457,6 +528,12 @@ graphify_enabled="$(yq '.operations.graphify_enabled // true' "$WIKIHUB_HOME/wik
 | index.md write 실패 (disk full 등) | exit 1 + ops-alert |
 | 카테고리 디렉토리 생성 실패 | exit 2 (Fatal, 권한 문제 의심) + notify |
 | chmod 실패 (소유권·읽기전용 FS·NFS ACL) | warn-only + report에 노트. exit 0 (권한 실패가 wiki 내용 손실로 이어지지 않음) |
+| **frontmatter parse error (N건)** | 해당 page skip + report 에 건수·패턴 기록. **exit 0** (다음 cycle 재시도). 규모와 무관하게 skip-and-continue — 대량 오류를 한 회차에 자동 수정하려 시도하지 않는다 (issue #167 재발 방지) |
+| **판단 보류 항목 (보고만)** | 자동 적용 금지. `## 보고만 (승인 대기)` 에 기록만 하고 **exit 0**. 매 cycle 동일 항목이 반복되어도 회차마다 재판단하지 않는다 — §Step 8.1 의 이월 규칙을 따른다 |
+| **`referenced_by:` 가 빈 값** | 자동 등록·archive **모두 금지**. 보고만. `''` 은 리스트 0건과 의미가 다르므로 Step 7 archive 조건에 포함하지 않는다 |
+| **append-only 파일의 미치환 플레이스홀더** | 보고만. 접두 보존이 원칙이므로 자동 수정 금지. 건수만 계상하고 이월 기록 |
+| **sources 본문 한자** | 보고만. vault 원문이므로 ingest 책임 경계 — lint 가 변환하지 않는다 |
+| **검출기와 정본 계상 불일치** | 정본 계상을 신뢰하고 헬퍼 계상은 인용하지 않는다. 불일치 사실을 report 에 1줄 기록 (정본 수치를 함께 적음) |
 
 ## 멱등성 보장
 
