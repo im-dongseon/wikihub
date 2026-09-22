@@ -119,9 +119,51 @@ def _strip_frontmatter(text: str) -> str:
     """선두 YAML frontmatter(`---` 블록) 제거 — 본문만 남긴다.
 
     frontmatter 안의 YAML 주석(`# ...`)이 헤딩으로 오인되는 것을 막는다.
+    `---` 로 시작하지 않으면 **원문을 그대로** 둔다 (수평선 `---` 로 시작하는
+    frontmatter 없는 문서에서 본문이 통째로 잘리는 것을 막는다).
     """
-    m = re.match(r"^---\s*\n.*?\n---\s*\n?", text, re.S)
-    return text[m.end():] if m else text
+    m = re.match(r"^---[ \t]*\n(.*?\n)?---[ \t]*(\n|$)", text, re.S)
+    if not m:
+        return text
+    # 첫 `---` 쌍 사이가 YAML 매핑/시퀀스로 파싱될 때만 frontmatter 로 인정한다.
+    try:
+        fm = yaml.safe_load(m.group(1) or "")
+    except Exception:
+        return text
+    if not isinstance(fm, (dict, list)):
+        return text
+    return text[m.end():]
+
+
+# 닫는 펜스: 여는 펜스와 같은 문자·같은 길이 이상 + 뒤에 공백/탭만 (CommonMark).
+# `\`\`\`bash` 는 **여는** 펜스이지 닫는 펜스가 아니다 — 이 구분이 없으면
+# info string 이 붙은 줄이 펜스를 닫아 안쪽 헤딩이 누출한다 (PR #217 리뷰 [mid]).
+_FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+# 여는 펜스는 info string 을 가질 수 있다 (백틱 펜스의 info string 에는 백틱 금지).
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fence_match(line: str, in_fence: bool, fence_char: str, fence_len: int):
+    """``(is_fence_line, closes)`` — CommonMark 펜스 판정.
+
+    닫는 펜스는 **같은 문자 + 길이 이상 + 뒤에 공백/탭만** 이어야 한다.
+    info string 이 붙은 줄(```bash)은 닫는 펜스가 아니다.
+    """
+    if in_fence:
+        m = _FENCE_CLOSE_RE.match(line)
+        if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len:
+            return True, True
+        # 같은 문자로 시작하지만 닫힘 조건을 못 채운 줄도 펜스 '줄' 로 취급해
+        # 헤딩 파싱에서 제외한다 (안쪽 내용이므로 어차피 제외된다).
+        return bool(re.match(r"^ {0,3}(`{3,}|~{3,})", line)), False
+    m = _FENCE_OPEN_RE.match(line)
+    if not m:
+        return False, False
+    marker = m.group(1)
+    # 백틱 여는 펜스의 info string 에는 백틱이 올 수 없다 (CommonMark).
+    if marker[0] == "`" and "`" in m.group(2):
+        return False, False
+    return True, False
 
 
 def iter_body_headings(text: str):
@@ -134,7 +176,9 @@ def iter_body_headings(text: str):
     - 닫는 펜스는 여는 펜스와 **같은 문자**이고 **길이가 같거나 길어야** 닫힌다.
       길이를 보지 않으면 4-backtick 펜스 안의 3-backtick 줄이 닫힘으로 오인되어
       안쪽 헤딩이 누출한다 (중첩 펜스 예시가 있는 source 에서 실제 발생).
-    - ATX 헤딩은 **최대 3칸** 들여쓰기까지 허용한다.
+    - 닫는 펜스 뒤에는 **공백/탭만** 올 수 있다 — ```` ```bash ```` 는 여는 펜스다.
+      이 규칙이 없으면 info string 줄이 펜스를 닫아 안쪽 헤딩이 누출한다.
+    - ATX 헤딩은 **최대 3칸** 들여쓰기까지 허용한다 (탭은 4칸이므로 헤딩이 아니다).
     - frontmatter 의 YAML 주석은 본문이 아니므로 먼저 제거한다.
     """
     body = _strip_frontmatter(text)
@@ -142,19 +186,17 @@ def iter_body_headings(text: str):
     fence_char = ""
     fence_len = 0
     for line in body.split("\n"):
-        m = re.match(r"^(\s*)(`{3,}|~{3,})", line)
-        if m:
-            ch = m.group(2)[0]
-            ln = len(m.group(2))
-            if not in_fence:
-                in_fence, fence_char, fence_len = True, ch, ln
-            elif ch == fence_char and ln >= fence_len:
-                # 닫는 펜스는 같은 문자 + 길이 이상일 때만 성립
+        is_fence, closes = _fence_match(line, in_fence, fence_char, fence_len)
+        if is_fence:
+            if closes:
                 in_fence, fence_char, fence_len = False, "", 0
+            elif not in_fence:
+                m = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+                in_fence, fence_char, fence_len = True, m.group(1)[0], len(m.group(1))
             continue
         if in_fence:
             continue
-        h = re.match(r"^\s{0,3}#\s+(.+)$", line)
+        h = re.match(r"^ {0,3}#[ \t]+(.+?)[ \t]*#*[ \t]*$", line)
         if h:
             yield h.group(1).strip()
 
@@ -226,7 +268,12 @@ def find_candidates(wiki_home: Path, min_count: int = 2) -> tuple[dict, int]:
     ]
     existing = _load_existing_names(wiki)
 
+    # 후보 키는 **소문자로 통일**한다 — existing 매칭이 lowercase 이므로
+    # 집계 키도 같은 기준이어야 한다. 원본 케이스로 키잉하면 `CaseVar`/`casevar`
+    # 가 각각 count 1 이 되어 min_count 에 미달, 후보가 통째로 사라진다
+    # (PR #217 리뷰 [mid]).
     candidates: dict[str, dict] = {}
+    display: dict[str, str] = {}  # lowercase → 최초 관측 원본 표기
 
     for f in source_files:
         try:
@@ -240,16 +287,24 @@ def find_candidates(wiki_home: Path, min_count: int = 2) -> tuple[dict, int]:
         for name in iter_body_headings(text):
             if _is_excluded_heading(name):
                 continue
-            if name.lower() in existing:
+            key = name.lower()
+            if key in existing:
                 continue
-            if name not in candidates:
-                candidates[name] = {"count": 0, "refs": []}
-            candidates[name]["count"] += 1
-            if len(candidates[name]["refs"]) < 3 and rel not in candidates[name]["refs"]:
-                candidates[name]["refs"].append(rel)
+            if key not in candidates:
+                candidates[key] = {"count": 0, "sources": 0, "refs": [], "variants": []}
+                display[key] = name
+            entry = candidates[key]
+            entry["count"] += 1
+            if rel not in entry["refs"]:
+                entry["sources"] += 1  # 출현 파일 수 — count(출현 횟수)와 구분한다
+            if len(entry["refs"]) < 3 and rel not in entry["refs"]:
+                entry["refs"].append(rel)
+            # 표기 변형을 기록한다 — 같은 후보로 합산됐음을 보고서에서 확인 가능.
+            if name not in entry["variants"]:
+                entry["variants"].append(name)
 
     strong = {
-        k: v
+        display[k]: v
         for k, v in sorted(candidates.items(), key=lambda x: -x[1]["count"])
         if v["count"] >= min_count
     }
@@ -290,7 +345,15 @@ def main() -> int:
     print(f"Scanned {scanned} source files")
     print("Missing entity/concept candidates (body headings outside code fences):")
     for name, info in list(strong.items())[:30]:
-        print(f"  [[{name}]] — {info['count']} sources (e.g. {info['refs'][0]})")
+        # count = 출현 횟수, sources = 출현 파일 수. 같지 않을 수 있다 —
+        # 한 파일 안에서 여러 번 나온 헤딩이 그 예 (PR #217 리뷰 [low]).
+        detail = f"{info['count']} occ"
+        if info.get("sources") and info["sources"] != info["count"]:
+            detail += f" / {info['sources']} sources"
+        var = info.get("variants") or []
+        if len(var) > 1:
+            detail += f" / variants: {', '.join(var[:3])}"
+        print(f"  [[{name}]] — {detail} (e.g. {info['refs'][0]})")
     print(f"\nTotal candidates: {len(strong)}")
 
     out = Path(args.json) if args.json else (wiki_home / "wiki" / "_lint" / "_step6_candidates.json")

@@ -201,3 +201,54 @@ def test_archived_sources_skipped(tmp_path):
     _mk(tmp_path, "sources/.archived/a.md", "# 없는페이지\n# 없는페이지\n")
     strong, _ = S.find_candidates(tmp_path)
     assert "없는페이지" not in strong
+
+
+# ══ PR #217 리뷰 [mid] 회귀 — 실측 재현된 결함 2건 ═══════════════════════════
+def test_closing_fence_with_info_string_does_not_close():
+    """[mid 1] ```` ```bash ```` 는 여는 펜스다 — 닫는 펜스가 아니다 (CommonMark).
+
+    뒤에 공백/탭 외 문자가 오면 닫는 펜스가 아니다. 이 규칙이 없으면 info string
+    줄이 펜스를 닫아 안쪽 헤딩이 누출한다.
+    """
+    doc = "```\n```bash\n# leak\n```\n# real\n"
+    assert list(S.iter_body_headings(doc)) == ["real"]
+
+
+def test_closing_fence_with_trailing_spaces_closes():
+    """닫는 펜스 뒤 공백/탭은 허용된다 (위 규칙의 반대편 — 누락 방지)."""
+    doc = "```\n# in\n```   \n# out\n"
+    assert list(S.iter_body_headings(doc)) == ["out"]
+
+
+def test_roundtrip_case_variants_are_merged(tmp_path):
+    """[mid 2] 표기 변형은 같은 후보로 합산된다 — 분리 집계 시 후보가 사라진다."""
+    _mk(tmp_path, "sources/A/f.md", "# CaseVar\n")
+    _mk(tmp_path, "sources/B/f.md", "# casevar\n")
+    strong, _ = S.find_candidates(tmp_path)
+    assert list(strong) == ["CaseVar"], f"분리 집계됨: {strong}"
+    assert strong["CaseVar"]["count"] == 2
+    assert sorted(strong["CaseVar"]["variants"]) == ["CaseVar", "casevar"]
+
+
+def test_case_variant_meets_min_count(tmp_path):
+    """분리 집계 시 각 count=1 이 되어 min_count 미달로 전량 소실된다."""
+    _mk(tmp_path, "sources/A/f.md", "# GoLang\n")
+    _mk(tmp_path, "sources/B/f.md", "# golang\n")
+    strong, _ = S.find_candidates(tmp_path, min_count=2)
+    assert len(strong) == 1, f"후보 소실: {strong}"
+
+
+def test_occurrence_count_vs_source_count(tmp_path):
+    """[low] 출현 횟수와 출현 파일 수는 다를 수 있다 — 라벨 오표기 방지."""
+    _mk(tmp_path, "sources/A/f.md", "# Twice\n# Twice\n")
+    strong, _ = S.find_candidates(tmp_path)
+    assert strong["Twice"]["count"] == 2      # 출현 횟수
+    assert strong["Twice"]["sources"] == 1    # 출현 파일 수
+
+
+def test_frontmatterless_horizontal_rule_keeps_body():
+    """수평선 `---` 로 시작하는 문서에서 본문이 잘리지 않는다."""
+    doc = "---\n# 첫 헤딩\n---\n# 둘째 헤딩\n"
+    got = list(S.iter_body_headings(doc))
+    assert "둘째 헤딩" in got, f"본문 소실: {got}"
+
