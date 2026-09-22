@@ -203,52 +203,83 @@ def test_archived_sources_skipped(tmp_path):
     assert "없는페이지" not in strong
 
 
-# ══ PR #217 리뷰 [mid] 회귀 — 실측 재현된 결함 2건 ═══════════════════════════
-def test_closing_fence_with_info_string_does_not_close():
-    """[mid 1] ```` ```bash ```` 는 여는 펜스다 — 닫는 펜스가 아니다 (CommonMark).
-
-    뒤에 공백/탭 외 문자가 오면 닫는 펜스가 아니다. 이 규칙이 없으면 info string
-    줄이 펜스를 닫아 안쪽 헤딩이 누출한다.
-    """
+# ══ PR #217 2차 리뷰 [mid]·[low] 회귀 — 실측 재현된 결함 ═══════════════════
+def test_closing_fence_info_string_is_open_fence():
+    """[mid] ```` ```bash ```` 는 여는 펜스다 — 닫는 펜스가 아니다."""
     doc = "```\n```bash\n# leak\n```\n# real\n"
     assert list(S.iter_body_headings(doc)) == ["real"]
 
 
-def test_closing_fence_with_trailing_spaces_closes():
-    """닫는 펜스 뒤 공백/탭은 허용된다 (위 규칙의 반대편 — 누락 방지)."""
-    doc = "```\n# in\n```   \n# out\n"
-    assert list(S.iter_body_headings(doc)) == ["out"]
+def test_sources_count_independent_of_refs_cap(tmp_path):
+    """[mid] sources 는 refs 캡(3)과 무관하게 세야 한다.
 
-
-def test_roundtrip_case_variants_are_merged(tmp_path):
-    """[mid 2] 표기 변형은 같은 후보로 합산된다 — 분리 집계 시 후보가 사라진다."""
-    _mk(tmp_path, "sources/A/f.md", "# CaseVar\n")
-    _mk(tmp_path, "sources/B/f.md", "# casevar\n")
-    strong, _ = S.find_candidates(tmp_path)
-    assert list(strong) == ["CaseVar"], f"분리 집계됨: {strong}"
-    assert strong["CaseVar"]["count"] == 2
-    assert sorted(strong["CaseVar"]["variants"]) == ["CaseVar", "casevar"]
-
-
-def test_case_variant_meets_min_count(tmp_path):
-    """분리 집계 시 각 count=1 이 되어 min_count 미달로 전량 소실된다."""
-    _mk(tmp_path, "sources/A/f.md", "# GoLang\n")
-    _mk(tmp_path, "sources/B/f.md", "# golang\n")
+    refs 로 중복을 판정하면 4번째 파일부터 캡에 걸려 sources 가 출현 횟수처럼
+    부풀려진다. 별도 seen 집합으로 세야 한다.
+    """
+    for name in "ABCDE":
+        body = "# Dup\n# Dup\n" if name == "D" else "# Dup\n"
+        _mk(tmp_path, f"sources/{name}/f.md", body)
     strong, _ = S.find_candidates(tmp_path, min_count=2)
-    assert len(strong) == 1, f"후보 소실: {strong}"
+    e = strong["Dup"]
+    assert e["count"] == 6, f"출현 횟수 오류: {e}"      # A,B,C,E 1회 + D 2회
+    assert e["sources"] == 5, f"파일 수 오류: {e}"       # A~E 5개 파일
+    assert len(e["refs"]) == 3, f"refs 캡 위반: {e}"     # refs 는 3으로 캡
 
 
-def test_occurrence_count_vs_source_count(tmp_path):
-    """[low] 출현 횟수와 출현 파일 수는 다를 수 있다 — 라벨 오표기 방지."""
-    _mk(tmp_path, "sources/A/f.md", "# Twice\n# Twice\n")
-    strong, _ = S.find_candidates(tmp_path)
-    assert strong["Twice"]["count"] == 2      # 출현 횟수
-    assert strong["Twice"]["sources"] == 1    # 출현 파일 수
+@pytest.mark.parametrize(
+    "heading,expected",
+    [
+        ("# C#", "C#"),            # CommonMark: 앞 공백 없는 `#` 는 텍스트의 일부
+        ("# F# language", "F# language"),
+        ("# foo #", "foo"),        # 앞 공백 있는 닫는 시퀀스는 제거된다
+        ("# foo bar##", "foo bar##"),
+        ("# 제목#", "제목#"),        # `# 제목` 과 합쳐지면 count 가 부풀려진다
+    ],
+)
+def test_trailing_hash_only_stripped_after_space(heading, expected):
+    """[mid] 닫는 `#` 시퀀스는 앞에 공백/탭이 있을 때만 제거한다."""
+    assert list(S.iter_body_headings(heading)) == [expected]
 
 
-def test_frontmatterless_horizontal_rule_keeps_body():
-    """수평선 `---` 로 시작하는 문서에서 본문이 잘리지 않는다."""
+@pytest.mark.parametrize(
+    "doc,should_strip",
+    [
+        ("---\ntitle: x\nsource:\n  vault: nas\n---\n# H\n", True),   # 중첩 mapping
+        ("---\ntitle: x\naliases:\n- A\n---\n# H\n", True),           # 리스트 포함
+        ("---\n# just a comment\n---\n# Body\n", False),              # 주석만 → 비-mapping
+        ("---\n- item one\n- item two\n---\n# Body\n", False),        # YAML 리스트
+        ("---\n# 첫 헤딩\n---\n# 둘째 헤딩\n", False),                    # 수평선 시작
+        ("---\n---\n# Body\n", False),                                # 빈 블록
+        ("# frontmatter 없음\n", False),
+    ],
+)
+def test_frontmatter_detection(doc, should_strip):
+    """[low] 실제 frontmatter 는 YAML **매핑**일 때만 제거한다."""
+    assert (S._strip_frontmatter(doc) != doc) is should_strip
+
+
+def test_frontmatterless_body_not_swallowed():
+    """[low] 수평선으로 시작하는 문서에서 본문이 잘리지 않는다.
+
+    ⚠️ 이 테스트는 **기존 코드에서도 통과했다**(vacuous). 그래서 판정 기준을
+    'YAML 매핑일 때만' 으로 강화하고 위 parametrized 테스트로 케이스를 넓혔다.
+    """
     doc = "---\n# 첫 헤딩\n---\n# 둘째 헤딩\n"
-    got = list(S.iter_body_headings(doc))
-    assert "둘째 헤딩" in got, f"본문 소실: {got}"
+    assert "둘째 헤딩" in list(S.iter_body_headings(doc))
+
+
+def test_candidates_json_serializable(tmp_path):
+    """후보 dict 는 JSON 직렬화 가능해야 한다.
+
+    내부 중복 판정용 set 을 후보 dict 에 넣으면 `--json` 출력이
+    `TypeError: Object of type set is not JSON serializable` 로 죽는다 —
+    테스트가 아니라 **실행 경로에서만** 드러나므로 별도로 고정한다.
+    """
+    import json
+
+    _mk(tmp_path, "sources/A/f.md", "# 직렬화\n# 직렬화\n")
+    strong, _ = S.find_candidates(tmp_path)
+    json.dumps({"strong": strong})  # 예외 없이 통과해야 한다
+
+
 

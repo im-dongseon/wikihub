@@ -119,18 +119,28 @@ def _strip_frontmatter(text: str) -> str:
     """선두 YAML frontmatter(`---` 블록) 제거 — 본문만 남긴다.
 
     frontmatter 안의 YAML 주석(`# ...`)이 헤딩으로 오인되는 것을 막는다.
-    `---` 로 시작하지 않으면 **원문을 그대로** 둔다 (수평선 `---` 로 시작하는
-    frontmatter 없는 문서에서 본문이 통째로 잘리는 것을 막는다).
+
+    판정 기준 (PR #217 리뷰 [low] 반영):
+    - `---` 로 시작하지 않으면 **원문 유지** (수평선으로 시작하는 문서 보호)
+    - 첫 `---` 쌍 사이가 **YAML 매핑(`key: value`)** 일 때만 frontmatter 로 인정한다.
+      `safe_load` 결과만 보면 주석만 있는 frontmatter(`None`)나 YAML 리스트로
+      파싱되는 마크다운 목록을 오인한다 — 실제 YAML frontmatter 는 매핑이다.
     """
-    m = re.match(r"^---[ \t]*\n(.*?\n)?---[ \t]*(\n|$)", text, re.S)
+    m = re.match(r"^---[ \t]*\n(.*?\n)?---[ \t]*(?:\n|$)", text, re.S)
     if not m:
         return text
-    # 첫 `---` 쌍 사이가 YAML 매핑/시퀀스로 파싱될 때만 frontmatter 로 인정한다.
+    raw = m.group(1) or ""
+    stripped = raw.strip()
+    if not stripped:
+        # 빈 `---\n---` — frontmatter 로 볼 근거가 없다.
+        return text
     try:
-        fm = yaml.safe_load(m.group(1) or "")
+        fm = yaml.safe_load(raw)
     except Exception:
         return text
-    if not isinstance(fm, (dict, list)):
+    # 실제 frontmatter 는 YAML **매핑**이다. 리스트(마크다운 목록이 YAML 로 파싱된
+    # 경우)나 스칼라(수평선 사이 한 줄)는 frontmatter 가 아니므로 원문을 유지한다.
+    if not isinstance(fm, dict):
         return text
     return text[m.end():]
 
@@ -196,9 +206,14 @@ def iter_body_headings(text: str):
             continue
         if in_fence:
             continue
-        h = re.match(r"^ {0,3}#[ \t]+(.+?)[ \t]*#*[ \t]*$", line)
+        h = re.match(r"^ {0,3}#[ \t]+(.+?)[ \t]*$", line)
         if h:
-            yield h.group(1).strip()
+            # CommonMark: 닫는 `#` 시퀀스는 **앞에 공백/탭이 있을 때만** 제거한다.
+            # 무조건 `#*` 를 벗기면 `# C#` → `C` 가 되어 언어명이 훼손되고,
+            # `# 제목#` 이 `# 제목` 과 합쳐져 count 가 부풀려진다 (PR #217 리뷰 [mid]).
+            text_out = re.sub(r"[ \t]+#+$", "", h.group(1)).strip()
+            if text_out:
+                yield text_out
 
 
 # ── 경로 복원 (ADR-0034 data-first layout 정합 — 타 helper 와 동일 순서) ──────
@@ -274,6 +289,7 @@ def find_candidates(wiki_home: Path, min_count: int = 2) -> tuple[dict, int]:
     # (PR #217 리뷰 [mid]).
     candidates: dict[str, dict] = {}
     display: dict[str, str] = {}  # lowercase → 최초 관측 원본 표기
+    seen_sources: dict[str, set[str]] = {}  # lowercase → 출현 파일 집합 (JSON 미포함)
 
     for f in source_files:
         try:
@@ -291,12 +307,19 @@ def find_candidates(wiki_home: Path, min_count: int = 2) -> tuple[dict, int]:
             if key in existing:
                 continue
             if key not in candidates:
+                # `seen` 은 내부 중복 판정용 — JSON 출력에서 제외해야 하므로
+                # 직렬화 가능한 형태로 두지 않고 별도 dict 로 관리한다.
                 candidates[key] = {"count": 0, "sources": 0, "refs": [], "variants": []}
+                seen_sources[key] = set()
                 display[key] = name
             entry = candidates[key]
             entry["count"] += 1
-            if rel not in entry["refs"]:
-                entry["sources"] += 1  # 출현 파일 수 — count(출현 횟수)와 구분한다
+            # 출현 파일 수는 refs 캡(3)과 **무관하게** 세야 한다 — refs 로 중복을
+            # 판정하면 4번째 파일부터 캡에 걸려 sources 가 출현 횟수처럼 부풀려진다
+            # (PR #217 리뷰 [mid]). 별도 seen 집합으로 센다.
+            if rel not in seen_sources[key]:
+                seen_sources[key].add(rel)
+                entry["sources"] += 1
             if len(entry["refs"]) < 3 and rel not in entry["refs"]:
                 entry["refs"].append(rel)
             # 표기 변형을 기록한다 — 같은 후보로 합산됐음을 보고서에서 확인 가능.
