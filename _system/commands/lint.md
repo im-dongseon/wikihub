@@ -233,6 +233,19 @@ def resolve_link(name, category):
 - 해당 entity·concept 페이지의 `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
   - **`referenced_by:` 가 빈 값(`''`/`null`)인 페이지는 제외**한다 — 빈 값에 항목을 넣는 것은 "등록"이며 자동 등록 금지 대상이다 (issue #167, `## 실패 처리` 표). 리스트 0건(`[]`)은 추가 대상이다
 - 추가 외에 본문·다른 frontmatter 필드는 수정 안 함
+- **`referenced_by` 실재성 전수 감사 (issue #215)**: `ref_audit.py` 로 **전수 스캔**한다 (현행은 단일 페이지만 보고 — `entities/AGENTS.md` 중복 2건 수준). 결과를 4계층으로 분류해 보고한다.
+
+  | 분류 | 정의 | 조치 |
+  |---|---|---|
+  | **P1** | 이름·alias 가 source 어디에도 없음 (완전부재) | 제거 대상 — **보고만** |
+  | **P2** | source frontmatter 에만 있고 본문엔 없음 | 제거 대상 — **보고만** |
+  | **P3** | 동형명사 페이지 (`Go`·`OS`·`PR`) — **판정 불가** | **자동 제거 금지**, 목록만 |
+  | `missing_file` | `referenced_by` 가 가리키는 source 파일 부재 | 별도 보고 |
+
+  - **자동 제거하지 않는다** — 데이터 변경은 운영 소관이고, P3 는 문자열 매칭으로 진성/오염을 구분할 수 없어 제거하면 진성분을 잃는다 (`Go` 실측: 언어 14 / 동사 54).
+  - **`referenced_by` 중복 전수 검사 (issue #210)**: 같은 source 가 한 페이지에 2회 이상 들어간 경우를 **전수 스캔**한다 — 현행 Step 4.5 는 **alias 중복**만 보고 `referenced_by` 는 검사하지 않아, 편입 등록 페이지 1건만 보고했다 (실측: lint 2건 vs 실제 362페이지 823건). 출력은 `duplicate_refs`(초과분 합) · `duplicate_pages` 로 보고한다. 삽입기 set semantics(`ingest.md` L175·L188·L254) 위반의 재발 감시용이다.
+  - 실행: `"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/ref_audit.py" --wiki-home "$WIKIHUB_HOME"`
+  - 등록 근거는 `ref_ledger.py` 로 기록한다 (매칭된 이름·분기·줄). 판정 정본은 `scripts/_helpers/ref_match.py`.
 
 ### Step 4.5. Duplicate detection (자동, 보고만 — v0.1.8 ADR-0039)
 

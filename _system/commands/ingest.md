@@ -172,6 +172,19 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
    - 동의어 처리는 frontmatter `aliases` 필드 — ADR-0039 (v0.1.8 신설)
 3. 각 entity·concept에 대해:
    - **alias 인식 (ADR-0039)**: 본문 form 의 lowercase 가 기존 page 의 frontmatter `aliases` 셋 (lowercase normalize) 1+ 공통 → 기존 page 로 간주. `referenced_by` 만 추가 (alias 셋 미변경, stub 생성 skip — LLM 재생성 무한 loop 차단)
+   - **referenced_by 등록 매칭 규정 (3중 분기 — issue #215)**: 등록 판정은 **이름 유형**에 따라 아래 3분기로 나눈다. 단순 부분문자열 매칭은 금지한다 (`os` ⊂ `most`·`cost`·`host`, `agents` ⊂ `agents.md` 로 오등록 — 실측 3,928건/315페이지).
+
+     | 분기 | 대상 | 매칭 규칙 |
+     |---|---|---|
+     | ① 확장자 포함 | `AGENTS.md` · `wikihub.yaml` | **완전 일치** (대소문자 무시). `agents` ≠ `agents.md` |
+     | ② ASCII | `AST` · `OS` · `PR` · `Go` | **토큰 경계** — 구분자(`-`/`_`/공백/괄호/슬래시) 허용, 양쪽 비영숫자 경계 필수 |
+     | ③ 한글·CJK | `에이닷` · `마이크론` | **표기변형 정규화 후 같은 줄 substring** (`구글_지식_그래프` = `구글 지식 그래프`) |
+
+     - ⚠️ **②는 `re.IGNORECASE` 필수** — 이름과 본문 표기가 대소문자로 다르다(`Go` vs `go`). 플래그를 빠뜨리면 대문자 이름이 전부 미매칭이 되어 오등록이 **3,928 → 7,383** 으로 과대계상된다 (실측).
+     - ⚠️ **표기 정규화를 ②(ASCII)에 적용하지 않는다** — `AST` → `ast` 로 낮추면 `Fast`·`last`·`taste` 에 걸린다 (실측: `| Fast mode |` 오탐). ③에만 적용한다.
+     - ⚠️ **전역 정규화 금지** — `re.sub(r'[-_\s]+','',whole_body)` 는 개행까지 지워 인접 단어를 이어붙여 오탐을 위조한다. ③은 **반드시 줄 단위**로만 적용한다.
+     - **판정 불가 영역**: `Go`·`OS`·`PR` 처럼 일반명사와 동형인 이름은 문자열 매칭으로 진성/오염을 구분할 수 없다 (`Go` 실측: 언어 문맥 14 / 동사 문맥 54 — "have a go at" vs "Go language"). 이들은 **자동 제거 대상이 아니며 목록 보고만** 한다.
+     - **등록 근거 ledger**: `referenced_by` 추가 시 매칭 근거(페이지·source·매칭된 이름·분기·줄)를 `ref_ledger.py` 로 기록한다 — 사후 감사 가능. 정본 로직은 `scripts/_helpers/ref_match.py`.
    - `wiki/entities/<name>.md` 또는 `wiki/concepts/<name>.md` 존재 (위 alias 인식 포함) → frontmatter `referenced_by`에 source 경로 추가 (set semantics — 중복 X)
    - 없음 → 새 stub 페이지 생성 (frontmatter `type: entity|concept` + `aliases: [<본문 form>]` + 본문은 1줄 요약, `referenced_by: [<source>]`)
      - **referenced_by 들여쓰기**: **run 의 실제 들여쓰기를 재사용**한다 — 0칸 run 은 0칸으로, 2칸 run 은 2칸으로. 2칸 고정 삽입은 0칸 run 에서 YAML 을 파손한다(`expected <block end>, but found '-'`). `indent or '  '` 같은 폴백은 `''` 이 falsy 라 0칸을 2칸으로 승격시키므로 금지. 새 run 을 시작할 때만 0칸을 쓴다.
