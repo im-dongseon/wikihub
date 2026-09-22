@@ -212,7 +212,10 @@ def iter_body_headings(text: str):
             # 무조건 `#*` 를 벗기면 `# C#` → `C` 가 되어 언어명이 훼손되고,
             # `# 제목#` 이 `# 제목` 과 합쳐져 count 가 부풀려진다 (PR #217 리뷰 [mid]).
             text_out = re.sub(r"[ \t]+#+$", "", h.group(1)).strip()
-            if text_out:
+            # 닫는 시퀀스만 남은 헤딩(`# ##` → `##` → 제거 후 빈 문자열)은
+            # CommonMark 에서 제목이 비므로 **yield 하지 않는다** (3차 리뷰 [low]).
+            # 남은 문자열이 `#` 뿐인 경우도 텍스트가 없다.
+            if text_out and text_out.strip("#").strip():
                 yield text_out
 
 
@@ -233,7 +236,7 @@ def _load_existing_names(wiki: Path) -> set[str]:
     """entities/concepts 페이지 stem + aliases (lowercase)."""
     names: set[str] = set()
     for cat in ("entities", "concepts"):
-        for f in (wiki / cat).glob("*.md"):
+        for f in sorted((wiki / cat).glob("*.md"), key=lambda p: str(p)):
             names.add(f.stem.lower())
             try:
                 content = f.read_text(encoding="utf-8", errors="replace")
@@ -278,9 +281,10 @@ def find_candidates(wiki_home: Path, min_count: int = 2) -> tuple[dict, int]:
     """
     wiki = wiki_home / "wiki"
     sources_root = wiki / "sources"
-    source_files = [
-        f for f in sources_root.rglob("*.md") if ".archived" not in str(f)
-    ]
+    source_files = sorted(
+        (f for f in sources_root.rglob("*.md") if ".archived" not in str(f)),
+        key=lambda p: str(p),
+    )
     existing = _load_existing_names(wiki)
 
     # 후보 키는 **소문자로 통일**한다 — existing 매칭이 lowercase 이므로

@@ -271,15 +271,35 @@ def test_frontmatterless_body_not_swallowed():
 def test_candidates_json_serializable(tmp_path):
     """후보 dict 는 JSON 직렬화 가능해야 한다.
 
-    내부 중복 판정용 set 을 후보 dict 에 넣으면 `--json` 출력이
-    `TypeError: Object of type set is not JSON serializable` 로 죽는다 —
-    테스트가 아니라 **실행 경로에서만** 드러나므로 별도로 고정한다.
+    ⚠️ 이 테스트만으로는 부족하다 — set 을 도입하기 **전** 코드에서도 통과했다
+    (3차 리뷰 [low]). 그래서 후보 dict 의 값 타입을 직접 고정한다:
+    직렬화 가능 타입만 들어 있어야 한다.
     """
     import json
 
     _mk(tmp_path, "sources/A/f.md", "# 직렬화\n# 직렬화\n")
     strong, _ = S.find_candidates(tmp_path)
     json.dumps({"strong": strong})  # 예외 없이 통과해야 한다
+    for info in strong.values():
+        for k, v in info.items():
+            assert isinstance(v, (int, str, list)), f"{k} 가 직렬화 불가 타입: {type(v)}"
+
+
+def test_empty_heading_after_closing_sequence_not_yielded():
+    """[low] 닫는 시퀀스만 남는 헤딩은 제목이 비므로 yield 하지 않는다."""
+    for line in ("# ##", "# #", "# ###"):
+        assert list(S.iter_body_headings(line)) == [], f"{line!r} 오yield"
+
+
+def test_output_is_deterministic(tmp_path):
+    """[low] 파일 순서에 의존하지 않는다 — display/variants 순서가 고정된다."""
+    _mk(tmp_path, "sources/B/f.md", "# casevar\n")
+    _mk(tmp_path, "sources/A/f.md", "# CaseVar\n")
+    first = S.find_candidates(tmp_path)[0]
+    second = S.find_candidates(tmp_path)[0]
+    assert list(first) == list(second)
+    assert first[list(first)[0]]["variants"] == second[list(second)[0]]["variants"]
+
 
 
 
