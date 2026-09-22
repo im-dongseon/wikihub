@@ -497,10 +497,12 @@ ls -t "$WIKIHUB_HOME/vault/<vault>/project/wikihub/report/"*lint.md 2>/dev/null 
 ```
 
 - 정본 경로 복원: `--wiki-home` arg > `$WIKIHUB_HOME` > `$WIKIHUB_YAML` 부모 > `~/wikihub`
-- 대상: Step 1·1.5·2·4.5 (`lint_mechanical.py`), Step 2.5 (`link_audit_v2.py`),
-  Step 3 (`analyze_graph_v3.py`), Step 5 (`rebuild_index.py`),
-  Step 7 (`step7_apply.py`·`apply_fixes.py`), 계상 보조 (`_wl_step2_spec.py`·
-  `_wl_check_missing_cycle.py`)
+- 대상: Step 1·1.5·2·4.5 (`lint_mechanical.py`), Step 3 (`analyze_graph_v3.py`),
+  Step 5 (`rebuild_index.py`), Step 7 (`step7_apply.py`·`apply_fixes.py`),
+  계상 보조 (`_wl_step2_spec.py`·`_wl_check_missing_cycle.py`)
+- **Step 2 link 규약 검증은 `_wl_step2_spec.py` 단독** — 동일 검사를 두 helper 로
+  나누면 정본이 이원화된다. 구 `link_audit_v2.py` 는 호출자·소비처 0건이었고
+  fence 미스트립·카테고리 오판으로 정본과 두 자릿수 차이를 냈다 (#206).
 - **하드코딩 경로 금지** — `/home/ubuntu/wikihub` 리터럴은 이식성을 깨뜨린다.
   회귀 테스트 `tests/test_ops_helpers.py` 가 이를 강제한다.
 

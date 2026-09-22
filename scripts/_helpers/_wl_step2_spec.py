@@ -69,7 +69,7 @@ LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 FENCE_RE = re.compile(r"```.*?```", re.S)
 INLINE_RE = re.compile(r"`[^`\n]*`")
 FM_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
-# 셸 파편·placeholder 필터 — link_audit_v2.py 와 동일 기준 (#201 ⑧).
+# 셸 파편·placeholder 필터 — fence·inline code 스트립 후 적용 (#201 ⑧, #206).
 # `-` · `$var` · `[[경로]]` 같은 비링크를 위반 1 로 계상하지 않는다.
 NON_LINK_RE = re.compile(
     r"^[\s\-–—$@#%^&*+=<>\[\]{}|\\/;:~`!]+$|^\d+$|^[\._\-]+$|^[-\d\s]+$"
