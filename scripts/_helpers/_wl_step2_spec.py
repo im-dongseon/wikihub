@@ -98,15 +98,23 @@ def aliases_of(path: Path):
     # inline: aliases: [a, b]
     for k in re.findall(r"^aliases:\s*\[(.*?)\]\s*$", fm, re.M):
         out |= {a.strip().strip("'\"") for a in k.split(",") if a.strip()}
-    # block: aliases: (빈 값) 다음 줄부터 "  - a"
+    # block: aliases: (빈 값) 다음 줄부터 항목. **들여쓰기는 선택적** —
+    # 실측 분포는 column 0 2,020 / 들여쓰기 272 이므로 `^\s*-\s+` (필수 아님).
+    # 구 정규식 `^\s+-\s+` 는 column-0 block 을 전량 놓쳐 alias 558건이 누락됐다 (#208).
+    # 키 범위를 한정한다 — 다음 top-level 키를 만나면 중단(타 키 block 삼킴 방지).
     lines = fm.split("\n")
     for i, ln in enumerate(lines):
         if re.match(r"^aliases:\s*$", ln):
             for nxt in lines[i + 1:]:
-                bm = re.match(r"^\s+-\s+(.*)$", nxt)
-                if not bm:
-                    break
-                out.add(bm.group(1).strip().strip("'\""))
+                bm = re.match(r"^\s*-\s+(.*)$", nxt)
+                if bm:
+                    out.add(bm.group(1).strip().strip("'\""))
+                    continue
+                if not nxt.strip():
+                    continue          # 빈 줄은 건너뜀
+                if re.match(r"^\S", nxt):
+                    break             # 다음 top-level 키 — 중단
+                # 그 외(들여쓰기된 비-항목)는 무시하고 계속
     return {a.lower() for a in out} or {stem.lower()}
 
 
