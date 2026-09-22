@@ -488,6 +488,22 @@ ls -t "$WIKIHUB_HOME/vault/<vault>/project/wikihub/report/"*lint.md 2>/dev/null 
 **정본 우선 원칙** — 운영 로컬 헬퍼와 정본 계상이 다르면 **정본을 인용**하고 불일치
 사실만 1줄 기록한다. 헬퍼 수치를 report 본문에 그대로 싣지 않는다.
 
+**정본 helper 실행 (issue #201 ⑥, 2026-09-22)** — lint 실행 계층은
+`scripts/_helpers/` 정본을 쓴다. 운영 로컬 `_scripts/` 사본에 의존하지 않는다.
+
+```bash
+"$WIKIHUB_VENV/bin/python3" "$WIKIHUB_SRC/scripts/_helpers/<name>.py" \
+    --wiki-home "$WIKIHUB_HOME"
+```
+
+- 정본 경로 복원: `--wiki-home` arg > `$WIKIHUB_HOME` > `$WIKIHUB_YAML` 부모 > `~/wikihub`
+- 대상: Step 1·1.5·2·4.5 (`lint_mechanical.py`), Step 2.5 (`link_audit_v2.py`),
+  Step 3 (`analyze_graph_v3.py`), Step 5 (`rebuild_index.py`),
+  Step 7 (`step7_apply.py`·`apply_fixes.py`), 계상 보조 (`_wl_step2_spec.py`·
+  `_wl_check_missing_cycle.py`)
+- **하드코딩 경로 금지** — `/home/ubuntu/wikihub` 리터럴은 이식성을 깨뜨린다.
+  회귀 테스트 `tests/test_ops_helpers.py` 가 이를 강제한다.
+
 ### Step 9. graphify chain trigger (v0.1.8 update_path_fixes — D3 (B) 채택)
 
 **책임 분리** (ADR-0036 §D6 single-source 정합):
