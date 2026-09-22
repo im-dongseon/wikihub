@@ -608,7 +608,10 @@ _install_graphify() {
     # ADR-0036 — graphify CLI (PyPI graphifyy) PyPI 설치 + version 검증.
     # rclone 의 binary 설치 (_install_rclone) 와 달리 PyPI 패키지 — pip 의 hash-based install 의존.
     # supply chain hash pin enforce 는 v0.2.x 검토 트리거.
-    local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.8.0,<1.0.0}"
+    # min 0.9.20 (option C, issue #170): 0.9.21 이 OLLAMA_HOST auto-detection 을 추가했으나
+    # 하한은 0.9.20 으로 둔다 — 0.9.x 계열 진입 자체가 목적이고, 실설치(0.9.32)와 정합한다.
+    # max <1.0.0 은 breaking-change 방어선 유지 (메이저 bump 시 재검토).
+    local pin_spec="${GRAPHIFY_PIN_SPEC:-graphifyy>=0.9.20,<1.0.0}"
 
     # install_update_hardening (v0.1.8): venv 의 bin/ 이 install-time PATH 에 우선해야
     # `command -v graphify` check 가 정합 동작. 운영자 shell PATH 에 venv/bin 자연 없음 (OCI default)

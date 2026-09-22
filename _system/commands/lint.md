@@ -147,6 +147,35 @@ def resolve_link(name, category):
 
 **graphify schema 호환 (v0.7 → v0.8+ migration)**: graph.json 의 edge 키가 v0.7 = `edges`, v0.8+ = `links` 로 변경됨. parsing 시 `d.get('links', d.get('edges', []))` 패턴으로 양쪽 호환 (graphify CLI 버전 transition 중 silent break 회피).
 
+**graphify 질의 우선 (3계층 — issue #173)**
+
+전체 `graph.json`(수 MB)을 컨텍스트에 올리는 대신 아래 순서로 질의한다.
+
+| 계층 | 도구 | 용도 | 비용 |
+|---|---|---|---|
+| **1차** | `graphify query` / `graphify explain` | 특정 노드·source 의 연결/이웃 확인 | ~1-2k tokens |
+| **2차** | `graph.json` 직접 읽기 | 1차로 전체 구조가 필요하다고 판명된 경우 (폴백) | 기존과 동일 |
+| **3차** | deterministic helper | 고아 페이지 등 **전체 노드 순회** 필요 항목 | 0 (LLM 호출 없음) |
+
+호출 형식:
+
+```bash
+"$WIKIHUB_VENV/bin/graphify" query "<질의>" --graph "$WIKIHUB_HOME/graphify-out/graph.json"
+"$WIKIHUB_VENV/bin/graphify" explain "<노드명>" --graph "$WIKIHUB_HOME/graphify-out/graph.json"
+```
+
+- `$WIKIHUB_VENV` 는 `~/.config/wikihub/session-env.sh`(#186)가 export 하고,
+  Hermes `terminal.shell_init_files` 등록으로 세션에 주입된다 (Step 5 의 다른 helper 호출과 동일 패턴).
+- PATH 에도 venv `bin` 이 있으므로(unit) `graphify` 단독 호출도 동작한다 — 경로가 확실한 쪽을 쓴다.
+- `--graph` 는 **절대 경로**로 넘긴다 (CWD-independent).
+- **고아 페이지(degree=0) 탐지는 query 로 불가**하다 — 전체 노드 순회가 필요하므로 3차 계층(helper)을 쓴다.
+  1차 계층으로 시도하지 않는다.
+- ⚠️ `graphify god-nodes` 는 **고아 탐지가 아니다** — "가장 연결이 많은 노드(architectural hubs)"를 나열한다
+  (실측 2026-09-22: `God nodes (most connected): ... - 67 edges`). degree=0 탐지에 쓰면 **정반대 결과**를 얻는다.
+  고아 탐지는 Python helper(전체 노드 순회)로만 가능하다.
+- 1차 질의가 빈 결과·오류를 내면 **2차로 폴백**하고 그 사실을 report 에 1줄 기록한다.
+- 질의 실패를 이유로 **중단하거나 clarify 를 호출하지 않는다** (headless 규칙).
+
 진단 항목:
 
 - **고아 페이지** (인바운드 엣지 0건):
