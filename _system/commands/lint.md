@@ -70,6 +70,19 @@ flock -n 200 || { echo "lint 이미 진행 중 — exit 0 (race 가드)"; exit 0
 > 운영 로그 실측: `/wl` 세션 3개 동시 실행, 셋 다 lock 미점유 (2026-09-14 02:43 KST).
 > **fd 상속 방식은 이 실행 모델에서 `race window 0%` 를 보장하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다.
 
+**결론 — 본 가드의 실효 범위**
+
+| 계층 | 실효성 | 근거 |
+|---|---|---|
+| systemd 유닛 (`Type=oneshot`) | **유효 — 1차 가드** | 동일 유닛 중복 발화를 systemd 가 드롭 (실측: 실행 중 유닛에 start 3회 → 실행 1회) |
+| flock 파일 (보조) | **무효 — Hermes 경유 시** | fd-scoped lock 이 subprocess 종료와 함께 해제됨 (위 실측) |
+
+따라서 **동시 실행 차단은 systemd 유닛에 의존한다.** flock 은 단일 bash 프로세스가 세션
+전체를 소유하는 경로(예: 실행 스크립트 내부)에서만 보조로 유효하다.
+
+flock 무효를 이유로 **세션을 중단하거나 clarify 를 호출하지 않는다** — 중복 위험은
+systemd 계층이 막고 있으므로 본 Step 은 그대로 진행한다.
+
 ### Step 0.5. Hermes 채팅 `/wl` 직접 호출 경로 (미해결 — 후속 결정)
 
 Hermes 채팅에서 `/wl` 을 직접 호출하면 systemd 유닛을 경유하지 않으므로 **1차 가드가 적용되지 않습니다.** 이 경로에서는 위 flock 2차 가드도 무력합니다 (fd 상속 불가).
@@ -142,7 +155,7 @@ def resolve_link(name, category):
 - **dangling 엣지** (존재하지 않는 노드 가리킴): Step 2와 중복 가능. 통합 보고
 - **언급된 개념의 페이지 부재**: source 본문에서 LLM이 식별한 entity·concept 중 `wiki/entities/`·`wiki/concepts/`에 페이지 없음 → **자동 stub 생성** (frontmatter + 1줄 LLM 요약 + `referenced_by`)
   - **alias 인식 (v0.1.8 — ADR-0039)**: stub 생성 전 wiki/entities/ + wiki/concepts/ 의 기존 page frontmatter `aliases` 셋을 lowercase 로 normalize 한 후, 본문 form 의 lowercase 가 그 셋에 포함되면 stub 생성 **skip** (LLM 재생성 무한 loop 차단). 기존 page 의 referenced_by 만 갱신.
-  - **권한 설정**: stub write 직후 `chmod 644 "<path>"` 실행 (Step 5·8과 동일 패턴). 신규 파일은 `_atomic_write`의 mktemp 기본값 600이므로 명시적 644 보정 필요.
+  - **권한 설정**: `_atomic_write_wiki_page` 가 write 시 `chmod 644` 를 코드로 보장한다 (issue #201 ①). 별도 `chmod` 는 불필요하다 — 과거 mktemp 기본값 600 보정용 지시였으나 코드가 흡수했다.
 
 ### Step 4. 자동 cross-ref 추가 (자동)
 

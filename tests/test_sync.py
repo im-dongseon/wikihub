@@ -817,3 +817,42 @@ def test_handle_create_or_modify_nas_multi_file_no_overwrite(tmp_path: Path, mon
     assert "b.txt" in file_map["files"]
     assert "c.txt" in file_map["files"]
 
+
+
+# ---------------------------------------------------------------------------
+# _atomic_write_wiki_page 권한 (issue #201 ①)
+# ---------------------------------------------------------------------------
+
+
+def test_atomic_write_wiki_page_mode_is_644(tmp_path) -> None:
+    """mkstemp 기본값 0600 이 최종 파일에 남지 않아야 한다.
+
+    playbook(`ingest.md`)이 `chmod 644` 를 지시해 현재 재발은 0건이나,
+    코드 차원의 보장이 없어 지시 누락 시 0600 으로 남는다.
+    """
+    import os
+    from lib.sync import _atomic_write_wiki_page
+
+    target = tmp_path / "page.md"
+    old = os.umask(0o077)  # 제한적 umask — mkstemp 는 0600 을 만든다
+    try:
+        _atomic_write_wiki_page(target, "body")
+    finally:
+        os.umask(old)
+
+    assert oct(target.stat().st_mode)[-3:] == "644"
+    assert target.read_text(encoding="utf-8") == "body"
+
+
+def test_atomic_write_wiki_page_replaces_existing(tmp_path) -> None:
+    """이미 존재하는 파일을 덮어쓸 때도 644 를 보장한다."""
+    import os
+    from lib.sync import _atomic_write_wiki_page
+
+    target = tmp_path / "page.md"
+    target.write_text("old", encoding="utf-8")
+    os.chmod(target, 0o600)
+
+    _atomic_write_wiki_page(target, "new")
+    assert target.read_text(encoding="utf-8") == "new"
+    assert oct(target.stat().st_mode)[-3:] == "644"

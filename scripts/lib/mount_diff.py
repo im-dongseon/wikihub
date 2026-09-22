@@ -18,9 +18,49 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 log = logging.getLogger("vault-fetch.mount_diff")
+
+
+def _normalize_mtime(value: object) -> str:
+    """mtime 문자열을 비교용 canonical UTC form 으로 정규화.
+
+    ``rclone lsjson`` 의 ``ModTime`` 과 file_map 의 ``source_mtime`` 은 보통
+    ``....Z`` (UTC) 지만 backend/version 에 따라 offset form (예:
+    ``2026-06-03T21:03:07+09:00``) 을 emit 할 수 있다. 이는 **동일 instant** 지만
+    문자열이 달라 plain ``!=`` 은 spurious ``modified`` 를 만들고 불필요한
+    re-extraction 을 유발한다. 따라서 양쪽을 파싱해 UTC 로 맞춘 뒤 비교한다.
+
+    - ``None``/누락 → ``""`` (str 변환 전에 처리)
+    - 빈 문자열 (strip 후) → ``""``
+    - 파싱 실패 (미인식 format) → 원본 stripped 문자열 반환 (절대 raise 안 함 —
+      parse 실패가 sync loop 를 깨면 안 됨)
+    - naive datetime → UTC 로 가정
+    - trailing ``Z``/``z`` 는 ``+00:00`` 으로 치환 후 파싱 (버전 무관 robustness)
+
+    ⚠️ 잔여 한계 — canonical form 이 초 단위이므로 **소수점 이하 초는 절삭**된다.
+    현재 rclone 이 초 단위만 emit 하나(실측 0건), backend 가 sub-second 를 내면
+    같은 초 안의 변경을 놓칠 수 있다(그 방향은 "modified 를 못 봄"). 그 경우
+    ``%Y-%m-%dT%H:%M:%S.%fZ`` 로 확장한다 (issue #201 리뷰 low-1 기록).
+    """
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    candidate = raw
+    if candidate.endswith(("Z", "z")):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(candidate)
+    except ValueError:
+        return raw
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -131,7 +171,7 @@ def compute_diff(
                 size=size,
             ))
             continue
-        if prev_mtime != mtime:
+        if _normalize_mtime(prev_mtime) != _normalize_mtime(mtime):
             result.entries.append(DiffEntry(
                 operation="modified",
                 source_id=source_id,
@@ -222,7 +262,7 @@ def _compute_diff_path_based(
             ))
             continue
         prev_mtime = str(prev.get("source_mtime", ""))
-        if prev_mtime != mtime:
+        if _normalize_mtime(prev_mtime) != _normalize_mtime(mtime):
             result.entries.append(DiffEntry(
                 operation="modified",
                 source_id=prev.get("_source_id", ""),
