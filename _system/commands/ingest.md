@@ -5,7 +5,8 @@
 ## 호출
 
 ```
-<agent_invocation> "/wi --vault <vault_id>"
+<agent_invocation> "/wi --vault <vault_id>"                  # 수동 호출 (Hermes 채팅·운영자)
+<agent_invocation> "/wi --vault <vault_id> --trigger timer"  # systemd timer 회차 (유닛 템플릿이 주입)
 ```
 
 - **트리거**: systemd timer (정상 주기) 또는 사용자 수동 호출
@@ -31,13 +32,56 @@
 
 ## 절차
 
-### Step 0. per-vault flock 가드 (race 가드)
+### Step 0. 트리거 확인 + 중복 실행 가드
 
-`wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wi --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단. 진행 중 ingest 가 있으면 즉시 exit 0 (no-op).
+`wikihub-ingest@<vault_id>.service` (timer 주기) + 메인테이너 수동 `systemctl --user start wikihub-ingest@<vault_id>` + Hermes 채팅의 `/wi --vault <vault_id>` 직접 호출 사이의 동일 vault 중복 실행 race 차단.
 
-**1차 가드 = systemd `Type=oneshot`.** vault별 유닛이 실행 중이면 중복 발화가 systemd 자체에서 드롭됩니다 (`## 동시성` 참조).
+**timer 회차와 수동 회차를 같은 기준으로 판정하지 않는다.** 판정 기준은 유닛 상태가 아니라 호출 문자열이다.
 
-**2차 가드 = per-vault flock 파일.** **단일 bash 프로세스가 세션 전체를 소유할 때만** 유효합니다.
+#### 0-1. 트리거 확인 (판정보다 먼저)
+
+timer 유닛의 ExecStart 는 `/wi --vault <vault_id> --trigger timer` 다 (`_system/systemd/wikihub-ingest@.service.template`). 호출 문자열에 `--trigger timer` 가 있으면 그 세션은 **timer 회차 본체**다.
+
+| 트리거 | 의미 | 동작 |
+|---|---|---|
+| `--trigger timer` 있음 | systemd 가 띄운 회차 본체 | 판정 없이 즉시 Step 1 로 진행 (0-2) |
+| `--trigger timer` 없음 | 수동 호출 (Hermes 채팅·운영자) | 0-3 의 1회 확인 |
+
+회차 로그 첫 줄(표준출력 → journald)에 `trigger=timer` / `trigger=manual` / `trigger=unknown`(fail-open) 중 하나를 남긴다. 이 줄이 검증의 계측 근거다.
+
+> **판독 불가 시 fail-open** — 호출 문자열이 전달되지 않는 호출 경로(wrapper 등)에서 트리거를 판독할 수 없으면 **판정 없이 진행**한다. 판정 불가 상태에서 no-op 을 택하면 ingest 가 조용히 멈추기 때문이다. 중복 위험은 systemd `Type=oneshot` 과 Step 2 의 `_state/<vault_id>/.lock` 이 흡수한다.
+
+#### 0-2. timer 회차 — 판정하지 않는다
+
+`Type=oneshot` 이므로 동일 유닛의 중복 발화는 systemd 가 이미 드롭한다. 따라서 **동시성 판정을 하지 않고 Step 1 로 진행한다.**
+
+**금지 — 아래 신호로 "다른 회차가 진행 중"을 판정하지 않는다.** 이 세션이 그 유닛의 실행 주체여서 항상 "진행 중"으로 보이고, 종료 조건이 성립하지 않는다.
+
+- `systemctl --user is-active` / `show -p ActiveState` 조회
+- `sleep` 으로 유닛 상태 변화를 기다리는 루프
+- 유닛 `MainPID` 와 조상 체인(`$PPID`) 대조 — Hermes 경유 세션의 tool 프로세스는 유닛 cgroup 이 아니라 `hermes-gateway.service` cgroup 에서 실행되므로 이 대조는 **위음성**을 낸다 (2026-11-09 실측).
+
+**금지 — 자기 유닛(`wikihub-ingest@<vault_id>`)에 `stop`/`restart`/`kill` 을 실행하지 않는다.** 회차 자기 종료로 `exit 130` 이 기록되고 `OnFailure=ops-alert` 가 발화한다.
+
+> **전제** — 위 "판정 생략"은 유닛이 `Type=oneshot` 이고 `Restart=` 가 없을 때만 성립한다. `Restart=` 를 추가하면 timer 회차가 중복 실행될 수 있으므로 유닛 템플릿 변경 시 본 절을 함께 검토한다.
+
+#### 0-3. 수동 회차 — 1회 확인
+
+아래를 **1회만** 확인한다. 대기·재시도·폴링은 금지다. 60초는 **커맨드 타임아웃 상한**이며 대기 예산이 아니다.
+
+```bash
+timeout 60 systemctl --user is-active wikihub-ingest@<vault_id>.service
+```
+
+- `activating`/`active` → 유닛 회차(timer 또는 운영자 `systemctl start`)가 진행 중 → 로그 1줄 남기고 `exit 0`.
+- `inactive`/`failed` → 진행한다. `_state/<vault_id>/pending_ingest.json` 이 남아 있으면 이전 회차의 잔재이므로 Step 1(부분 실패 복구)이 처리한다.
+- 판정 불가(타임아웃·`systemctl` 오류) → `exit 75`.
+
+`exit 0` 은 "할 일 없음", `exit 75` 는 "지금은 못 함(다음 발화 재시도)" 이다. 현행 유닛은 `SuccessExitStatus=0 75` 이고 `Restart=` 가 없어 두 코드의 systemd 동작 차이는 없으며, 구분은 로그·집계용이다.
+
+#### 0-4. 보조 가드 (선택, 단일 bash 소유 경로)
+
+단일 bash 프로세스가 세션 전체를 소유하는 호출 경로(대화형 셸에서 직접 실행 등)에서는 per-vault flock 을 보조로 쓸 수 있다.
 
 ```bash
 # 세션 전체를 소유하는 단일 bash 프로세스 내부에서만
@@ -52,8 +96,10 @@ flock -n 200 || { echo "ingest (vault=<vault_id>) 이미 진행 중 — exit 0 (
 > **fd 상속 방식은 이 실행 모델에서 race 를 보장 차단하지 못합니다.** 세션을 소유하는 단일 프로세스가 없는 호출 경로에서는 가드로 성립하지 않습니다. lint.md Step 0 참조.
 >
 > `flock -n` 은 non-blocking — lock 획득 fail 시 즉시 exit. systemd 가 success 로 처리 (다음 timer fire 자연 재시도).
+>
+> **Hermes 경유 경로에서는 이 블록의 성공/실패를 판정 근거로 쓰지 말 것** — fd 수명 때문에 lock 이 항상 통과하므로 "lock 획득 = 진행 가능"이 참이 아니다(0-1·0-2·0-3 이 담당). 반면 **단일 bash 프로세스가 세션을 소유하는 경로에서는 `flock -n` 실패 시 즉시 `exit 0`** 으로 중복을 차단한다 — 그 경로에서는 이 블록이 실효 가드다.
 
-**scope = per-vault** (lock 파일명에 `<vault_id>` 접미). multi-vault 병렬 ingest 허용 — `wikihub.yaml.operations.max_concurrent_vaults` 정책 정합. 본 lock 은 Step 1~6 전체를 cover하므로, Step 2 의 `vault-fetch.py` 가 보유한 기존 `_state/<vault>/.lock` 이 보호하지 못하던 Step 1 (`pending_ingest.json` attempts 증가) · Step 4 (LLM entity·concept 추출) · Step 5 (`log.md` append) · Step 6 (`pending_ingest.json` 삭제) 의 race window 가 본 lock 으로 닫힌다.
+**scope = per-vault** (lock 파일명에 `<vault_id>` 접미). multi-vault 병렬 ingest 허용 — `wikihub.yaml.operations.max_concurrent_vaults` 정책 정합.
 
 ### Step 1. pending_ingest.json 확인 (부분 실패 복구)
 
@@ -289,9 +335,22 @@ Step 5까지 무에러 완료 시:
 
 ## 동시성
 
-- **Step 0 per-vault flock** (`$WIKIHUB_HOME/.wi-<vault_id>.lock`) — systemd 유닛 경유 경로(timer·수동 `systemctl`)는 1차 가드가 커버하므로, 본 2차 가드는 **Hermes 채팅의 `/wi` 직접 호출 경로** 대상이다. `vault-fetch.py` 의 기존 `_state/<vault>/.lock` 은 Step 2 진입 시점부터 보호이므로, 본 Step 0 lock 이 Step 1·4·5·6 race window 까지 cover한다. **단 세션 전체를 소유하는 단일 bash 프로세스 내부에서만 유효** — Step 0 경고 참조.
-- vault별 systemd unit 이 `Type=oneshot` → 동일 vault timer 중복 발화는 systemd 자체에서도 드롭 (**1차 가드**. Step 0 lock 은 2차 보조 layer, F1 §4.6.5).
-- 다중 vault 간 직렬화는 `wikihub.yaml.operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합. F1 §4.6.5의 `hermes_concurrency` 키명은 본 명으로 supersede). Step 0 lock 은 per-vault 이므로 본 정책에 직교.
+- **판정 정본은 Step 0-1 의 트리거 표식**(`--trigger timer`)이다. 유닛 상태(`is-active`/`ActiveState`)·cgroup·조상 체인·`pgrep` 은 Hermes 경유 세션에서 판별력이 없다 — 세션의 tool 프로세스는 `hermes-gateway.service` cgroup 에서 실행되고, 유닛 `MainPID` 는 세션의 조상이 아니다 (2026-11-09 실측).
+- timer 회차는 systemd `Type=oneshot` 이 동일 유닛 중복 발화를 드롭하므로 **스스로 판정하지 않는다** (`ingest.md` Step 0-2).
+- 수동 회차만 Step 0-3 의 유닛 상태 1회 확인으로 양보한다. 잔재 `pending_ingest.json` 은 Step 1 이 복구한다. 폴링·`sleep` 대기는 금지.
+- per-vault flock 은 단일 bash 프로세스 소유 경로에서만 유효한 **보조** 수단이며 판정 근거가 아니다 (Step 0-4).
+- 다중 vault 간 직렬화는 `wikihub.yaml.operations.max_concurrent_vaults` 정책 (F4 결정 — agent-agnostic 명명으로 ADR-0012 정합). Step 0 가드는 per-vault 이므로 본 정책과 직교한다.
+
+### 경계
+
+- **concurrent `/wl`** — lint(`wikihub-lint.service`)는 별 유닛이다. `/wi` 동시성 판정 대상이 아니며, 판정 대상은 같은 vault 의 ingest 뿐이다.
+- **멀티볼트 동시 발화** — 서로 다른 vault 의 동시 실행은 허용한다. 공유 NAS 경합은 본 가드가 다루지 않는다(현행과 동일).
+- **session resume** — resume 된 세션은 env 를 재수집하지 않는다. 트리거는 env 가 아니라 호출 문자열(`--trigger timer`)로만 판정한다.
+
+**허용 residual (감지하지 않는다 — 문서화된 경계)**
+
+- **수동 회차 진행 중 timer 발화** — timer 회차는 0-2 에서 판정하지 않으므로 겹칠 수 있다. 반대 방향(수동이 timer 를 피하는 것)만 0-3 이 보장한다. 종전에도 이 조합은 차단되지 않았다(자기 유닛을 보고 20분 대기했다).
+- **수동 회차끼리 동시 실행** — 둘 다 유닛을 쓰지 않으므로 상호 감지하지 않는다. Step 2 의 `vault-fetch.py` 가 보유한 `_state/<vault_id>/.lock` 이 mechanical phase 만 보호한다.
 
 ## 관련 ADR
 

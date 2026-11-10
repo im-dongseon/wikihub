@@ -18,7 +18,7 @@ Environment=WIKIHUB_YAML={wikihub_home}/wikihub.yaml
 Environment=WIKIHUB_SRC={wikihub_src}
 # ADR-0035: gws SA 폐기. credentials Env 제거. rclone.conf 가 단일 인증 자료 (~/.config/rclone/rclone.conf default).
 Environment=RCLONE_RC_ADDR=127.0.0.1:{rc_port_for_%i}
-ExecStart={agent_invocation_for_wi} "/wi --vault %i"
+ExecStart={agent_invocation_for_wi} "/wi --vault %i --trigger timer"
 SuccessExitStatus=0 75
 TimeoutStartSec={ingest_timeout_start_sec}sec
 SyslogIdentifier=wikihub-ingest-%i

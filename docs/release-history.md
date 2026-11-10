@@ -500,3 +500,19 @@
   - 리뷰는 `glm-5.3` + 추론 억제 블록으로 돌렸다 — 억제 없이는 `reason=length`(출력 32K 소진)로 보고를 하나도 내지 못했다.
 - **결론**: main merge + annotated tag `v0.1.19` + `latest` (2026-09-22). 운영자 `install.sh --branch latest`.
 - **참조**: `docs/changelog.md` [v0.1.19]. 관련 open issue — #149(데이터 백업), #116(PDF 추출 방법론).
+
+## [2026-11-10] v0.1.20 — `/wi` timer 회차 자기교착 제거 (Step 0 트리거 표식)
+
+- **배경**: timer 발화 회차가 2026-11-07 24시간 내 5회 실패(4회 `Failed with result 'timeout'` = 1,200초 소진, 1회 자기 유닛 `stop` → `exit 130`). 원인은 세션이 "동일 vault ingest 진행 중"을 판정하려고 자기 유닛의 `is-active`(`activating` 고정)를 신호로 채택한 것이다. Step 0 은 판정을 요구하면서 수단을 주지 않았고, 유일한 실효 가드(systemd `Type=oneshot`)는 판정법이 아니었다. 2차 flock 은 문서 스스로 "Hermes 경유에서 무력"을 선언한 상태였다.
+- **변경**:
+  - **유닛 표식** — `wikihub-ingest@.service.template` 의 `ExecStart` 를 `/wi --vault %i --trigger timer` 로. 세션은 자기 호출 문자열로 timer 회차임을 식별한다.
+  - **Step 0 재구성** — 0-1 트리거 확인(판독 불가 시 fail-open) / 0-2 timer 회차는 판정 생략 / 0-3 수동 회차는 `timeout 60` 1회 확인 / 0-4 flock 을 단일 bash 소유 경로의 보조 가드로 축소.
+  - **금지 명문** — 유닛 상태 폴링, `sleep` 으로 상태 변화 대기, `MainPID` 조상 체인 대조(Hermes 경유 세션의 tool 프로세스는 `hermes-gateway.service` cgroup 에서 실행되어 위음성), 자기 유닛 `stop`/`restart`/`kill`.
+  - **경계 문서화** — concurrent `/wl`, 멀티볼트, session resume, 그리고 감지하지 않는 residual 2건(수동↔timer, 수동↔수동).
+- **트레이드오프**:
+  - 수동 회차 진행 중 timer 발화는 여전히 감지하지 않는다 — 종전에도 차단된 적이 없다(자기 유닛을 보고 20분 대기했다). 허용 residual 로 명시.
+  - 수동 회차끼리의 동시 실행도 감지하지 않는다. Step 2 의 `vault-fetch.py` `_state/<vault>/.lock` 이 mechanical phase 만 보호한다.
+  - 운영 검증(3회 발화에서 유닛 상태 조회 0건·Step 2 진입 60초 이내)은 런타임 반영 후에만 측정 가능하다 — #219 는 그때까지 OPEN 유지.
+  - 리뷰는 `ollama-cloud/glm-5.3` 2회(1차 6건 → 2차 PASS). 구현은 최PM 직접.
+- **결론**: main merge + annotated tag `v0.1.20` + `latest` (2026-11-10). 운영자 `install.sh --branch latest` 또는 `wh-update`.
+- **참조**: `docs/changelog.md` [v0.1.20]. 관련 issue — #219.
