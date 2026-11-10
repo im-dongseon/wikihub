@@ -6,11 +6,11 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.20] — 2026-11-09 (canary)
+## [v0.1.20] — 2026-11-10 (released)
 
-### 추가 (Added)
+### 수정 (Fixed)
 
-- (bootstrap — first feature commit 부터 entry 누적)
+- `/wi` timer 회차의 자기교착 제거 — 유닛 `ExecStart` 에 `--trigger timer` 표식을 주입하고, playbook Step 0 이 그 표식으로 timer/수동 회차를 분기한다. timer 회차는 동시성 판정 없이 즉시 Step 1 로 진행하며, 유닛 상태 폴링·`sleep` 대기·`MainPID` 조상 대조·자기 유닛 `stop`/`restart`/`kill` 을 금지로 명문화했다 (#219)
 
 ---
 
