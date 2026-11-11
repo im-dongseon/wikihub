@@ -40,7 +40,7 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. **Ope
 
 ## 3. 5-step issue-first workflow
 
-**플로우**: 설계 → 설계 리뷰 → 구현 → (구현 리뷰) → (Deploy) → archive. 모델·절차 정본은 Hermes `github-dev-flow` 스킬 §Workflow Steps 다 — 설계 `muse-spark-open` → 설계 리뷰 `mistral-large-4` → 구현 `deepseek-v4.1-flash`(hard: `glm-5.3`) → 구현 리뷰 `kimi-k2.7-code`·`minimax-m3`. 구현 리뷰·Deploy 는 조건부 생략 가능 (생략 결정은 설계 코멘트에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 cleanup 하므로, 다음 사이클 시작은 첫 issue PR 시 Hermes `github-dev-flow` Step 3 이 `scripts/bootstrap_version.sh` 를 자동 호출한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-issue-first-workflow) 참조.
+**플로우**: 설계 → 설계 리뷰 → 구현 → (구현 리뷰) → (Deploy) → archive. 모델·절차 정본은 Hermes `github-dev-flow` 스킬 §Workflow Steps 다 — 설계 `muse-spark-open` → 설계 리뷰 **2모델 교차** `mistral-large-4` + `glm-5.2` → 구현 `deepseek-v4.1-flash`(hard: `glm-5.3`) → 구현 리뷰 `kimi-k2.7-code`·`minimax-m3`. 설계 리뷰 출력은 게시 전 **비한글 문자 스캔(한자·가나·키릴)** 을 통과해야 한다. 구현 리뷰·Deploy 는 조건부 생략 가능 (생략 결정은 설계 코멘트에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 cleanup 하므로, 다음 사이클 시작은 첫 issue PR 시 Hermes `github-dev-flow` Step 3 이 `scripts/bootstrap_version.sh` 를 자동 호출한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-issue-first-workflow) 참조.
 
 | Step | 산출물 | 진입 조건 | 종료 |
 |---|---|---|---|
