@@ -39,6 +39,7 @@ from .exceptions import VaultSyncFatal, VaultSyncFileFatal, VaultSyncRetryable
 from .extraction import GWS_EXPORT_MIME, ExtractionResult, extract, extract_text
 from .frontmatter import build_source_frontmatter, emit_page
 from .mount_diff import DiffEntry, DiffResult, compute_diff
+from .path_exclude import filter_listing, normalize_prefixes, prune_file_map
 from .rclone import lsjson
 from .state import (
     enqueue_retry,
@@ -85,6 +86,8 @@ class SyncResult:
     started_at: str = ""
     finished_at: str = ""
     duration_ms: int = 0
+    excluded_listing_count: int = 0  # issue #221 — listing 에서 제외된 항목 수
+    excluded_pruned_count: int = 0   # issue #221 — file_map 에서 프루닝된 엔트리 수
 
 
 # ---------------------------------------------------------------------------
@@ -470,12 +473,14 @@ def sync(
     exclude_swm = bool(options.get("exclude_shared_with_me", True))
     max_file_size_mb = options.get("max_file_size_mb")
     false_delete_threshold = float(options.get("false_delete_threshold", 0.3))
+    exclude_paths = normalize_prefixes(options.get("exclude_paths") or [])
 
     log.info("sync start: vault=%s remote=%s path=%s exclude_swm=%s",
              vault_id, remote, remote_path or "", exclude_swm)
 
     # 1. lsjson 호출 — mount source 와 동일 scope (ADR-0035 §Note 2026-05-19).
     listing = lsjson(remote, path=remote_path, recursive=True, vault_id=vault_id)
+    listing, excluded_listing = filter_listing(listing, exclude_paths)
 
     # 2. file_map 로드 + retry 로드
     file_map = load_file_map(state_dir)
@@ -483,6 +488,7 @@ def sync(
         file_map["files"] = {}
     if not file_map.get("vault_id"):
         file_map["vault_id"] = vault_id
+    file_map, pruned_paths = prune_file_map(file_map, exclude_paths)
     retry_obj = load_retry(state_dir)
     if not retry_obj.get("vault_id"):
         retry_obj["vault_id"] = vault_id
@@ -517,6 +523,19 @@ def sync(
                 "listing partial 의심"
             ),
         )
+
+    # issue #221: exclude_paths 적용 결과 로그 — 가드 통과 후 diff 결과 확보 시점에 출력.
+    if exclude_paths:
+        log.info(
+            "exclude_paths 적용 — listing %d건 제외 / file_map %d건 프루닝 (prefix=%s)",
+            excluded_listing, len(pruned_paths), ",".join(exclude_paths),
+        )
+        if pruned_paths:
+            log.warning(
+                "exclude_paths 프루닝 %d건 — wiki source 정리 필요: "
+                "scripts/migrate_exclude_paths.py --vault %s --apply",
+                len(pruned_paths), vault_id,
+            )
 
     # 5. per-entry 처리
     changed: list[ChangedFile] = []
@@ -596,7 +615,8 @@ def sync(
     # persist 됨. next cycle 의 idempotent re-detect (mount_diff 가 untracked entry
     # 를 created 로 재분류) 로 보완. 이는 per-entry save 모델의 "각 entry 별 즉시
     # commit" 과 미묘한 차이 — 의도된 동작이며, pre-existing pattern.
-    if changed or deleted:
+    # 단 issue #221 — exclude_paths 프루닝이 발생한 cycle 은 state change 로 간주해 save 1회 수행한다.
+    if changed or deleted or pruned_paths:
         save_file_map(state_dir, file_map)
 
     duration_ms = int((time.monotonic() - started) * 1000)
@@ -611,6 +631,8 @@ def sync(
         started_at=started_iso,
         finished_at=finished_iso,
         duration_ms=duration_ms,
+        excluded_listing_count=excluded_listing,
+        excluded_pruned_count=len(pruned_paths),
     )
 
     save_last_sync(state_dir, _result_to_last_sync_dict(result))
@@ -638,16 +660,20 @@ def _result_to_last_sync_dict(result: SyncResult) -> dict:
 
 def result_to_stdout_json(result: SyncResult) -> str:
     """F2 ingest.md §Step 2 contract emit (stdout JSON)."""
-    return json.dumps(
-        {
-            "vault_id": result.vault_id,
-            "has_changes": result.has_changes,
-            "changed": [asdict(c) for c in result.changed],
-            "deleted": result.deleted,
-            "duration_ms": result.duration_ms,
-        },
-        ensure_ascii=False,
-    )
+    payload = {
+        "vault_id": result.vault_id,
+        "has_changes": result.has_changes,
+        "changed": [asdict(c) for c in result.changed],
+        "deleted": result.deleted,
+        "duration_ms": result.duration_ms,
+    }
+    # issue #221 — 제외가 1건 이상일 때만 excluded 키 노출 (기존 contract 보존).
+    if result.excluded_listing_count or result.excluded_pruned_count:
+        payload["excluded"] = {
+            "listing_filtered": result.excluded_listing_count,
+            "file_map_pruned": result.excluded_pruned_count,
+        }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 __all__ = ["ChangedFile", "SyncResult", "sync", "result_to_stdout_json"]
