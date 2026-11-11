@@ -204,6 +204,29 @@ def extract_links(content):
     return re.findall(r'\[\[([^\]]+)\]\]', content)
 
 
+def _link_not_a_path(link: str) -> bool:
+    """경로로 성립할 수 없는 [[link]] 인지.
+
+    일반 공백은 정상 링크(파일명·엔티티명)에 있으므로 제외하지 않는다.
+    개행·백틱·200자 초과만 배제한다. 그대로 Path.exists() 에 넘기면
+    OSError(ENAMETOOLONG) 로 lint 사이클 전체가 죽는다.
+    """
+    if not link or len(link) > 200:
+        return True
+    if "`" in link or "\n" in link or "\r" in link:
+        return True
+    # NAME_MAX 는 바이트다. 한글 100자(300바이트)는 글자 수 가드를 통과한 뒤 exists()에서 죽는다.
+    return any(len(part.encode()) > 255 for part in link.split("/"))
+
+
+def _exists(path: Path) -> bool | None:
+    """exists() 결과. OSError 면 None — 위반으로 보고하지 않고 호출자가 건너뛴다."""
+    try:
+        return path.exists()
+    except OSError:
+        return None
+
+
 def step2_links(alias_index, vault_ids):
     violations = {
         'no_prefix_sources': [],      # 위반 1: sources link without vault prefix
@@ -231,7 +254,10 @@ def step2_links(alias_index, vault_ids):
             return True
         # Direct file check
         p = WIKI_ROOT / category_dir_name / f'{name_clean}.md'
-        if p.exists():
+        found = _exists(p)
+        if found is None:
+            return None
+        if found:
             return True
         return False
 
@@ -248,6 +274,8 @@ def step2_links(alias_index, vault_ids):
 
         for link in links:
             link = link.strip()
+            if _link_not_a_path(link):
+                continue
             if '/' in link:
                 # Full path: [[category/path]] or [[vault/path]]
                 prefix = link.split('/')[0]
@@ -277,7 +305,10 @@ def step2_links(alias_index, vault_ids):
                     # Path('a/b/c.pdf').with_suffix('.md') 는 원 확장자를 잘라버려 (c.md) 틀림.
                     # 링크가 .md 로 끝나면 그대로, 아니면 .md 를 뒤에 추가해 확인.
                     expected_source_file = expected_source_path if expected_source_path.suffix == '.md' else Path(str(expected_source_path) + '.md')
-                    if not expected_source_file.exists():
+                    found = _exists(expected_source_file)
+                    if found is None:
+                        continue
+                    if not found:
                         violations['dangling_full_path'].append({
                             'link': link,
                             'source': rel_path,
@@ -288,7 +319,8 @@ def step2_links(alias_index, vault_ids):
                 # Check entities first, then concepts
                 found_entity = resolve_short_link(link, entity_pages, 'entities')
                 found_concept = resolve_short_link(link, concept_pages, 'concepts')
-
+                if found_entity is None or found_concept is None:
+                    continue
                 if not found_entity and not found_concept:
                     violations['dangling_short_entity'].append({
                         'link': link,
@@ -307,7 +339,7 @@ def step45_duplicates():
 
     try:
         result = subprocess.run(
-            ['python3', str(helper), '--wiki-home', str(WIKIHUB_HOME)],
+            [sys.executable, str(helper), '--wiki-home', str(WIKIHUB_HOME)],
             capture_output=True, text=True, timeout=60
         )
         if result.returncode != 0:
