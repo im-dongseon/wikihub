@@ -27,7 +27,8 @@ def test_link_not_a_path_skips_only_unusable() -> None:
     assert mod._link_not_a_path("a\rb") is True
     assert mod._link_not_a_path("AI Gateway") is False
     assert mod._link_not_a_path("nas/lecture/LLM MultiAgent.pdf") is False
-    assert mod._link_not_a_path("x" * 200) is False
+    assert mod._link_not_a_path("가" * 86) is True
+    assert mod._link_not_a_path("가" * 85) is False
 
 
 def test_space_links_are_still_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +77,7 @@ def test_step2_oserror_skips_without_abort(tmp_path: Path, monkeypatch: pytest.M
 
     assert violations["dangling_short_entity"] == []
     assert violations["dangling_full_path"] == []
+    assert len(seen) >= 2
     assert all(long_link not in item for item in seen)
     assert all("has`tick" not in item for item in seen)
 

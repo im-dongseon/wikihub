@@ -213,7 +213,10 @@ def _link_not_a_path(link: str) -> bool:
     """
     if not link or len(link) > 200:
         return True
-    return "`" in link or "\n" in link or "\r" in link
+    if "`" in link or "\n" in link or "\r" in link:
+        return True
+    # NAME_MAX 는 바이트다. 한글 100자(300바이트)는 글자 수 가드를 통과한 뒤 exists()에서 죽는다.
+    return any(len(part.encode()) > 255 for part in link.split("/"))
 
 
 def _exists(path: Path) -> bool | None:
