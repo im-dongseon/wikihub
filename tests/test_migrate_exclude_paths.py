@@ -215,7 +215,7 @@ def test_lock_held_returns_exit_3(tmp_path: Path, capsys: pytest.CaptureFixture)
     lock_fd = open(lock_path, "w")
     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        rc = m.main(["--vault", "gdrive", "--home", str(tmp_path)])
+        rc = m.main(["--vault", "gdrive", "--home", str(tmp_path), "--apply"])
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         lock_fd.close()
@@ -280,4 +280,55 @@ def test_symlinked_vault_dir_aborts_without_unlink(
     assert out["errors"]
     assert out["unlinked_pages"] == 0
     assert victim.exists()
+
+
+# ---------------------------------------------------------------------------
+# 7. multi-line flow list — 손상 없이 block 으로 정규화
+# ---------------------------------------------------------------------------
+
+def test_strip_refs_multiline_flow_list(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """여러 줄에 걸친 flow list 도 항목 단위로 제거되고 YAML 이 깨지지 않는다."""
+    import yaml
+
+    _setup(tmp_path)
+    ents = tmp_path / "wiki" / "entities"
+    ents.mkdir(parents=True)
+    page = ents / "e_flow.md"
+    page.write_text(
+        "---\n"
+        "title: flow 다중행\n"
+        "referenced_by: [sources/gdrive/other/a.md, sources/gdrive/report/r1.md,\n"
+        "  sources/gdrive/report/sub/r2.md, sources/gdrive/other/b.md]\n"
+        "---\n\n본문 flow\n",
+        encoding="utf-8",
+    )
+
+    rc = m.main(["--vault", "gdrive", "--home", str(tmp_path), "--apply", "--strip-refs"])
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert out["stripped_ref_items"] == 2
+    text = page.read_text(encoding="utf-8")
+    assert "sources/gdrive/report/" not in text
+    fm = yaml.safe_load(text.split("---")[1])
+    assert fm["referenced_by"] == [
+        "sources/gdrive/other/a.md",
+        "sources/gdrive/other/b.md",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 8. dry-run 은 상태 디렉터리·lock 파일을 만들지 않는다
+# ---------------------------------------------------------------------------
+
+def test_dry_run_does_not_create_state_dir(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    """dry-run 은 _state/<vault>/ 를 생성하지 않는다 (쓰기 0)."""
+    _write_yaml(tmp_path)
+    (tmp_path / "wiki" / "sources" / "gdrive").mkdir(parents=True)
+    rc = m.main(["--vault", "gdrive", "--home", str(tmp_path)])
+    capsys.readouterr()
+    assert rc == 0
+    assert not (tmp_path / "_state").exists()
 

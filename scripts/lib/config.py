@@ -113,7 +113,7 @@ def _parse_vault(vid: str, vcfg: dict[str, Any]) -> VaultConfig:
     # issue #221 — exclude_paths 정규화. 위반 항목은 load_wikihub yaml 시점에
     # VaultSyncFatal(vault_id="__config__") 로 실패한다 (path_exclude 모듈 발생).
     if "exclude_paths" in options:
-        options["exclude_paths"] = normalize_prefixes(options.get("exclude_paths"))
+        options["exclude_paths"] = normalize_prefixes(options.get("exclude_paths"), vault_id=vid)
 
     # ADR-0031 §Decision B (HIGH-A1): mount_path 는 maintainer-controlled.
     # default (Path C+) 는 mount_path == local_path 지만, advanced 운영자가 bind-mount /

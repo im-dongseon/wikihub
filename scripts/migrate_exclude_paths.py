@@ -44,6 +44,32 @@ def _within(child: Path, parent: Path) -> bool:
         return False
 
 
+def _split_flow_items(inner: str) -> list[str]:
+    """YAML flow list 내부 문자열을 인용부호를 존중해 항목으로 분해한다."""
+    items: list[str] = []
+    cur: list[str] = []
+    quote: str | None = None
+    for ch in inner:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch == ",":
+            value = "".join(cur).strip()
+            if value:
+                items.append(value)
+            cur = []
+        else:
+            cur.append(ch)
+    value = "".join(cur).strip()
+    if value:
+        items.append(value)
+    return items
+
+
 def _fail(msg: str) -> None:
     print(f"[migrate_exclude_paths] 오류: {msg}", file=sys.stderr)
 
@@ -81,6 +107,7 @@ def _strip_refs_from_page(
 
     fm_lines = lines[: end_idx + 1]
     rest = lines[end_idx + 1:]
+    nl = "\r\n" if any(line.endswith("\r\n") for line in lines[:3]) else "\n"
     out: list[str] = []
     stripped = 0
     emptied = False
@@ -96,20 +123,30 @@ def _strip_refs_from_page(
         indent = key_match.group(1)
         content = line.split(":", 1)[1].strip()
         if content.startswith("["):
-            # inline flow style — 대괄호 내 항목만 수술
-            inner = content.strip("[]").strip()
-            items = [x.strip() for x in inner.split(",") if x.strip()] if inner else []
+            # flow style — 대괄호가 여러 줄에 걸칠 수 있으므로 닫힘까지 수집한다.
+            buf = content
+            j = i + 1
+            while "]" not in buf and j < len(fm_lines):
+                buf += fm_lines[j]
+                j += 1
+            if "]" in buf:
+                inner = buf[buf.index("[") + 1: buf.rindex("]")]
+                items = _split_flow_items(inner)
+            else:
+                items = _split_flow_items(buf.lstrip("["))
             kept = [
                 x for x in items
-                if not any(x.strip("'\"").startswith(t) for t in targets)
+                if not any(x.strip().strip("'\"").startswith(t) for t in targets)
             ]
             stripped += len(items) - len(kept)
             if kept:
-                out.append(f"{indent}referenced_by: [{', '.join(kept)}]\n")
+                # block style 로 정규화 — flow 잔여 라인 손상 위험 제거
+                out.append(f"{indent}referenced_by:{nl}")
+                out.extend(f"{indent}  - {x}{nl}" for x in kept)
             else:
-                out.append(f"{indent}referenced_by: []\n")
+                out.append(f"{indent}referenced_by: []{nl}")
                 emptied = True
-            i += 1
+            i = j
             continue
 
         # block style — 이후 `- item` 라인들을 수집 (목록 중간의 빈 줄은 목록 내부로 간주)
@@ -172,7 +209,9 @@ def _migrate_file_map(state_dir: Path, prefixes: list[str], *, apply: bool,
         try:
             shutil.copy2(fm_path, backup)
         except OSError as e:
-            result["errors"].append(f"file_map backup 실패: {e}")
+            # 백업 실패 후 진행하면 복구 불가 — 이번 run 의 file_map 변경을 중단한다.
+            result["errors"].append(f"file_map backup 실패 — file_map 변경 중단: {e}")
+            return
     pruned, removed = prune_file_map(file_map, prefixes)
     result["removed_file_map_entries"] = len(removed)
     if apply and removed:
@@ -215,7 +254,7 @@ def _migrate_wiki_sources(instance_root: Path, vault_id: str, prefixes: list[str
         for md in sorted(target_real.rglob("*.md")):
             if not md.is_file():
                 continue
-            if not md.is_symlink() and not _within(md.resolve(), sources_real):
+            if not md.is_symlink() and not _within(md.resolve(), target_real):
                 result["errors"].append(f"경계 밖 경로 — skip ({md})")
                 continue
             if not apply:
@@ -313,17 +352,25 @@ def main(argv: list[str] | None = None) -> int:
 
     instance_root = cfg.instance_root
     state_dir = instance_root / "_state" / args.vault
-    state_dir.mkdir(parents=True, exist_ok=True)
+    # dry-run 은 디렉터리·lock 파일을 만들지 않는다(쓰기 0 보장). apply 만 생성.
+    if args.apply:
+        state_dir.mkdir(parents=True, exist_ok=True)
 
-    # lock — vault-fetch 와 동일 패턴 (LOCK_EX | LOCK_NB)
-    lock_path = state_dir / ".lock"
-    lock_fd = open(lock_path, "w")
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, OSError) as e:
-        _fail(f"다른 sync 가 실행 중 (lock 획득 실패: {lock_path}) — 잠시 후 재시도")
-        lock_fd.close()
-        return 3
+    # lock — apply 만 잡는다. dry-run 은 읽기 전용이라 파일·lock 을 만들지 않는다.
+    lock_fd = None
+    if args.apply:
+        lock_path = state_dir / ".lock"
+        try:
+            lock_fd = open(lock_path, "w")
+        except OSError as e:
+            _fail(f"lock 파일 생성 실패: {lock_path} ({e})")
+            return 3
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            _fail(f"다른 sync 가 실행 중 (lock 획득 실패: {lock_path}) — 잠시 후 재시도")
+            lock_fd.close()
+            return 3
 
     try:
         result: dict[str, Any] = {
@@ -355,8 +402,9 @@ def main(argv: list[str] | None = None) -> int:
             return 4
         return 0
     finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
+        if lock_fd is not None:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            lock_fd.close()
 
 
 if __name__ == "__main__":

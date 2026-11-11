@@ -34,3 +34,4 @@ vault 전체를 ingest 대상으로 삼으면 보고서·임시 산출물처럼 
 - **긍정**: vault 별로 ingest 대상을 좁힐 수 있고, 기존 발행 경로·검증은 그대로 유지된다.
 - **부정/제약**: `exclude_paths` 미설정 시 동작 변화는 없다. 프루닝 사이클은 `has_changes=false` 를 유지하고 `last_sync.json` 의 `file_map_count_before` 는 프루닝 후 값이다.
 - **후속 영향**: 파괴적 정리는 1회성 마이그레이션 스크립트가 전담하며, 런타임 ingest 코드는 제외 판정과 프루닝만 수행한다.
+- 프루닝 경고는 프루닝이 발생한 **1회 사이클에만** 출력된다(file_map 이 즉시 갱신되므로). 제외 콘텐츠의 실제 정리는 1회성 마이그레이션 로그(`unlinked_pages`·`stripped_ref_items`)로 추적한다.

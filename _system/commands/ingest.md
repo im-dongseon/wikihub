@@ -164,7 +164,7 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
 }
 ```
 
-`excluded` 는 `exclude_paths` 미설정 시 생략된다.
+`excluded` 는 제외가 1건 이상 발생한 사이클에만 노출된다(`exclude_paths` 미설정 또는 매칭 0건이면 생략).
 
 위 schema는 F1 §4.2.2의 `ChangedFile` dataclass를 lift (`source_mtime`·`source_id`·`bytes_written` 모두 포함). F3 구현자는 본 schema를 정본으로.
 

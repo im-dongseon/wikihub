@@ -13,17 +13,26 @@ from .exceptions import VaultSyncFatal
 _REMEDIATION = "예: project/wikihub/report/"
 
 
-def normalize_prefixes(raw: Sequence[str] | None) -> list[str]:
-    """원본 prefix 목록을 vault 상대 디렉터리 prefix 로 정규화한다."""
+def normalize_prefixes(raw: Sequence[str] | None, *, vault_id: str = "__config__") -> list[str]:
+    """원본 prefix 목록을 vault 상대 디렉터리 prefix 로 정규화한다.
+
+    YAML scalar(문자열 1개)가 들어오면 문자 단위로 분해되므로 명시적으로 거부한다.
+    """
     if not raw:
         return []
+    if isinstance(raw, str):
+        raise VaultSyncFatal(
+            vault_id=vault_id,
+            reason=f"exclude_paths 는 리스트여야 한다 (받은 값: {raw!r} — YAML scalar 는 문자 단위로 분해된다)",
+            remediation=_REMEDIATION,
+        )
 
     normalized: list[str] = []
     seen: set[str] = set()
     for item in raw:
         if not isinstance(item, str):
             raise VaultSyncFatal(
-                vault_id="__config__",
+                vault_id=vault_id,
                 reason=f"exclude_paths 항목이 문자열이 아니다 (원본: {item!r}). 각 항목은 문자열이어야 한다",
                 remediation=_REMEDIATION,
             )
@@ -39,7 +48,7 @@ def normalize_prefixes(raw: Sequence[str] | None) -> list[str]:
 
         if value in ("", "/", "./"):
             raise VaultSyncFatal(
-                vault_id="__config__",
+                vault_id=vault_id,
                 reason=(
                     f"exclude_paths 항목 정규화 결과가 비어 있다 (원본: {item!r}). "
                     "vault 상대 디렉터리 prefix 이며 '/' 로 끝나야 한다"

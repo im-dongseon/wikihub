@@ -147,3 +147,10 @@ def test_normalize_prefixes_rejects_dot() -> None:
     for bad in ([". "], ["./"], ["."]):
         with pytest.raises(VaultSyncFatal):
             normalize_prefixes(bad)
+
+
+def test_normalize_prefixes_rejects_scalar_string() -> None:
+    """YAML scalar 문자열은 문자 단위 분해를 막기 위해 거부한다."""
+    with pytest.raises(VaultSyncFatal):
+        normalize_prefixes("report/")
+
