@@ -16,10 +16,19 @@
   },
   "agent": {
     "plan": {
-      "model": "ollama-cloud/minimax-m3",
+      "model": "ollama-cloud/muse-spark-open",
       "tools": {
         "write": false,
         "edit": false
+      }
+    },
+    "design-review": {
+      "model": "ollama-cloud/mistral-large-4",
+      "mode": "primary",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
       }
     },
     "research": {

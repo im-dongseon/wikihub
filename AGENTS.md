@@ -40,17 +40,18 @@ WikiHub 시스템 설계·개발·배포를 위한 최상위 거버넌스. **Ope
 
 ## 3. 5-step issue-first workflow
 
-**플로우**: Plan → Analysis & Design → Implementation → (Review) → (Deploy) → archive. Step 4·5 는 조건부 생략 가능 (생략 결정은 Step 1 plan.md 에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 cleanup 하므로, 다음 사이클 시작은 첫 issue PR 시 Hermes `github-dev-flow` Step 4 가 `scripts/bootstrap_version.sh` 를 자동 호출한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-issue-first-workflow) 참조.
+**플로우**: 설계 → 설계 리뷰 → 구현 → (구현 리뷰) → (Deploy) → archive. 모델·절차 정본은 Hermes `github-dev-flow` 스킬 §Workflow Steps 다 — 설계 `muse-spark-open` → 설계 리뷰 `mistral-large-4` → 구현 `deepseek-v4.1-flash`(hard: `glm-5.3`) → 구현 리뷰 `kimi-k2.7-code`·`minimax-m3`. 구현 리뷰·Deploy 는 조건부 생략 가능 (생략 결정은 설계 코멘트에 사전 선언). 분기 base = **`origin/<현재 버전 브랜치>`** (예: `origin/v0.1.12`) — main 직접 분기·commit 금지. 버전 브랜치는 release 시 `release.sh`가 cleanup 하므로, 다음 사이클 시작은 첫 issue PR 시 Hermes `github-dev-flow` Step 3 이 `scripts/bootstrap_version.sh` 를 자동 호출한다. **메서드론 정본은 본 §3**, 실무 how-to / git 액션 5단계 / 리뷰 규칙 / HISTORY.md 형식은 [agent_dev_guide §3](docs/agent_dev_guide.md#5단계-issue-first-workflow) 참조.
 
 | Step | 산출물 | 진입 조건 | 종료 |
 |---|---|---|---|
-| 1 Plan | GitHub issue body (8-section template) | GitHub issue #N 생성 (모든 작업 필수) | 사용자 확정 |
-| 2 AD | `analysis_and_design.md` (optional `design_review_N.md`) | — | `approved: YYYY-MM-DD` 마커 (사용자 명시 승인 필수) |
+| 1 설계 | GitHub issue body (8-section template) + `[Design]` 코멘트 (EXECUTABLE SPEC, `[easy]`/`[hard]` 태그) | GitHub issue #N 생성 (모든 작업 필수) | 사용자 확정 |
+| 2 설계 리뷰 | `[Design Review]` 코멘트 (diff 없는 스펙·구조 리뷰) | Step 1 설계 | `[high]`/`[mid]` 0건 |
 | 3 Impl | `_system/commands/*.md`, `_system/wiki-schema.md`, `scripts/*`, `install.sh` 등 | Step 2 승인 | 설계서 모든 항목 반영 |
 | 4 Review | `code_review_N.md` (생략 가능) | Step 3 완료 | 결함 없음 |
 | 5 Deploy | squash → v0.X.Y, canary force-update, (release 시) main merge + tag | 사용자 `"배포 진행해줘"` | 운영 반영 + archive 이동 |
 
-- **ADR 추출**: Step 2 의 미결 사항이 결정되면 `docs/adr/NNNN-{slug}.md` 1개 (결정 N개 = ADR N개). ADR이 정본 — `analysis_and_design.md` 의 미결 표는 옵션 탐색 과정만 보존. ADR Feature 필드는 `issue #N` 로 기록.
+- **모델 배치**: 설계 `muse-spark-open` → 설계 리뷰 `mistral-large-4` → 구현 `deepseek-v4.1-flash`(hard: `glm-5.3`) → 구현 리뷰 `kimi-k2.7-code`·`minimax-m3`. 작성자와 리뷰어는 서로 다른 모델군으로 둔다(같은 모델 자기 리뷰는 검출력이 0에 가깝다). 설정 정본은 `.opencode/agent/*.md` frontmatter 다.
+- **ADR 추출**: 설계 단계의 미결 사항이 결정되면 `docs/adr/NNNN-{slug}.md` 1개 (결정 N개 = ADR N개). ADR이 정본 — 설계 코멘트의 미결 표는 옵션 탐색 과정만 보존. ADR Feature 필드는 `issue #N` 로 기록.
 - **Issue 종료**: 완료 시 PR merge + issue close (archive 이동 불필요 — `features/` 디렉토리 미생성). `feature/issue-<N>` 브랜치·worktree 강제 정리.
 
 ## 4. 버전 관리 — Atomic Change
@@ -72,7 +73,7 @@ Release 직후: `release.sh` 가 cleanup 만 자동 수행.
 - **새 버전 브랜치/canary 자동 생성 X** — bootstrap 은 on-demand
 
 **다음 사이클 시작** (release 직후 첫 issue 작업 시):
-- Hermes `github-dev-flow` Step 4 가 `origin/{base_branch}` 부재를 감지 → `scripts/bootstrap_version.sh` 자동 호출
+- Hermes `github-dev-flow` Step 3 이 `origin/{base_branch}` 부재를 감지 → `scripts/bootstrap_version.sh` 자동 호출
 - 수동 호출: `bash scripts/bootstrap_version.sh` (release 후 바로 다음 사이클 시작 시)
 
 **hotfix 필요 시**: `refs/tags/vX.Y.Z` (annotated, main HEAD) 에서 임시 hotfix 브랜치 분기. 5-액션 git workflow 전체: [agent_dev_guide §Step 5](docs/agent_dev_guide.md#step-5-deployment-배포--조건부-생략-가능).
