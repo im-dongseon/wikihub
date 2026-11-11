@@ -128,6 +128,7 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
 - `rclone lsjson <remote>: --recursive` subprocess (vault type=gdrive_api, ADR-0035). vault-fetch.py 가 내부에서 rclone backend (Drive API files.list) 를 호출하여 ID·MimeType·ModTime·Path 포함 JSON listing 획득
 - `mount_diff.compute_diff(listing, file_map)` — file_map(source_id 키) 과 diff. 분류: created · modified · renamed · deleted
 - false-deleted 가드 — listing 0건 또는 삭제 비율 > `false_delete_threshold` 시 Retryable 발화
+- 경로 제외 — `options.exclude_paths` prefix 를 listing 과 file_map 양쪽에서 제거(제외분은 deleted 로 분류되지 않음, issue #221)
 - 변경된 파일 read → rclone mount FS `open()` (ADR-0025 Path C+ 유지)
 - Binary 파일(`.pptx`/`.docx`/`.xlsx`/`.pdf`): 텍스트 추출 (wiki-schema.md §extraction tool 매핑 참조)
 - 텍스트 파일 그대로 / Google 네이티브(`.gdoc`·`.gsheet`·`.gslides`): rclone mount export-formats 경유 binary → extraction dispatch
@@ -145,6 +146,7 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
 {
   "vault_id": "<string, 필수, wikihub.yaml.vaults[*].id와 일치>",
   "has_changes": "<bool, 필수>",
+  "excluded": {"listing_filtered": "<int, optional>", "file_map_pruned": "<int, optional>"},
   "changed": [
     {
       "source_relpath": "<string, 필수, vault 내 POSIX 상대경로 (예: 'meetings/2026-Q1.pptx')>",
@@ -161,6 +163,8 @@ python3 "$WIKIHUB_SRC/scripts/vault-fetch.py" --vault <vault_id>
   "duration_ms": "<int, 필수, script start → JSON emit 시점까지>"
 }
 ```
+
+`excluded` 는 제외가 1건 이상 발생한 사이클에만 노출된다(`exclude_paths` 미설정 또는 매칭 0건이면 생략).
 
 위 schema는 F1 §4.2.2의 `ChangedFile` dataclass를 lift (`source_mtime`·`source_id`·`bytes_written` 모두 포함). F3 구현자는 본 schema를 정본으로.
 

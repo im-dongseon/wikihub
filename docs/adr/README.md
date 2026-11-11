@@ -103,5 +103,6 @@ cp docs/adr/template.md docs/adr/NNNN-{slug}.md
 
 > ADR-0016 은 F3 plan 의 잠정 후보 (Python 모듈 구조) 였으나 spec 명시로 충분 — 발의 안 함 결정 (`features/archive/20260513_vault_gdrive_api/analysis_and_design.md` §5).
 | [0047](0047-retire-feature-directory.md) | Retire feature directory — GitHub issue as workflow single source | Accepted | 2026-06-08 | governance transition (ADR-0046 follow-up) |
+| [0048](0048-exclude-paths-ingest-scope.md) | ingest 제외 범위 — vault 별 `options.exclude_paths` | Accepted | 2026-11-11 | issue #221 |
 
 > 신규 ADR을 추가할 때마다 이 표에 1행씩 append.

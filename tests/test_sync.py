@@ -856,3 +856,206 @@ def test_atomic_write_wiki_page_replaces_existing(tmp_path) -> None:
     _atomic_write_wiki_page(target, "new")
     assert target.read_text(encoding="utf-8") == "new"
     assert oct(target.stat().st_mode)[-3:] == "644"
+
+
+# ---------------------------------------------------------------------------
+# issue #221 — exclude_paths 연동 (path_exclude)
+# ---------------------------------------------------------------------------
+
+
+def test_sync_exclude_paths_keeps_excluded_out_of_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #221 — 제외 항목은 created/deleted 어디에도 없고 deleted == [], sync 성공."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "keep.md").write_text("hello")
+
+    # file_map: keep 1건 + 제외 대상 report/ 1건
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            "id_keep": {"source_relpath": "keep.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": "wiki/sources/gdrive/keep.md", "bytes": 5,
+                        "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_excl": {"source_relpath": "report/x.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": "wiki/sources/gdrive/report/x.md", "bytes": 5,
+                        "last_synced_at": "2026-05-19T00:00:00Z"},
+        },
+    }))
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_keep", "Path": "keep.md", "Name": "keep.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+        {"ID": "id_excl", "Path": "report/x.md", "Name": "x.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    result = sync.sync(
+        vault_cfg=_vault_cfg(exclude_paths=["report/"]),
+        instance_root=tmp_path,
+        state_dir=state_dir,
+    )
+
+    assert result.deleted == []
+    assert result.changed == []
+    assert result.has_changes is False
+    assert result.excluded_listing_count == 1
+    assert result.excluded_pruned_count == 1
+
+
+def test_sync_exclude_paths_pruning_only_still_saves_file_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #221 — 프루닝만 발생한 cycle 도 save_file_map 1회 수행."""
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "keep.md").write_text("hello")
+
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            "id_keep": {"source_relpath": "keep.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": "wiki/sources/gdrive/keep.md", "bytes": 5,
+                        "last_synced_at": "2026-05-19T00:00:00Z"},
+            "id_excl": {"source_relpath": "report/x.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": "wiki/sources/gdrive/report/x.md", "bytes": 5,
+                        "last_synced_at": "2026-05-19T00:00:00Z"},
+        },
+    }))
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_keep", "Path": "keep.md", "Name": "keep.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    call_count: dict[str, int] = {"n": 0}
+    real_save = sync.save_file_map
+
+    def _spy_save_file_map(state_dir_arg: Path, file_map_arg: dict[str, Any]) -> None:
+        call_count["n"] += 1
+        real_save(state_dir_arg, file_map_arg)
+
+    monkeypatch.setattr(sync, "save_file_map", _spy_save_file_map)
+
+    result = sync.sync(
+        vault_cfg=_vault_cfg(exclude_paths=["report/"]),
+        instance_root=tmp_path,
+        state_dir=state_dir,
+    )
+
+    # changed/deleted 모두 비어 있어도 프루닝이 state change → save 1회
+    assert result.changed == []
+    assert result.deleted == []
+    assert call_count["n"] == 1, (
+        f"프루닝만 발생한 cycle 도 save_file_map 1회 필요, got {call_count['n']}"
+    )
+    # 영속화된 file_map 에서 제외 엔트리 제거 확인
+    fm = json.loads((state_dir / "file_map.json").read_text())
+    assert set(fm["files"].keys()) == {"id_keep"}
+
+
+def test_sync_exclude_paths_high_prune_ratio_no_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #221 — 제외 비율이 높아도 false_delete_threshold(기본 0.3) 가드 미발동.
+
+    file_map 10건 중 9건이 report/ prefix — exclude_paths 없으면 delete_ratio
+    90% 로 Retryable 이지만, 프루닝 후 가드는 0% 로 통과한다.
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    (vault_local / "keep.md").write_text("hello")
+
+    files: dict[str, Any] = {
+        "id_keep": {"source_relpath": "keep.md", "source_mtime": "2026-05-19T00:00:00Z",
+                    "wiki_path": "wiki/sources/gdrive/keep.md", "bytes": 5,
+                    "last_synced_at": "2026-05-19T00:00:00Z"},
+    }
+    for n in range(9):
+        files[f"id_r{n}"] = {
+            "source_relpath": f"report/f{n}.md",
+            "source_mtime": "2026-05-19T00:00:00Z",
+            "wiki_path": f"wiki/sources/gdrive/report/f{n}.md", "bytes": 5,
+            "last_synced_at": "2026-05-19T00:00:00Z",
+        }
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive", "updated_at": None, "files": files,
+    }))
+
+    # listing 은 keep 1건뿐 — report/ 는 vault listing 에서 이미 사라짐
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": "id_keep", "Path": "keep.md", "Name": "keep.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False},
+    ])
+
+    # false_delete_threshold 기본값 (0.3) 사용
+    result = sync.sync(
+        vault_cfg=_vault_cfg(exclude_paths=["report/"]),
+        instance_root=tmp_path,
+        state_dir=state_dir,
+    )
+
+    assert result.deleted == []
+    assert result.excluded_pruned_count == 9
+    assert result.has_changes is False
+
+
+def test_sync_without_exclude_paths_regression(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """issue #221 회귀 — exclude_paths 미설정 시 기존 diff 결과와 동일.
+
+    file_map 4건 / listing 3건 → deleted 1건 (d.md), delete_ratio 1/4 < 0.3.
+    기존 테스트(test_sync_delete_ratio_at_exact_threshold_passes) 와 동일 구도.
+    """
+    state_dir = tmp_path / "_state" / "gdrive"
+    state_dir.mkdir(parents=True)
+    vault_local = tmp_path / "vault" / "gdrive"
+    vault_local.mkdir(parents=True)
+    for name in ("a.md", "b.md", "c.md"):
+        (vault_local / name).write_text("hello")
+
+    (state_dir / "file_map.json").write_text(json.dumps({
+        "vault_id": "gdrive",
+        "updated_at": None,
+        "files": {
+            f"id_{x}": {"source_relpath": f"{x}.md", "source_mtime": "2026-05-19T00:00:00Z",
+                        "wiki_path": f"wiki/sources/gdrive/{x}.md", "bytes": 5,
+                        "last_synced_at": "2026-05-19T00:00:00Z"}
+            for x in ("a", "b", "c", "d")
+        },
+    }))
+
+    monkeypatch.setattr(sync, "lsjson", lambda *a, **kw: [
+        {"ID": f"id_{x}", "Path": f"{x}.md", "Name": f"{x}.md", "Size": 5,
+         "MimeType": "text/markdown", "ModTime": "2026-05-19T00:00:00Z", "IsDir": False}
+        for x in ("a", "b", "c")
+    ])
+
+    result = sync.sync(
+        vault_cfg=_vault_cfg(),
+        instance_root=tmp_path,
+        state_dir=state_dir,
+    )
+
+    # 기존 동작과 동일 — deleted 1건 (d.md), 제외 0건
+    assert result.deleted == ["d.md"]
+    assert result.has_changes is True
+    assert result.excluded_listing_count == 0
+    assert result.excluded_pruned_count == 0
+    # stdout JSON 에 excluded 키 없음 (제외 0건 — 기존 contract 보존)
+    payload = json.loads(result_to_stdout_json(result))
+    assert "excluded" not in payload

@@ -6,11 +6,15 @@ WikiHub 의 version 별 누적 변경 기록. [Keep a Changelog](https://keepach
 
 ---
 
-## [v0.1.21] — 2026-11-11 (canary)
+## [v0.1.21] — 2026-11-11 (released)
 
 ### 추가 (Added)
 
-- (bootstrap — first feature commit 부터 entry 누적)
+- **lint 발행 리포트 ingest 제외** — `vaults[*].options.exclude_paths` 로 listing·file_map 양쪽에서 prefix를 뺀다. 제외 항목은 다음 사이클에 `deleted`로 재분류되지 않는다. 기존 편입분은 `scripts/migrate_exclude_paths.py`(dry-run 기본, `--apply`·`--strip-refs`)로 1회 정리한다 (#221, ADR-0048)
+
+### 수정 (Fixed)
+
+- **lint Step 2 `ENAMETOOLONG`** — `log.md`의 미닫힌 bash `[[`가 초장문 링크로 잡혀 `Path.exists()`가 사이클 전체를 죽이던 경로를 막는다. 빈 값·200자 초과·백틱·개행·컴포넌트 255바이트 초과만 건너뛰고, 공백이 있는 정상 링크는 검사한다. `OSError`는 위반으로 기록하지 않는다. Step 4.5 자식 호출은 `sys.executable`을 쓴다 (#223)
 
 ---
 

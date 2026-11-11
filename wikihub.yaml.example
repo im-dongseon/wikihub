@@ -25,6 +25,8 @@ vaults:
       exclude_shared_with_me: true    # sharedWithMe 파일 제외 (trust boundary). rclone lsjson default 가 정합
       max_file_size_mb: 50            # 큰 파일 skip threshold
       false_delete_threshold: 0.3     # ADR-0035 §ζ2 — 한 사이클의 삭제 비율 임계치. 초과 시 Retryable (mount/auth 부분 장애 가드)
+      # exclude_paths:                 # ingest 제외 경로 prefix (vault 상대, '/' 종료). issue #221
+      #   - project/wikihub/report/
       # ADR-0025·0026·0035 — rclone mount + lsjson:
       mount_path: ~/wikihub/vault/gdrive            # local_path 와 동일 — rclone mount 가 마운트하는 path
       rclone_remote_name: gdrive                    # ~/.config/rclone/rclone.conf 의 remote 이름 (rclone.conf section 명, OAuth provider 식별)

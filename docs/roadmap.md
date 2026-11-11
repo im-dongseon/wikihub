@@ -8,7 +8,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 항목 | 상태 |
 |---|---|
-| (없음 — v0.1.20 릴리즈) | — |
+| (없음 — v0.1.21 릴리즈) | — |
 
 ---
 
@@ -16,6 +16,7 @@ WikiHub 의 향후 계획. 시점·내용은 변경 가능 — release 확정은
 
 | 버전 | 주요 내용 |
 |---|---|
+| [v0.1.21](changelog.md) | lint 발행 리포트 ingest 제외 — `exclude_paths` + file_map 프루닝 마이그레이션 (#221) · lint Step 2 `ENAMETOOLONG` 가드 (#223) |
 | [v0.1.20](changelog.md) | `/wi` timer 회차 자기교착 제거 — `--trigger timer` 표식 주입 + Step 0 분기 재구성(폴링·sleep 대기·조상 대조·자기 유닛 제어 금지) (#219) |
 | [v0.1.19](changelog.md) | `referenced_by` 매칭 3중 분기 + 중복 전수 검출 (#215·#210) · lint report 한자 자기재생산 차단 (#213) · Step 6 후보 펜스 밖 한정 (#214) · log.md 무결성 검출기 (#211) · aliases column-0 파서 누락 558건 회복 (#208) · flock 세션 소유 wrapper (#201 ④) |
 | [v0.1.18](changelog.md) | 정본 helper 이원화 해소 — 사장 스크립트 `link_audit_v2.py` 제거 (#206) |

@@ -516,3 +516,18 @@
   - 리뷰는 `ollama-cloud/glm-5.3` 2회(1차 6건 → 2차 PASS). 구현은 최PM 직접.
 - **결론**: main merge + annotated tag `v0.1.20` + `latest` (2026-11-10). 운영자 `install.sh --branch latest` 또는 `wh-update`.
 - **참조**: `docs/changelog.md` [v0.1.20]. 관련 issue — #219.
+
+---
+
+## [2026-11-11] v0.1.21 — lint 리포트 ingest 제외 + Step 2 ENAMETOOLONG 가드
+
+- **목적**: lint가 vault에 발행하는 진단 리포트가 ingest로 지식 그래프 노드의 절반을 차지하던 경로를 끊고, `log.md`의 초장문 `[[링크]]`가 `Path.exists()`에서 사이클 전체를 죽이던 장애를 정본에 넣는다.
+- **변경**:
+  - **exclude_paths (#221)** — listing과 file_map 양쪽에서 prefix를 제외한다. 제외 항목은 `deleted`로 재분류되지 않는다. 기존 편입분은 `scripts/migrate_exclude_paths.py`(dry-run 기본)로 1회 정리한다. ADR-0048.
+  - **ENAMETOOLONG (#223)** — 빈 값·200자 초과·백틱·개행·컴포넌트 255바이트 초과만 건너뛴다. 공백이 있는 정상 링크는 검사한다. `OSError`는 위반으로 기록하지 않는다.
+- **트레이드오프**:
+  - 그래프에서 report 노드를 빼는 마이그레이션은 배포 후 별도 실행이다. 코드 머지만으로는 기존 418건이 남지 않는다.
+  - 운영본에 있던 미커밋 가드(`any(c.isspace())`)는 정상 링크 1,023건을 건너뛰므로 배포 시 지우고 이 정본을 받는다.
+- **결론**: main merge + annotated tag `v0.1.21` + `latest` (2026-11-11). 운영자 `install.sh --branch latest` 또는 `wh-update`.
+- **참조**: `docs/changelog.md` [v0.1.21]. 관련 issue — #221, #223.
+

@@ -40,7 +40,8 @@
   // ---- Agents --------------------------------------------------------------
   // NOTE: wikihub uses .opencode/opencode.json (project-local).
   // Agents with prompts are defined in .opencode/agent/<name>.md:
-  //   - plan.md        — EXECUTABLE SPEC + [easy]/[hard] + difficulty tally
+  //   - plan.md          — 설계: EXECUTABLE SPEC + [easy]/[hard] + difficulty tally
+  //   - design-review.md — 설계 리뷰: diff 없는 스펙·구조 리뷰 (mode: primary)
   //   - review-correctness.md
   //   - review-quality.md
   //
@@ -54,8 +55,14 @@
 
     // PLAN — frontier reasoning + long context. Produces an EXECUTABLE SPEC.
     "plan": {
-      "model": "ollama-cloud/minimax-m3",
+      "model": "ollama-cloud/muse-spark-open",
       "tools": { "write": false, "edit": false }
+    },
+
+    // DESIGN-REVIEW — 설계 리뷰 (diff 없음). mode: primary 라 --agent 로 직접 실행된다.
+    "design-review": {
+      "model": "ollama-cloud/mistral-large-4",
+      "tools": { "write": false, "edit": false, "bash": false }
     },
 
     // RESEARCH — exploration, understanding, analysis.
