@@ -222,3 +222,34 @@ def test_default_resolution_no_opt_wikihub(tmp_path: Path, monkeypatch) -> None:
     # 시도한 경로가 ~/wikihub/wikihub.yaml 이어야 하며 /opt/wikihub 이면 안 된다
     assert str(fake_home / "wikihub" / "wikihub.yaml") in e.value.reason
     assert "/opt/wikihub" not in e.value.reason
+
+# ---------------------------------------------------------------------------
+# issue #221 — exclude_paths 정규화·검증
+# ---------------------------------------------------------------------------
+
+def _yaml_with_exclude_paths(value: str) -> str:
+    """minimum yaml 의 vault options 에 exclude_paths 를 주입한다."""
+    return _minimum_yaml().replace(
+        "      credentials_path: /opt/wikihub/.credentials/token_gdrive.json",
+        "      credentials_path: /opt/wikihub/.credentials/token_gdrive.json\n      exclude_paths:\n" + value,
+    )
+
+
+def test_exclude_paths_normalized(tmp_path: Path) -> None:
+    """exclude_paths 는 말미 '/' 추가·NFC 정규화 후 options 에 저장된다."""
+    import unicodedata
+    nfd = unicodedata.normalize("NFD", "자료/보고서")
+    yaml_text = _yaml_with_exclude_paths(f"        - ./{nfd}\n        - /raw/path\n")
+    cfg = load_wikihub_yaml(_write(tmp_path / "wikihub.yaml", yaml_text))
+    assert cfg.vaults["gdrive"].options["exclude_paths"] == [
+        unicodedata.normalize("NFC", "자료/보고서") + "/",
+        "raw/path/",
+    ]
+
+
+@pytest.mark.parametrize("bad", ['        - ""\n', '        - "/"\n', '        - "."\n', "        - 123\n"])
+def test_exclude_paths_invalid_raises(tmp_path: Path, bad: str) -> None:
+    """빈 값·루트·'.'·비문자열은 설정 로드 시점에 VaultSyncFatal."""
+    yaml_text = _yaml_with_exclude_paths(bad)
+    with pytest.raises(VaultSyncFatal):
+        load_wikihub_yaml(_write(tmp_path / "wikihub.yaml", yaml_text))
