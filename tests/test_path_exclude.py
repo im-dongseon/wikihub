@@ -140,3 +140,10 @@ def test_prune_file_map_without_files_key() -> None:
     pruned, removed = prune_file_map({"version": 1}, ["project/report/"])
     assert pruned == {"version": 1, "files": {}}
     assert removed == []
+
+
+def test_normalize_prefixes_rejects_dot() -> None:
+    """'.' / './' 는 전체 제외 의도로 해석될 수 있어 거부한다."""
+    for bad in ([". "], ["./"], ["."]):
+        with pytest.raises(VaultSyncFatal):
+            normalize_prefixes(bad)

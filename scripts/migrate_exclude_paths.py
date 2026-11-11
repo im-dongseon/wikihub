@@ -35,6 +35,15 @@ from lib.path_exclude import normalize_prefixes, prune_file_map  # noqa: E402
 from lib.state import load_file_map, save_file_map, utc_now_iso  # noqa: E402
 
 
+def _within(child: Path, parent: Path) -> bool:
+    """child 가 parent 하위인지 realpath 기준으로 판정한다."""
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def _fail(msg: str) -> None:
     print(f"[migrate_exclude_paths] 오류: {msg}", file=sys.stderr)
 
@@ -60,11 +69,11 @@ def _strip_refs_from_page(
     """
     targets = tuple(f"sources/{vault_id}/{p}" for p in prefixes)
     lines = page.read_text(encoding="utf-8").splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    if not lines or lines[0].strip() != "---":
         return
     end_idx = -1
     for i in range(1, len(lines)):
-        if lines[i].rstrip("\r\n") == "---":
+        if lines[i].strip() == "---":
             end_idx = i
             break
     if end_idx < 0:
@@ -177,9 +186,20 @@ def _migrate_wiki_sources(instance_root: Path, vault_id: str, prefixes: list[str
                           *, apply: bool, result: dict[str, Any]) -> None:
     """3. wiki/sources/<vault_id>/<prefix> 하위 *.md unlink + 빈 디렉터리 제거."""
     sources_root = instance_root / "wiki" / "sources" / vault_id
+    if sources_root.is_symlink():
+        result["errors"].append(
+            f"wiki/sources/{vault_id} 가 symlink — 경계 판정 불가로 abort ({sources_root})"
+        )
+        return
     if not sources_root.exists():
         return
     sources_real = sources_root.resolve()
+    base_real = (instance_root / "wiki" / "sources").resolve()
+    if not _within(sources_real, base_real):
+        result["errors"].append(
+            f"wiki/sources/{vault_id} realpath 가 wiki/sources 밖 — abort ({sources_real})"
+        )
+        return
     for prefix in prefixes:
         target_real = (sources_root / prefix).resolve()
         # realpath 가 wiki/sources/<vault_id>/ 하위인지 검사 — 밖이면 abort
@@ -194,6 +214,9 @@ def _migrate_wiki_sources(instance_root: Path, vault_id: str, prefixes: list[str
             continue
         for md in sorted(target_real.rglob("*.md")):
             if not md.is_file():
+                continue
+            if not md.is_symlink() and not _within(md.resolve(), sources_real):
+                result["errors"].append(f"경계 밖 경로 — skip ({md})")
                 continue
             if not apply:
                 result["unlinked_pages"] += 1

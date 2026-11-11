@@ -37,7 +37,7 @@ def normalize_prefixes(raw: Sequence[str] | None) -> list[str]:
         if not value.endswith("/"):
             value += "/"
 
-        if value in ("", "/"):
+        if value in ("", "/", "./"):
             raise VaultSyncFatal(
                 vault_id="__config__",
                 reason=(

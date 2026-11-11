@@ -255,3 +255,29 @@ def test_apply_strip_refs_with_blank_line_inside_list(
     assert "sources/gdrive/report/" not in text
     assert "sources/gdrive/other/o1.md" in text
     assert "본문 빈줄" in text
+
+
+# ---------------------------------------------------------------------------
+# 6. symlink escape 가드 — 실패 시 unlink 0건
+# ---------------------------------------------------------------------------
+
+def test_symlinked_vault_dir_aborts_without_unlink(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    """wiki/sources/<vault> 가 symlink 면 실패로 기록하고 아무것도 삭제하지 않는다."""
+    _setup(tmp_path)
+    src = tmp_path / "wiki" / "sources" / "gdrive"
+    # 실제 디렉터리를 외부로 옮기고 symlink 로 대체
+    outside = tmp_path / "outside"
+    src.rename(outside)
+    src.symlink_to(outside)
+    victim = outside / "report" / "r1.md"
+
+    rc = m.main(["--vault", "gdrive", "--home", str(tmp_path), "--apply"])
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 4
+    assert out["errors"]
+    assert out["unlinked_pages"] == 0
+    assert victim.exists()
+
